@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jobify Hub — AI Career Copilot, Autofill, Resume Tailor & Job Tracker</title>
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <div class="app-layout">
+    <aside class="sidebar">
+      <div class="brand-box">
+        <div class="brand-logo">J</div>
+        <div>
+          <div class="brand-name">Jobify</div>
+          <div class="brand-tag">Simplify+ AI Suite</div>
+        </div>
+      </div>
+
+      <nav class="nav-list" id="main-nav">
+        <button class="nav-item active" data-view="overview">📊 Overview & Sandbox</button>
+        <button class="nav-item" data-view="tracker">📋 Job Tracker</button>
+        <button class="nav-item" data-view="resume">✨ AI Resume Tailor & Score</button>
+        <button class="nav-item" data-view="cover">📝 AI Cover Letters</button>
+        <button class="nav-item" data-view="jobs">🔍 Live Jobs & Daily Lists</button>
+        <button class="nav-item" data-view="autopilot">🤖 Autopilot Automation</button>
+        <button class="nav-item" data-view="network">🤝 Network Copilot</button>
+        <button class="nav-item" data-view="vault">👤 Profile, Answers & Vault</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-pill">
+          <div class="avatar">RV</div>
+          <div style="overflow:hidden;">
+            <div class="u-name" id="sb-user-name">Raviteja Velanati</div>
+            <div class="u-email" id="sb-user-email">ravitejavelanati11@gmail.com</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <header class="topbar">
+        <div>
+          <h1 class="view-title" id="topbar-title">Overview & Quick Launch</h1>
+          <p class="view-sub" id="topbar-sub">Pre-configured with Raviteja Velanati's Master & 1-Page Resumes</p>
+        </div>
+        <div class="topbar-right">
+          <span class="model-pill" id="topbar-model-pill">Gemini 3.8 Flash + Smart Fallback</span>
+        </div>
+      </header>
+
+      <div class="content-area" id="view-container"></div>
+    </main>
+  </div>
+
+  <div class="global-toast" id="global-toast"></div>
+  <script type="module" src="dashboard.js"></script>
+</body>
+</html>

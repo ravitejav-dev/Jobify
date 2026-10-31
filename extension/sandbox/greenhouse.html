@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI Platform & Evaluation Engineer - Anthropic | Greenhouse Sandbox</title>
+  <style>
+    body { font-family: Inter, system-ui, sans-serif; max-width: 820px; margin: 32px auto; padding: 0 20px; color: #111827; background: #f8fafc; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 28px; margin-bottom: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+    h1 { margin: 0 0 6px; font-size: 26px; }
+    .meta { color: #475569; font-size: 14px; margin-bottom: 18px; }
+    .field { margin-bottom: 16px; }
+    label { display: block; font-weight: 600; font-size: 13.5px; margin-bottom: 5px; }
+    input[type="text"], input[type="email"], input[type="tel"], input[type="url"], select, textarea {
+      width: 100%; box-sizing: border-box; padding: 9px 11px; border: 1px solid #cbd5e1; border-radius: 7px; font-size: 14px;
+    }
+    textarea { min-height: 95px; }
+    .btn-submit { background: #2563eb; color: #fff; border: none; border-radius: 8px; padding: 12px 24px; font-size: 15px; font-weight: 700; cursor: pointer; }
+    #submit-banner { display: none; padding: 16px; background: #dcfce7; border: 1px solid #22c55e; border-radius: 9px; color: #14532d; font-weight: 700; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div data-company-name="Anthropic" style="font-weight:700;color:#4f46e5;">Anthropic</div>
+    <h1 class="app-title" data-jobify-title>AI Platform &amp; Evaluation Engineer</h1>
+    <div class="meta location" data-jobify-location>San Francisco, CA • Hybrid ($210,000 - $285,000)</div>
+    <div id="content" data-jobify-jd>
+      <p>We are seeking an AI Platform &amp; Evaluation Engineer to build autonomous agent evaluation sandboxes, large-scale synthetic user simulation pipelines, adversarial safety &amp; red-teaming suites, and real-time observability dashboards.</p>
+      <p><strong>Key Qualifications:</strong> Python, TypeScript, React, LangGraph or multi-agent frameworks, Docker, Kubernetes, GCP or AWS, BigQuery, PyTorch, Playwright browser automation, RAG, Vector Databases, OpenTelemetry, and CI/CD.</p>
+    </div>
+  </div>
+
+  <form id="application_form" class="card">
+    <h2>Submit Your Application</h2>
+    <div class="field"><label for="first_name">First Name *</label><input id="first_name" name="first_name" type="text" required /></div>
+    <div class="field"><label for="last_name">Last Name *</label><input id="last_name" name="last_name" type="text" required /></div>
+    <div class="field"><label for="email">Email *</label><input id="email" name="email" type="email" required /></div>
+    <div class="field"><label for="phone">Phone *</label><input id="phone" name="phone" type="tel" required /></div>
+    <div class="field"><label for="location_city">Current Location (City) *</label><input id="location_city" name="location" type="text" /></div>
+    <div class="field"><label for="resume_file">Resume/CV *</label><input id="resume_file" name="resume" type="file" accept=".pdf,.doc,.docx" /></div>
+    <div class="field"><label for="cover_file">Cover Letter</label><input id="cover_file" name="cover_letter" type="file" accept=".pdf,.txt" /></div>
+    <div class="field"><label for="linkedin_url">LinkedIn Profile</label><input id="linkedin_url" name="linkedin_url" type="url" /></div>
+    <div class="field"><label for="github_url">GitHub / Website</label><input id="github_url" name="github_url" type="url" /></div>
+    <div class="field"><label for="curr_company">Current Company</label><input id="curr_company" name="current_company" type="text" /></div>
+    <div class="field">
+      <label for="work_auth">Are you legally authorized to work in the United States? *</label>
+      <select id="work_auth" name="work_auth"><option value="">Select...</option><option value="Yes">Yes</option><option value="No">No</option></select>
+    </div>
+    <div class="field">
+      <label for="sponsorship">Will you now or in the future require visa sponsorship? *</label>
+      <select id="sponsorship" name="sponsorship"><option value="">Select...</option><option value="Yes">Yes</option><option value="No">No</option></select>
+    </div>
+    <div class="field">
+      <label for="why_anthropic">Why are you excited to join Anthropic's AI Platform &amp; Evaluation team? *</label>
+      <textarea id="why_anthropic" name="why_anthropic"></textarea>
+    </div>
+    <div class="field">
+      <label for="complex_sys">Describe a complex evaluation platform or synthetic data system you architected. *</label>
+      <textarea id="complex_sys" name="complex_sys"></textarea>
+    </div>
+    <hr style="margin:20px 0;border:none;border-top:1px solid #e2e8f0;" />
+    <h3>U.S. Equal Opportunity Employment Questions</h3>
+    <div class="field">
+      <label for="eeo_gender">Gender</label>
+      <select id="eeo_gender"><option value="">Select...</option><option value="Male">Male</option><option value="Female">Female</option><option value="Decline">Decline to self-identify</option></select>
+    </div>
+    <div class="field">
+      <label for="eeo_race">Race / Ethnicity</label>
+      <select id="eeo_race"><option value="">Select...</option><option value="Asian">Asian</option><option value="White">White</option><option value="Hispanic">Hispanic or Latino</option></select>
+    </div>
+    <div class="field">
+      <label for="eeo_vet">Veteran Status</label>
+      <select id="eeo_vet"><option value="">Select...</option><option value="I am not a protected veteran">I am not a protected veteran</option><option value="Protected veteran">I identify as a protected veteran</option></select>
+    </div>
+    <div class="field">
+      <label for="eeo_dis">Disability Status</label>
+      <select id="eeo_dis"><option value="">Select...</option><option value="No, I do not have a disability">No, I do not have a disability</option><option value="Yes">Yes, I have a disability</option></select>
+    </div>
+    <button type="submit" class="btn-submit">Submit Application</button>
+    <div id="submit-banner">✅ Application Submitted Successfully! (Logged in Jobify Tracker)</div>
+  </form>
+  <script src="sandbox_init.js"></script>
+
+  <script src="../content/ats_adapters.js"></script>
+  <script src="../content/copilot_widget.js"></script>
+</body>
+</html>

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Senior GenAI Infrastructure Engineer - Databricks | Workday Sandbox</title>
+  <style>
+    body { font-family: Inter, system-ui, sans-serif; max-width: 840px; margin: 32px auto; padding: 0 20px; background: #f1f5f9; color: #0f172a; }
+    .card { background: #fff; border: 1px solid #cbd5e1; border-radius: 12px; padding: 26px; margin-bottom: 20px; }
+    .field { margin-bottom: 14px; }
+    label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+    input[type="text"], input[type="email"], input[type="password"], input[type="tel"], select, textarea {
+      width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #94a3b8; border-radius: 6px;
+    }
+    .btn { background: #0284c7; color: #fff; border: none; padding: 11px 22px; border-radius: 7px; font-weight: 700; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div data-automation-id="companyName" style="font-weight:700;color:#0284c7;">Databricks</div>
+    <h1 data-automation-id="jobPostingHeader">Senior GenAI Infrastructure &amp; Evaluation Engineer</h1>
+    <div data-automation-id="locations">Mountain View, CA • Hybrid ($195,000 - $260,000)</div>
+    <div data-automation-id="jobPostingDescription" style="margin-top:10px;">
+      Build distributed LLM evaluation pipelines, PySpark &amp; Python synthetic dataset frameworks, MLflow experiment tracking, and React/TypeScript developer tooling on Kubernetes, AWS, and GCP.
+    </div>
+  </div>
+
+  <form id="wd-form">
+    <div class="card" data-jobify-auth="true">
+      <h3>Step 1: Create Workday Candidate Account</h3>
+      <div class="field"><label for="wd-email">Email Address *</label><input id="wd-email" data-automation-id="email" type="email" /></div>
+      <div class="field"><label for="wd-pw">Password *</label><input id="wd-pw" data-automation-id="password" type="password" /></div>
+      <div class="field"><label for="wd-pw2">Verify Password *</label><input id="wd-pw2" data-automation-id="verifyPassword" type="password" /></div>
+      <label><input type="checkbox" data-automation-id="createAccountCheckbox" /> I agree to create a candidate account and accept terms</label>
+    </div>
+
+    <div class="card">
+      <h3>Step 2: My Information</h3>
+      <div class="field"><label for="wd-fn">First Name *</label><input id="wd-fn" data-automation-id="legalNameSection_firstName" type="text" /></div>
+      <div class="field"><label for="wd-ln">Last Name *</label><input id="wd-ln" data-automation-id="legalNameSection_lastName" type="text" /></div>
+      <div class="field"><label for="wd-city">City *</label><input id="wd-city" data-automation-id="addressSection_city" type="text" /></div>
+      <div class="field"><label for="wd-state">State *</label><input id="wd-state" data-automation-id="addressSection_countryRegion" type="text" /></div>
+      <div class="field"><label for="wd-zip">Postal Code *</label><input id="wd-zip" data-automation-id="addressSection_postalCode" type="text" /></div>
+      <div class="field"><label for="wd-phone">Phone Number *</label><input id="wd-phone" data-automation-id="phone-number" type="tel" /></div>
+    </div>
+
+    <div class="card" data-automation-id="workExperience-1">
+      <h3>Step 3: Work Experience (Most Recent)</h3>
+      <div class="field"><label>Job Title *</label><input type="text" name="exp_title" /></div>
+      <div class="field"><label>Company *</label><input type="text" name="exp_company" /></div>
+      <div class="field"><label>Location</label><input type="text" name="exp_location" /></div>
+      <div class="field"><label>Role Description</label><textarea name="exp_desc" rows="4"></textarea></div>
+    </div>
+
+    <div class="card" data-automation-id="education-1">
+      <h3>Step 4: Education</h3>
+      <div class="field"><label>School or University *</label><input type="text" name="edu_school" /></div>
+      <div class="field"><label>Degree *</label><input type="text" name="edu_degree" /></div>
+      <div class="field"><label>Field of Study *</label><input type="text" name="edu_field" /></div>
+      <div class="field"><label>Overall Result (GPA)</label><input type="text" name="edu_gpa" /></div>
+    </div>
+
+    <div class="card">
+      <h3>Step 5: Resume Upload</h3>
+      <div class="field"><label for="wd-res">Upload Resume PDF *</label><input id="wd-res" type="file" accept=".pdf" /></div>
+      <button type="submit" class="btn" data-automation-id="bottom-navigation-next-button">Submit Workday Application</button>
+      <div id="wd-done" style="display:none;margin-top:12px;color:#15803d;font-weight:700;">✅ Workday Application &amp; Account Submitted!</div>
+    </div>
+  </form>
+  <script src="sandbox_init.js"></script>
+
+  <script src="../content/ats_adapters.js"></script>
+  <script src="../content/copilot_widget.js"></script>
+</body>
+</html>

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Autonomous Agents Engineer - Scale AI | Lever Sandbox</title>
+  <style>
+    body { font-family: Inter, system-ui, sans-serif; max-width: 780px; margin: 32px auto; padding: 0 20px; background: #fff; color: #1e293b; }
+    .section { border-bottom: 1px solid #e2e8f0; padding: 20px 0; }
+    .field { margin-bottom: 14px; }
+    label { display: block; font-weight: 600; font-size: 13.5px; margin-bottom: 5px; }
+    input[type="text"], input[type="email"], input[type="tel"], input[type="url"], textarea {
+      width: 100%; box-sizing: border-box; padding: 9px 11px; border: 1px solid #cbd5e1; border-radius: 6px;
+    }
+    .btn { background: #4f46e5; color: #fff; border: none; padding: 12px 24px; border-radius: 7px; font-weight: 700; cursor: pointer; }
+  </style>
+</head>
+<body class="posting-page">
+  <div class="posting-headline section">
+    <div data-company-name="Scale AI" style="color:#4f46e5;font-weight:700;">Scale AI</div>
+    <h2>Autonomous Agents &amp; RLHF Platform Engineer</h2>
+    <div class="posting-categories"><span class="location">San Francisco, CA / Remote ($180,000 - $245,000)</span></div>
+  </div>
+  <div class="section-wrapper section">
+    Design human-in-the-loop (HITL) Side-by-Side LLM rating platforms, multi-turn trajectory pipelines, adversarial prompt injection benchmarks, and containerized browser-agent sandboxes using Python, TypeScript, React, FastAPI, Docker, and Kubernetes.
+  </div>
+  <form class="application-form section" id="lever-form">
+    <div class="field"><label>Resume/CV *</label><input type="file" name="resume" accept=".pdf" /></div>
+    <div class="field"><label>Full Name *</label><input type="text" name="name" /></div>
+    <div class="field"><label>Email *</label><input type="email" name="email" /></div>
+    <div class="field"><label>Phone *</label><input type="tel" name="phone" /></div>
+    <div class="field"><label>Current Company</label><input type="text" name="org" /></div>
+    <div class="field"><label>LinkedIn URL</label><input type="url" name="urls[LinkedIn]" /></div>
+    <div class="field"><label>Desired Compensation</label><input type="text" name="salary_expectation" /></div>
+    <div class="field"><label>Earliest Start Date / Notice Period</label><input type="text" name="start_date" /></div>
+    <div class="field"><label>Tell us about your experience with LLM evaluations and HITL workflows *</label><textarea name="comments" rows="4"></textarea></div>
+    <button type="submit" class="btn">Submit Application</button>
+    <div id="lv-done" style="display:none;margin-top:12px;color:#15803d;font-weight:700;">✅ Lever Application Submitted!</div>
+  </form>
+  <script src="sandbox_init.js"></script>
+
+  <script src="../content/ats_adapters.js"></script>
+  <script src="../content/copilot_widget.js"></script>
+</body>
+</html>

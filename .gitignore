@@ -1,0 +1,15 @@
+# Local secrets & API keys (NEVER commit to GitHub)
+extension/shared/local_secrets.json
+extension/shared/local_secrets.js
+.env
+.env.*
+
+# Ephemeral Chrome test profiles, logs & caches
+.tmp_*
+.cache/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+node_modules/
+*_Tailored_Sample.pdf

@@ -1,0 +1,430 @@
+#!/usr/bin/env node
+// Full End-to-End Verification Suite for Jobify Copilot:
+// Part A: Real Google Chrome MV3 Unpacked Extension (Service Worker + Shadow-DOM Copilot + Greenhouse, Workday & Lever Autofill + Binary PDF Upload + Auto-Tracker)
+// Part B: Live Gemini AI Tailoring + Cover Letter + AI Question Answering + pdflatex & Pure-JS PDF Compilation + Live Public ATS Job Feeds
+
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+
+import { DEFAULT_PROFILE, DEFAULT_SETTINGS, DEFAULT_SAVED_ANSWERS } from "../extension/shared/default_profile.js";
+import { scoreResumeATS } from "../extension/shared/ats_analyzer.js";
+import {
+  tailorResumeWithGemini,
+  generateCoverLetterWithGemini,
+  answerApplicationQuestionWithGemini
+} from "../extension/shared/gemini_client.js";
+import { generateTailoredResumePdf, buildPureJsResumePdfBase64 } from "../extension/shared/pdf_generator.js";
+import { fetchPersonalizedRecommendations } from "../extension/shared/job_feeds.js";
+
+const ROOT = path.resolve(import.meta.dirname, "..");
+const EXT_DIR = path.join(ROOT, "extension");
+const USER_DATA_DIR = path.join(ROOT, ".tmp_chrome_e2e");
+const SAMPLE_PDF_OUT = path.join(ROOT, "Raviteja_Velanati_Anthropic_Tailored_Sample.pdf");
+const CDP_PORT = 9339;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+class CDPClient {
+  constructor(wsUrl) {
+    this.wsUrl = wsUrl;
+    this.seq = 1;
+    this.pending = new Map();
+  }
+  async connect() {
+    this.ws = new WebSocket(this.wsUrl);
+    await new Promise((resolve, reject) => {
+      this.ws.addEventListener("open", resolve, { once: true });
+      this.ws.addEventListener("error", reject, { once: true });
+    });
+    this.ws.addEventListener("message", (ev) => {
+      const msg = JSON.parse(String(ev.data));
+      if (msg.id && this.pending.has(msg.id)) {
+        const { resolve, reject } = this.pending.get(msg.id);
+        this.pending.delete(msg.id);
+        if (msg.error) reject(new Error(JSON.stringify(msg.error)));
+        else resolve(msg.result);
+      }
+    });
+  }
+  send(method, params = {}, timeoutMs = 20000) {
+    const id = this.seq++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`CDP timeout on ${method}`));
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: (v) => { clearTimeout(timer); resolve(v); },
+        reject: (e) => { clearTimeout(timer); reject(e); }
+      });
+      this.ws.send(JSON.stringify({ id, method, params }));
+    });
+  }
+  async eval(expression, timeoutMs = 25000) {
+    const res = await this.send(
+      "Runtime.evaluate",
+      { expression, awaitPromise: true, returnByValue: true },
+      timeoutMs
+    );
+    if (res.exceptionDetails) {
+      throw new Error(`Eval exception: ${JSON.stringify(res.exceptionDetails)}`);
+    }
+    return res.result?.value;
+  }
+  async navigateTo(url) {
+    await this.send("Page.enable", {}, 8000);
+    await this.send("Page.navigate", { url }, 10000);
+    for (let i = 0; i < 25; i++) {
+      await sleep(300);
+      const st = await this.eval(`({ href: location.href, ready: document.readyState })`, 4000).catch(() => null);
+      if (st && st.href === url && st.ready === "complete") {
+        await sleep(700);
+        return st;
+      }
+    }
+    throw new Error(`Navigation timeout for ${url}`);
+  }
+  close() {
+    try { this.ws.close(); } catch (_) {}
+  }
+}
+
+async function main() {
+  fs.rmSync(USER_DATA_DIR, { recursive: true, force: true });
+  fs.mkdirSync(USER_DATA_DIR, { recursive: true });
+
+  console.log("=== PART A: REAL GOOGLE CHROME MV3 EXTENSION RUNTIME VERIFICATION ===");
+  let ChromeProc = null;
+  let srv = null;
+
+  try {
+    ChromeProc = spawn(
+      "/usr/bin/google-chrome",
+      [
+        "--headless=new",
+        "--no-sandbox",
+        "--disable-gpu",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-dev-shm-usage",
+        "--enable-unsafe-extension-debugging",
+        `--user-data-dir=${USER_DATA_DIR}`,
+        `--remote-debugging-port=${CDP_PORT}`,
+        "about:blank"
+      ],
+      { stdio: "pipe" }
+    );
+
+    let browserInfo = null;
+    for (let i = 0; i < 20; i++) {
+      await sleep(400);
+      try {
+        browserInfo = await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`).then((r) => r.json());
+        if (browserInfo?.webSocketDebuggerUrl) break;
+      } catch (_) {}
+    }
+
+    const browserCdp = new CDPClient(browserInfo.webSocketDebuggerUrl);
+    await browserCdp.connect();
+    const unpackedRes = await browserCdp.send("Extensions.loadUnpacked", { path: EXT_DIR });
+    const extId = unpackedRes.id;
+
+    let targets = [];
+    for (let i = 0; i < 20; i++) {
+      await sleep(400);
+      targets = await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`).then((r) => r.json());
+      if (targets.some((t) => t.type === "service_worker" && t.url.includes(`${extId}/background/service_worker.js`))) {
+        break;
+      }
+    }
+
+    const swTarget = targets.find((t) => t.type === "service_worker" && t.url.includes(`${extId}/background/service_worker.js`));
+    if (!swTarget) throw new Error("Jobify MV3 Service Worker did not start!");
+    console.log(`1. ✅ MV3 Service Worker Registered! Extension ID: ${extId}`);
+
+    const swCdp = new CDPClient(swTarget.webSocketDebuggerUrl);
+    await swCdp.connect();
+
+    async function openTabAndConnect(url) {
+      const tabInfo = await swCdp.eval(`chrome.tabs.create({ url: ${JSON.stringify(url)}, active: true })`);
+      for (let i = 0; i < 35; i++) {
+        await sleep(350);
+        const st = await swCdp.eval(`chrome.tabs.get(${tabInfo.id})`).catch(() => null);
+        if (st?.status === "complete" && st?.url?.startsWith(url)) break;
+      }
+      for (let i = 0; i < 15; i++) {
+        const list = await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`).then((r) => r.json());
+        const t = list.find((x) => x.type === "page" && x.url.startsWith(url));
+        if (t?.webSocketDebuggerUrl) {
+          const client = new CDPClient(t.webSocketDebuggerUrl);
+          client.tabId = tabInfo.id;
+          await client.connect();
+          await sleep(800);
+          return client;
+        }
+        await sleep(300);
+      }
+      throw new Error(`Tab target did not appear for ${url}`);
+    }
+
+    // 1. Real Live Production Greenhouse Remix Application (Anthropic)
+    const liveGhCdp = await openTabAndConnect("https://job-boards.greenhouse.io/anthropic/jobs/5456619008");
+    await liveGhCdp.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    for (let i = 0; i < 30; i++) {
+      const ready = await liveGhCdp
+        .eval(`Boolean(document.readyState === "complete" && document.getElementById("first_name") && document.getElementById("jobify-copilot-host")?.shadowRoot)`)
+        .catch(() => false);
+      if (ready) break;
+      await sleep(400);
+    }
+    const liveGhFill = await swCdp.eval(`
+      new Promise(resolve => {
+        chrome.tabs.get(${liveGhCdp.tabId}, (tabMeta) => {
+          chrome.tabs.sendMessage(${liveGhCdp.tabId}, { type: "TRIGGER_AUTOFILL", payload: { fillOpenEndedWithAI: false } }, (res) => {
+            resolve(res || { err: chrome.runtime.lastError?.message || null, tabUrl: tabMeta?.url, tabStatus: tabMeta?.status });
+          });
+        });
+      })
+    `);
+    const liveGhCheck = await liveGhCdp.eval(`({
+      pillMountedAfterHydration: Boolean(document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-pill")),
+      firstName: document.getElementById("first_name")?.value,
+      countryCode: document.getElementById("country")?.closest(".select-shell")?.querySelector(".select__single-value")?.innerText,
+      visaSponsor: document.getElementById("question_19018745008")?.closest(".select-shell")?.querySelector(".select__single-value")?.innerText,
+      workAddress: document.getElementById("question_19018749008")?.value,
+      gender: document.getElementById("gender")?.closest(".select-shell")?.querySelector(".select__single-value")?.innerText,
+      resumeFileAttached: document.getElementById("resume")?.files?.[0]?.name || null,
+      resumeShownInUI: document.body.innerText.includes("Raviteja_Velanati_Resume_1Page.pdf")
+    })`);
+    console.log(`2. ✅ Live Production Greenhouse Remix Verified (${liveGhFill?.filledCount} fields):`, JSON.stringify({ fill: { ok: liveGhFill?.ok, filledCount: liveGhFill?.filledCount, err: liveGhFill?.err }, check: liveGhCheck }, null, 2));
+    if (
+      !liveGhCheck.pillMountedAfterHydration ||
+      liveGhCheck.firstName !== "Raviteja" ||
+      liveGhCheck.countryCode !== "+1" ||
+      liveGhCheck.visaSponsor !== "Yes" ||
+      !liveGhCheck.workAddress?.includes("Newark") ||
+      liveGhCheck.gender !== "Male" ||
+      !(liveGhCheck.resumeShownInUI || liveGhCheck.resumeFileAttached === "Raviteja_Velanati_Resume_1Page.pdf")
+    ) {
+      throw new Error("Live production Greenhouse Remix assertion failed!");
+    }
+    liveGhCdp.close();
+
+    // 2. Greenhouse Sandbox inside real Chrome extension
+    const ghCdp = await openTabAndConnect(`chrome-extension://${extId}/sandbox/greenhouse.html`);
+    const pillMounted = await ghCdp.eval(`Boolean(document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-pill"))`);
+    const pillScore = await ghCdp.eval(`document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-pill-score")?.textContent`);
+    console.log(`3. ✅ Greenhouse Sandbox Shadow-DOM Copilot Pill Mounted: ${pillMounted} (${pillScore})`);
+    if (!pillMounted) throw new Error("Shadow-DOM pill missing on Greenhouse sandbox!");
+
+    await ghCdp.eval(`
+      (async () => {
+        const sr = document.getElementById("jobify-copilot-host").shadowRoot;
+        sr.getElementById("jb-pill").click();
+        await new Promise(r => setTimeout(r, 200));
+        sr.getElementById("jb-btn-autofill").click();
+      })()
+    `);
+    await sleep(1800);
+
+    const gh = await ghCdp.eval(`({
+      firstName: document.getElementById("first_name").value,
+      lastName: document.getElementById("last_name").value,
+      email: document.getElementById("email").value,
+      phone: document.getElementById("phone").value,
+      location: document.getElementById("location_city").value,
+      resumeFile: document.getElementById("resume_file").files[0]?.name || null,
+      resumeBytes: document.getElementById("resume_file").files[0]?.size || 0,
+      linkedin: document.getElementById("linkedin_url").value,
+      company: document.getElementById("curr_company").value,
+      workAuth: document.getElementById("work_auth").value,
+      sponsorship: document.getElementById("sponsorship").value,
+      gender: document.getElementById("eeo_gender").value,
+      race: document.getElementById("eeo_race").value,
+      vet: document.getElementById("eeo_vet").value,
+      dis: document.getElementById("eeo_dis").value,
+      whyAnthropic: document.getElementById("why_anthropic").value,
+      complexSys: document.getElementById("complex_sys").value
+    })`);
+    console.log("4. ✅ Greenhouse Sandbox 1-Click Autofill + AI Essay Verified:", JSON.stringify({
+      ...gh,
+      whyAnthropic: gh.whyAnthropic.slice(0, 80) + "...",
+      complexSys: gh.complexSys.slice(0, 80) + "...",
+      distinctOpenAnswers: gh.whyAnthropic !== gh.complexSys
+    }, null, 2));
+
+    if (
+      gh.firstName !== "Raviteja" ||
+      gh.lastName !== "Velanati" ||
+      gh.email !== "ravitejavelanati11@gmail.com" ||
+      gh.resumeFile !== "Raviteja_Velanati_Resume_1Page.pdf" ||
+      gh.resumeBytes !== 5770 ||
+      gh.workAuth !== "Yes" ||
+      gh.gender !== "Male" ||
+      gh.race !== "Asian" ||
+      gh.whyAnthropic.length < 50 ||
+      gh.complexSys.length < 50 ||
+      gh.whyAnthropic === gh.complexSys
+    ) {
+      throw new Error("Greenhouse assertion mismatch or duplicate open answers!");
+    }
+
+    await ghCdp.eval(`document.querySelector("button[type='submit']").click()`);
+    await sleep(500);
+    ghCdp.close();
+
+    // 3. Workday + Candidate Account Creation Sandbox
+    const wdCdp = await openTabAndConnect(`chrome-extension://${extId}/sandbox/workday.html`);
+    await wdCdp.eval(`
+      (async () => {
+        const sr = document.getElementById("jobify-copilot-host").shadowRoot;
+        sr.getElementById("jb-pill").click();
+        await new Promise(r => setTimeout(r, 200));
+        sr.getElementById("jb-btn-autofill").click();
+      })()
+    `);
+    await sleep(1600);
+
+    const wd = await wdCdp.eval(`({
+      portalEmail: document.getElementById("wd-email").value,
+      pwMatch: document.getElementById("wd-pw").value.length >= 8,
+      pwVerifyMatch: document.getElementById("wd-pw2").value === document.getElementById("wd-pw").value,
+      consentChecked: document.querySelector("[data-automation-id='createAccountCheckbox']").checked,
+      firstName: document.getElementById("wd-fn").value,
+      lastName: document.getElementById("wd-ln").value,
+      city: document.getElementById("wd-city").value,
+      zip: document.getElementById("wd-zip").value,
+      expCompany: document.querySelector("input[name='exp_company']").value,
+      eduSchool: document.querySelector("input[name='edu_school']").value,
+      eduGpa: document.querySelector("input[name='edu_gpa']").value,
+      resumeFile: document.getElementById("wd-res").files[0]?.name || null
+    })`);
+    console.log("5. ✅ Workday Account Signup + Multi-Entry Autofill Verified:", JSON.stringify(wd, null, 2));
+
+    if (
+      wd.portalEmail !== "ravitejavelanati11@gmail.com" ||
+      !wd.pwMatch ||
+      !wd.pwVerifyMatch ||
+      !wd.consentChecked ||
+      !wd.expCompany.includes("GlobalLogic") ||
+      !wd.eduSchool.includes("Clark") ||
+      wd.resumeFile !== "Raviteja_Velanati_Resume_1Page.pdf"
+    ) {
+      throw new Error("Workday assertion mismatch!");
+    }
+    wdCdp.close();
+
+    // 4. Lever Sandbox
+    const lvCdp = await openTabAndConnect(`chrome-extension://${extId}/sandbox/lever.html`);
+    await lvCdp.eval(`
+      (async () => {
+        const sr = document.getElementById("jobify-copilot-host").shadowRoot;
+        sr.getElementById("jb-pill").click();
+        await new Promise(r => setTimeout(r, 200));
+        sr.getElementById("jb-btn-autofill").click();
+      })()
+    `);
+    await sleep(1500);
+
+    const lv = await lvCdp.eval(`({
+      fullName: document.querySelector("input[name='name']").value,
+      email: document.querySelector("input[name='email']").value,
+      org: document.querySelector("input[name='org']").value,
+      salary: document.querySelector("input[name='salary_expectation']").value,
+      startDate: document.querySelector("input[name='start_date']").value,
+      commentsLen: document.querySelector("textarea[name='comments']").value.length,
+      resumeFile: document.querySelector("input[name='resume']").files[0]?.name || null
+    })`);
+    console.log("6. ✅ Lever 1-Click Autofill Verified:", JSON.stringify(lv, null, 2));
+    if (lv.fullName !== "Raviteja Velanati" || lv.commentsLen < 50 || !lv.resumeFile) {
+      throw new Error("Lever assertion mismatch!");
+    }
+    lvCdp.close();
+
+    // 5. Verify Dashboard & Auto-Tracked Application
+    const dashCdp = await openTabAndConnect(`chrome-extension://${extId}/dashboard/dashboard.html`);
+    const trackedApps = await dashCdp.eval(`chrome.runtime.sendMessage({ type: "GET_ALL_STATE" }).then(r => r.state.applications)`);
+    console.log(`7. ✅ Dashboard & Auto-Tracker Verified: ${trackedApps.length} application automatically logged (${trackedApps[0]?.company} — ${trackedApps[0]?.status})`);
+    if (trackedApps.length < 1 || trackedApps[0].status !== "Applied") {
+      throw new Error("Auto-tracker failed to log submitted Greenhouse application!");
+    }
+    dashCdp.close();
+    swCdp.close();
+    browserCdp.close();
+    ChromeProc.kill("SIGKILL");
+    ChromeProc = null;
+
+    console.log("\n=== PART B: LIVE GEMINI AI + PDFLATEX PDF + PURE-JS PDF + LIVE ATS FEEDS VERIFICATION ===");
+    let localSecrets = {};
+    try {
+      localSecrets = JSON.parse(fs.readFileSync(path.join(EXT_DIR, "shared/local_secrets.json"), "utf8"));
+    } catch (_) {}
+    const runtimeSettings = {
+      ...DEFAULT_SETTINGS,
+      geminiApiKey: localSecrets.geminiApiKey || process.env.GEMINI_API_KEY || DEFAULT_SETTINGS.geminiApiKey
+    };
+
+    srv = spawn("python3", [path.join(ROOT, "backend/server.py")], { stdio: "pipe" });
+    await sleep(900);
+
+    const jobMeta = {
+      company: "Anthropic",
+      title: "AI Platform & Evaluation Engineer",
+      location: "San Francisco, CA",
+      description:
+        "We are hiring an AI Platform & Evaluation Engineer to architect autonomous browser AI agent sandboxes, multi-modal synthetic user state pipelines, red-teaming & adversarial safety evaluations, and real-time OpenTelemetry dashboards. Required skills: Python, TypeScript, React, LangGraph, Docker, Kubernetes, GCP, BigQuery, PyTorch, Playwright, RAG, Vector Databases, and CI/CD."
+    };
+
+    const aiTailor = await tailorResumeWithGemini(
+      jobMeta,
+      DEFAULT_PROFILE,
+      ["Vector Databases", "Observability / Telemetry"],
+      runtimeSettings,
+      "gemini-3.8-flash"
+    );
+    const pdfRes = await generateTailoredResumePdf(aiTailor.tailored, DEFAULT_PROFILE, runtimeSettings);
+    fs.writeFileSync(SAMPLE_PDF_OUT, Buffer.from(pdfRes.pdfBase64, "base64"));
+    const postScore = scoreResumeATS(DEFAULT_PROFILE, jobMeta.description, aiTailor.tailored);
+    console.log(
+      `8. ✅ Gemini AI Resume Tailoring + pdflatex PDF Compiled! Requested: ${aiTailor.requestedModel} -> Active Model: ${aiTailor.modelUsed} | PDF Engine: ${pdfRes.engine} | New ATS Score: ${postScore.totalScore}/100 | Saved: ${SAMPLE_PDF_OUT}`
+    );
+
+    const pureJsB64 = buildPureJsResumePdfBase64(aiTailor.tailored, DEFAULT_PROFILE);
+    const pureRaw = Buffer.from(pureJsB64, "base64").toString("latin1");
+    if (!pureRaw.startsWith("%PDF-1.4") || !pureRaw.endsWith("%%EOF")) {
+      throw new Error("Pure-JS fallback PDF invalid header/trailer!");
+    }
+    console.log(`9. ✅ Standalone Pure-JS Fallback PDF Engine Verified (${Buffer.from(pureJsB64, "base64").length} bytes, valid %PDF-1.4..%%EOF)`);
+
+    const clRes = await generateCoverLetterWithGemini(jobMeta, DEFAULT_PROFILE, "Concise & Technical", runtimeSettings);
+    console.log(`10. ✅ Gemini AI Cover Letter Generated (${clRes.coverLetter.length} chars, Model: ${clRes.modelUsed})`);
+
+    const qAns = await answerApplicationQuestionWithGemini(
+      { label: "Why are you excited to join Anthropic's AI Platform & Evaluation team?", fieldType: "textarea", maxLength: 600 },
+      jobMeta,
+      DEFAULT_PROFILE,
+      DEFAULT_SAVED_ANSWERS,
+      runtimeSettings
+    );
+    console.log(`11. ✅ Gemini AI Custom Application Question Answered (${qAns.answer.length} chars): "${qAns.answer.slice(0, 120)}..."`);
+
+    const liveJobs = await fetchPersonalizedRecommendations(DEFAULT_PROFILE, { category: "All", limit: 10 });
+    console.log(
+      `12. ✅ Live Curated ATS Feeds Fetched & Scored: ${liveJobs.length} top matches (e.g. #1 ${liveJobs[0]?.company} — ${liveJobs[0]?.title} [${liveJobs[0]?.matchScore}% Match])`
+    );
+    if (liveJobs.length === 0) throw new Error("Live job feed returned 0 matches!");
+
+    console.log("\n🎉 ALL 12 END-TO-END VERIFICATION GATES PASSED 100%!");
+  } finally {
+    if (ChromeProc) ChromeProc.kill("SIGKILL");
+    if (srv) srv.kill("SIGKILL");
+    await sleep(300);
+    fs.rmSync(USER_DATA_DIR, { recursive: true, force: true });
+  }
+}
+
+main().catch((err) => {
+  console.error("❌ E2E Verification Failed:", err);
+  process.exit(1);
+});

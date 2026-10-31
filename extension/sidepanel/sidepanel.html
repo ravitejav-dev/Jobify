@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Jobify Quick-Copy & Vault SidePanel</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: Inter, system-ui, sans-serif; }
+    body { background: #0f172a; color: #f8fafc; padding: 14px; }
+    .hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+    .title { font-size: 16px; font-weight: 800; color: #fff; }
+    .sub { font-size: 11.5px; color: #94a3b8; }
+    .btn {
+      background: linear-gradient(135deg, #4f46e5, #7c3aed); color: #fff; border: none;
+      border-radius: 8px; padding: 8px 12px; font-size: 12px; font-weight: 700; cursor: pointer;
+    }
+    .btn.sec { background: #334155; }
+    .section { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+    .sec-title { font-size: 11px; font-weight: 700; color: #a5b4fc; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .copy-card {
+      background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 8px;
+      text-align: left; color: #e2e8f0; cursor: pointer;
+    }
+    .copy-card:hover { border-color: #6366f1; }
+    .k { font-size: 10px; color: #94a3b8; display: block; }
+    .v { font-size: 12px; font-weight: 600; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .exp-block, .sa-block {
+      background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 9px; margin-bottom: 8px;
+    }
+    .toast {
+      position: fixed; bottom: 14px; left: 14px; right: 14px; background: #065f46; color: #ecfdf5;
+      padding: 9px 12px; border-radius: 8px; font-size: 12px; font-weight: 700; display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="hdr">
+    <div>
+      <div class="title">⚡ Jobify Quick-Copy</div>
+      <div class="sub">Manual Copy Container for Any Portal or Iframe</div>
+    </div>
+    <button class="btn sec" id="sp-hub">Full Hub ↗</button>
+  </div>
+
+  <div class="section">
+    <div class="sec-title">1-Click Identity & Portal Login</div>
+    <div class="grid" id="sp-identity-grid"></div>
+  </div>
+
+  <div class="section">
+    <div class="sec-title">Work Experience Blocks</div>
+    <div id="sp-exp-list"></div>
+  </div>
+
+  <div class="section">
+    <div class="sec-title">Saved Common Answers</div>
+    <div id="sp-sa-list"></div>
+  </div>
+
+  <div class="toast" id="sp-toast">Copied!</div>
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>
