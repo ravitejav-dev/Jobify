@@ -1317,7 +1317,12 @@
 
   // Self-contained per-frame entrypoint invoked by service_worker RUN_TAB_AUTOFILL across all frames (top + embedded ATS iframes)
   async function runFrameAutofill(options = {}) {
-    const stateResp = await chrome.runtime.sendMessage({ type: "GET_ALL_STATE" }).catch(() => null);
+    let stateResp = null;
+    try {
+      if (typeof chrome !== "undefined" && chrome.runtime?.id) {
+        stateResp = await chrome.runtime.sendMessage({ type: "GET_ALL_STATE" });
+      }
+    } catch (_) {}
     const state = stateResp?.state;
     if (!state) return { filledCount: 0, filledFieldsLog: [] };
 
@@ -1325,10 +1330,15 @@
     let resumePdfPayload = null;
     if (hasFileInputs && state.settings?.autoAttachResumePdf !== false) {
       const selectedResumeId = options.resumeChoice || state.settings?.defaultResumeVariant || "one_page";
-      const pdfResp = await chrome.runtime
-        .sendMessage({ type: "GET_RESUME_PDF_BYTES", payload: { variantOrId: selectedResumeId } })
-        .catch(() => null);
-      if (pdfResp?.ok) resumePdfPayload = pdfResp;
+      try {
+        if (typeof chrome !== "undefined" && chrome.runtime?.id) {
+          const pdfResp = await chrome.runtime.sendMessage({
+            type: "GET_RESUME_PDF_BYTES",
+            payload: { variantOrId: selectedResumeId }
+          });
+          if (pdfResp?.ok) resumePdfPayload = pdfResp;
+        }
+      } catch (_) {}
     }
 
     const latestCl = (state.coverLetters || [])[0] || null;

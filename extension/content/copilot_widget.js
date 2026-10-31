@@ -5,7 +5,13 @@
   window.__JOBIFY_WIDGET_LOADED__ = true;
 
   // Only mount floating UI in top frame (iframes still get inline autofill support via ats_adapters.js)
-  const IS_TOP_FRAME = window === window.top;
+  const IS_TOP_FRAME = (() => {
+    try {
+      return window === window.top;
+    } catch (_) {
+      return false;
+    }
+  })();
 
   let appState = null;
   let pageMeta = null;
@@ -16,6 +22,15 @@
   let hostEl = null;
   let drawerOpen = false;
   let activeTab = "autofill";
+
+  async function safeSendMessage(msg) {
+    try {
+      if (typeof chrome === "undefined" || !chrome.runtime?.id) return null;
+      return await chrome.runtime.sendMessage(msg);
+    } catch (_) {
+      return null;
+    }
+  }
 
   function escapeHtml(s) {
     return String(s ?? "")
@@ -54,16 +69,14 @@
 
   async function refreshStateAndAnalyze() {
     const adapters = window.__JOBIFY_ADAPTERS__;
-    if (!adapters) return;
+    if (!adapters || typeof chrome === "undefined" || !chrome.runtime?.id) return;
     pageMeta = adapters.extractJobMetadata(document);
 
-    const stateResp = await chrome.runtime.sendMessage({ type: "GET_ALL_STATE" }).catch(() => null);
+    const stateResp = await safeSendMessage({ type: "GET_ALL_STATE" });
     if (stateResp?.ok) appState = stateResp.state;
 
     if (pageMeta.isRelevantPage) {
-      const anResp = await chrome.runtime
-        .sendMessage({ type: "ANALYZE_JOB_PAGE", payload: { jobMeta: pageMeta } })
-        .catch(() => null);
+      const anResp = await safeSendMessage({ type: "ANALYZE_JOB_PAGE", payload: { jobMeta: pageMeta } });
       if (anResp?.ok) analysis = anResp;
     }
   }
@@ -180,6 +193,8 @@
     if (!adapters) return { filledCount: 0, filledFieldsLog: [] };
 
     await refreshStateAndAnalyze();
+    if (!appState?.profile) return { filledCount: 0, filledFieldsLog: [] };
+
     const selectedResumeId =
       options.resumeChoice ||
       shadowRoot?.getElementById("jb-resume-select")?.value ||
@@ -187,9 +202,7 @@
 
     let resumePdfPayload = null;
     if (appState?.settings?.autoAttachResumePdf !== false) {
-      const pdfResp = await chrome.runtime
-        .sendMessage({ type: "GET_RESUME_PDF_BYTES", payload: { variantOrId: selectedResumeId } })
-        .catch(() => null);
+      const pdfResp = await safeSendMessage({ type: "GET_RESUME_PDF_BYTES", payload: { variantOrId: selectedResumeId } });
       if (pdfResp?.ok) resumePdfPayload = pdfResp;
     }
 
@@ -230,23 +243,21 @@
       });
     } else {
       // Coordinate across top document AND any cross-origin embedded ATS iframes (Greenhouse, Ashby, Lever, Workday)
-      const tabResp = await chrome.runtime
-        .sendMessage({
-          type: "RUN_TAB_AUTOFILL",
-          payload: {
-            options: {
-              resumeChoice: selectedResumeId,
-              fillOpenEndedWithAI: options.fillOpenEndedWithAI !== false,
-              forceOverwrite: Boolean(options.forceOverwrite),
-              topJobMeta: pageMeta,
-              coverLetterText: latestCoverLetterRecord?.coverLetter || "",
-              coverLetterPdfPayload: latestCoverLetterRecord?.pdfBase64
-                ? { fileName: latestCoverLetterRecord.fileName, base64: latestCoverLetterRecord.pdfBase64 }
-                : null
-            }
+      const tabResp = await safeSendMessage({
+        type: "RUN_TAB_AUTOFILL",
+        payload: {
+          options: {
+            resumeChoice: selectedResumeId,
+            fillOpenEndedWithAI: options.fillOpenEndedWithAI !== false,
+            forceOverwrite: Boolean(options.forceOverwrite),
+            topJobMeta: pageMeta,
+            coverLetterText: latestCoverLetterRecord?.coverLetter || "",
+            coverLetterPdfPayload: latestCoverLetterRecord?.pdfBase64
+              ? { fileName: latestCoverLetterRecord.fileName, base64: latestCoverLetterRecord.pdfBase64 }
+              : null
           }
-        })
-        .catch(() => null);
+        }
+      });
 
       result = tabResp?.ok ? tabResp : await executeLocalAutofill({ ...options, resumeChoice: selectedResumeId });
     }
@@ -1036,7 +1047,9 @@
           matchScore: analysis?.match?.matchScore || 88
         };
       }
-    })().then(sendResponse);
+    })()
+      .then(sendResponse)
+      .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
     return true;
   });
 
@@ -1051,6 +1064,7 @@
       }
       await new Promise((r) => setTimeout(r, 250));
     }
+    if (typeof chrome === "undefined" || !chrome.runtime?.id) return;
     await refreshStateAndAnalyze();
     attachSubmitAutoTracker();
     if (pageMeta?.isRelevantPage) {
@@ -1063,31 +1077,33 @@
     if (IS_TOP_FRAME) {
       let lastHref = location.href;
       const pollTimer = setInterval(async () => {
-        if (!chrome.runtime?.id) {
-          clearInterval(pollTimer);
-          return;
-        }
-        if (
-          hostEl &&
-          !document.getElementById("jobify-copilot-host") &&
-          pageMeta?.isRelevantPage &&
-          appState?.settings?.autoShowCopilotWidget !== false
-        ) {
-          mountWidget();
-        }
-        if (location.href !== lastHref) {
-          lastHref = location.href;
-          await refreshStateAndAnalyze();
-          if (pageMeta?.isRelevantPage) {
-            injectInlineAiButtons();
-            if (!document.getElementById("jobify-copilot-host") && appState?.settings?.autoShowCopilotWidget !== false) {
-              mountWidget();
-            } else if (shadowRoot) {
-              renderDrawer();
+        try {
+          if (typeof chrome === "undefined" || !chrome.runtime?.id) {
+            clearInterval(pollTimer);
+            return;
+          }
+          if (
+            hostEl &&
+            !document.getElementById("jobify-copilot-host") &&
+            pageMeta?.isRelevantPage &&
+            appState?.settings?.autoShowCopilotWidget !== false
+          ) {
+            mountWidget();
+          }
+          if (location.href !== lastHref) {
+            lastHref = location.href;
+            await refreshStateAndAnalyze();
+            if (pageMeta?.isRelevantPage) {
+              injectInlineAiButtons();
+              if (!document.getElementById("jobify-copilot-host") && appState?.settings?.autoShowCopilotWidget !== false) {
+                mountWidget();
+              } else if (shadowRoot) {
+                renderDrawer();
+              }
             }
           }
-        }
+        } catch (_) {}
       }, 900);
     }
-  })();
+  })().catch(() => {});
 })();
