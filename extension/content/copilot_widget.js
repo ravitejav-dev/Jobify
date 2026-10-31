@@ -302,8 +302,21 @@
     shadowRoot.innerHTML = `
       <style>
         * { box-sizing: border-box; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        .jb-pill {
+        .jb-pill-bar {
           position: fixed; right: 16px; bottom: 24px;
+          display: flex; align-items: center; gap: 7px;
+          z-index: 2147483646;
+        }
+        .jb-pill-quick {
+          background: linear-gradient(135deg, #059669 0%, #0284c7 100%);
+          color: #fff; border: 1px solid rgba(255,255,255,0.28);
+          border-radius: 999px; padding: 9px 13px;
+          font-size: 12px; font-weight: 800; cursor: pointer;
+          box-shadow: 0 10px 26px rgba(5, 150, 105, 0.42);
+          transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }
+        .jb-pill-quick:hover { transform: translateY(-2px); box-shadow: 0 14px 30px rgba(5, 150, 105, 0.58); }
+        .jb-pill {
           display: flex; align-items: center; gap: 8px;
           background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
           color: #fff; border: 1px solid rgba(255,255,255,0.22);
@@ -311,7 +324,6 @@
           box-shadow: 0 10px 28px rgba(79, 70, 229, 0.42);
           cursor: pointer; user-select: none;
           transition: transform 0.18s ease, box-shadow 0.18s ease;
-          z-index: 2147483646;
         }
         .jb-pill:hover { transform: translateY(-2px); box-shadow: 0 14px 32px rgba(79, 70, 229, 0.55); }
         .jb-pill-logo { font-weight: 800; font-size: 13.5px; letter-spacing: -0.2px; }
@@ -453,9 +465,14 @@
         <div class="jb-hud-detail" id="jb-hud-detail">Initializing...</div>
       </div>
 
-      <div class="jb-pill" id="jb-pill" title="Open Jobify Copilot">
-        <span class="jb-pill-logo">⚡ Jobify</span>
-        <span class="jb-pill-score" id="jb-pill-score">${score}% Match</span>
+      <div class="jb-pill-bar">
+        <button class="jb-pill-quick" id="jb-pill-tailor-apply" title="Tailor Resume & Auto-Apply End-to-End">
+          🚀 Tailor &amp; Apply
+        </button>
+        <div class="jb-pill" id="jb-pill" title="Open Jobify Copilot">
+          <span class="jb-pill-logo">⚡ Jobify</span>
+          <span class="jb-pill-score" id="jb-pill-score">${score}% Match</span>
+        </div>
       </div>
 
       <div class="jb-drawer" id="jb-drawer">
@@ -490,6 +507,22 @@
     shadowRoot.getElementById("jb-pill").addEventListener("click", () => {
       drawerOpen = true;
       renderDrawer();
+    });
+    shadowRoot.getElementById("jb-pill-tailor-apply").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await refreshStateAndAnalyze();
+      drawerOpen = false;
+      renderDrawer();
+      await safeSendMessage({
+        type: "START_FULL_AUTO_APPLY",
+        payload: {
+          options: {
+            autoSubmit: true,
+            tailorResume: true,
+            jobMeta: pageMeta
+          }
+        }
+      });
     });
     shadowRoot.getElementById("jb-hud-stop").addEventListener("click", async () => {
       await safeSendMessage({ type: "STOP_FULL_AUTO_APPLY" });
@@ -777,8 +810,8 @@
                 : `<span style="font-size:12px;color:#6ee7b7;">🎉 Zero missing keywords detected!</span>`
             }
           </div>
-          <button class="jb-btn primary" id="jb-kw-tailor" style="margin-top:10px;">
-            ✨ Tailor Resume to Inject Missing Keywords
+          <button class="jb-btn auto-hero" id="jb-kw-tailor" style="margin-top:10px;">
+            🚀 Tailor Resume &amp; Auto-Apply End-to-End
           </button>
         </div>
 
@@ -791,10 +824,19 @@
           </div>
         </div>
       `;
-      body.querySelector("#jb-kw-tailor").addEventListener("click", () => {
-        activeTab = "ai";
-        shadowRoot.querySelectorAll(".jb-tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === "ai"));
-        renderTabContent();
+      body.querySelector("#jb-kw-tailor").addEventListener("click", async () => {
+        drawerOpen = false;
+        renderDrawer();
+        await safeSendMessage({
+          type: "START_FULL_AUTO_APPLY",
+          payload: {
+            options: {
+              autoSubmit: true,
+              tailorResume: true,
+              jobMeta: pageMeta
+            }
+          }
+        });
       });
       return;
     }
@@ -808,8 +850,11 @@
             <option value="gemini-3.1-pro-preview" ${appState.settings.primaryModel === "gemini-3.1-pro-preview" ? "selected" : ""}>Gemini 3.1 Pro (Deep Reasoning)</option>
           </select>
 
-          <button class="jb-btn primary" id="jb-run-tailor">
-            ✨ Tailor ATS Resume + Compile PDF
+          <button class="jb-btn auto-hero" id="jb-run-tailor">
+            🚀 Tailor Resume &amp; Auto-Apply End-to-End
+          </button>
+          <button class="jb-btn secondary" id="jb-run-tailor-only" style="margin-top:8px;">
+            📄 Tailor &amp; Download PDF Only
           </button>
 
           ${
@@ -852,7 +897,24 @@
         </div>
       `;
 
-      body.querySelector("#jb-run-tailor").addEventListener("click", async (e) => {
+      body.querySelector("#jb-run-tailor").addEventListener("click", async () => {
+        const chosenModel = body.querySelector("#jb-ai-model").value;
+        drawerOpen = false;
+        renderDrawer();
+        await safeSendMessage({
+          type: "START_FULL_AUTO_APPLY",
+          payload: {
+            options: {
+              autoSubmit: true,
+              tailorResume: true,
+              preferredModel: chosenModel,
+              jobMeta: pageMeta
+            }
+          }
+        });
+      });
+
+      body.querySelector("#jb-run-tailor-only").addEventListener("click", async (e) => {
         const b = e.currentTarget;
         const chosenModel = body.querySelector("#jb-ai-model").value;
         b.disabled = true;
@@ -868,7 +930,7 @@
           renderTabContent();
           showToast(`✨ Tailored PDF ready (${resp.record.modelUsed})!`, "success");
         } else {
-          b.textContent = "✨ Tailor ATS Resume + Compile PDF";
+          b.textContent = "📄 Tailor & Download PDF Only";
           showToast(`Error: ${resp?.error || "Failed"}`, "warn");
         }
       });

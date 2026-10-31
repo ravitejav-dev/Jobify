@@ -238,8 +238,12 @@ async function main() {
       autoAudit = await autoCdp.eval(`window.__AUTO_APPLY_AUDIT__`).catch(() => null);
       if (autoAudit?.submitted) break;
     }
-    await sleep(800);
-    const autoStatus = await swCdp.eval(`chrome.storage.local.get("jobify_auto_apply_session").then(r => r.jobify_auto_apply_session)`);
+    let autoStatus = null;
+    for (let sIdx = 0; sIdx < 20; sIdx++) {
+      await sleep(400);
+      autoStatus = await swCdp.eval(`chrome.storage.local.get("jobify_auto_apply_session").then(r => r.jobify_auto_apply_session)`);
+      if (autoStatus && !autoStatus.running) break;
+    }
     console.log("3. ✅ Full Autonomous Auto-Apply E2E Verified (5 Stages):", JSON.stringify({
       autoStatus,
       audit: {
@@ -255,6 +259,7 @@ async function main() {
     }, null, 2));
 
     if (
+      !autoStatus?.completed ||
       !autoAudit?.clickedApplyNow ||
       !autoAudit?.signInAttempted ||
       !autoAudit?.switchedToSignup ||
@@ -286,6 +291,177 @@ async function main() {
       throw new Error("Full Autonomous Auto-Apply E2E assertion failed!");
     }
     autoCdp.close();
+
+    // 2b. WORKDAY FULL-FLOW END-TO-END VIA AI STUDIO "TAILOR RESUME" BUTTON
+    // (Tests: Header SignIn Trap Ignored -> Adventure "Apply" -> Async "Start Your Application" Modal -> "Apply Manually" -> "Sign in with email" -> Sign In Fail -> Switch to Create Account -> Read More + opacity:0 Checkbox + opacity:0 click_filter -> Background Email Verification Link Activation -> Step 2 Sign In via click_filter -> Workday searchBox Combobox + State countryRegion + Spinbutton Date + Tailored PDF -> Submit -> Auto-Track!)
+    const wdE2eCdp = await openTabAndConnect("http://127.0.0.1:18765/sandbox/workday-full-e2e");
+    for (let i = 0; i < 20; i++) {
+      const hasQuickPill = await wdE2eCdp
+        .eval(`Boolean(document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-pill-tailor-apply"))`)
+        .catch(() => false);
+      if (hasQuickPill) break;
+      await sleep(300);
+    }
+    await wdE2eCdp.eval(`
+      (async () => {
+        const sr = document.getElementById("jobify-copilot-host").shadowRoot;
+        sr.getElementById("jb-pill").click();
+        await new Promise(r => setTimeout(r, 200));
+        sr.querySelector(".jb-tab[data-tab='ai']").click();
+        await new Promise(r => setTimeout(r, 200));
+        sr.getElementById("jb-run-tailor").click();
+      })()
+    `);
+
+    let wdAudit = null;
+    for (let waitIdx = 0; waitIdx < 90; waitIdx++) {
+      await sleep(1000);
+      wdAudit = await wdE2eCdp.eval(`window.__WD_E2E_AUDIT__`).catch(() => null);
+      if (wdAudit?.submitted) break;
+    }
+    let wdSessionStatus = null;
+    for (let sIdx = 0; sIdx < 20; sIdx++) {
+      await sleep(400);
+      wdSessionStatus = await swCdp.eval(`chrome.storage.local.get("jobify_auto_apply_session").then(r => r.jobify_auto_apply_session)`);
+      if (wdSessionStatus && !wdSessionStatus.running) break;
+    }
+    console.log("3b. ✅ Workday Full-Flow E2E (Triggered via 'Tailor Resume' in AI Studio) Verified:", JSON.stringify({
+      wdSessionStatus,
+      wdAudit
+    }, null, 2));
+
+    if (
+      !wdSessionStatus?.completed ||
+      !wdAudit ||
+      wdAudit.headerSignInTrapClicked !== false ||
+      wdAudit.usedLinkedInOrLastAppTrap !== false ||
+      !wdAudit.clickedAdventure ||
+      !wdAudit.clickedApplyManually ||
+      !wdAudit.clickedSignInWithEmail ||
+      !wdAudit.triedSignInFirst ||
+      !wdAudit.switchedToCreateAccount ||
+      !wdAudit.readMoreExpanded ||
+      !wdAudit.termsChecked ||
+      !wdAudit.accountCreatedViaClickFilter ||
+      !wdAudit.emailLinkVerified ||
+      !wdAudit.signedInAfterCreateViaClickFilter ||
+      wdAudit.step1?.howDidYouHear !== "LinkedIn" ||
+      wdAudit.step1?.firstName !== "Raviteja" ||
+      wdAudit.step1?.lastName !== "Velanati" ||
+      wdAudit.step1?.streetAddress !== "39861 Potrero Dr" ||
+      wdAudit.step1?.city !== "Newark" ||
+      wdAudit.step1?.state !== "California" ||
+      wdAudit.step1?.postalCode !== "94560" ||
+      wdAudit.step1?.phoneDeviceType !== "Cellular" ||
+      wdAudit.step2?.resumeFile !== "Raviteja_Velanati_NVIDIA_Resume.pdf" ||
+      wdAudit.step2?.resumeBytes < 1000 ||
+      wdAudit.step2?.linkedin !== "https://www.linkedin.com/in/raviteja-velanati/" ||
+      wdAudit.step2?.workAuth !== "Yes" ||
+      wdAudit.step2?.sponsorship !== "Yes" ||
+      wdAudit.step2?.gender !== "Male" ||
+      wdAudit.step2?.cc305Name !== "Raviteja Velanati" ||
+      wdAudit.step2?.cc305EmployeeId !== "" ||
+      !wdAudit.step2?.cc305Disability?.startsWith("No, I do not have a disability") ||
+      wdAudit.step2?.signMonth?.length !== 2 ||
+      wdAudit.step2?.signDay?.length !== 2 ||
+      wdAudit.step2?.signYear !== String(new Date().getFullYear()) ||
+      wdAudit.step2?.optionalComments !== "" ||
+      !wdAudit.submitted
+    ) {
+      throw new Error("Workday Full-Flow End-to-End assertion failed!");
+    }
+    wdE2eCdp.close();
+
+    // 2c. LIVE PRODUCTION NVIDIA WORKDAY GATE CHECK (Real nvidia.wd5.myworkdayjobs.com: Adventure "Apply" -> Async Modal -> "Apply Manually" -> "Sign in with email" -> signInContent Email+Password without touching utilityButtonSignIn)
+    let liveWdJobUrl = null;
+    try {
+      const cxsResp = await fetch("https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ appliedFacets: {}, limit: 3, offset: 0, searchText: "Engineer" })
+      }).then((r) => r.json());
+      const extPath = cxsResp?.jobPostings?.find((j) => j.externalPath)?.externalPath;
+      if (extPath) {
+        liveWdJobUrl = `https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite${extPath}`;
+      }
+    } catch (_) {}
+
+    if (liveWdJobUrl) {
+      const liveWdCdp = await openTabAndConnect(liveWdJobUrl);
+      for (let i = 0; i < 35; i++) {
+        const hasAdv = await liveWdCdp
+          .eval(`Boolean(document.querySelector("[data-automation-id='adventureButton']") && document.getElementById("jobify-copilot-host")?.shadowRoot)`)
+          .catch(() => false);
+        if (hasAdv) break;
+        await sleep(400);
+      }
+      const liveEntryRes = await swCdp.eval(`
+        (async () => {
+          const targetTabId = ${liveWdCdp.tabId};
+          const step1 = await chrome.scripting.executeScript({
+            target: { tabId: targetTabId },
+            func: async () => {
+              window.__jbUtilClicked = false;
+              const utilBtn = document.querySelector("[data-automation-id='utilityButtonSignIn']");
+              if (utilBtn) utilBtn.addEventListener("click", () => { window.__jbUtilClicked = true; });
+              return await window.__JOBIFY_ADAPTERS__.clickApplyEntryButton();
+            }
+          }).catch(() => null);
+          const applyRes = step1?.[0]?.result || null;
+
+          // Wait for Workday navigation / SPA route / auth gate after Apply Manually
+          for (let w = 0; w < 22; w++) {
+            await new Promise(r => setTimeout(r, 400));
+            const probe = await chrome.scripting.executeScript({
+              target: { tabId: targetTabId },
+              func: () => ({
+                hasEmailBtn: Boolean(document.querySelector("[data-automation-id='SignInWithEmailButton']")),
+                pwCount: document.querySelectorAll("input[type='password']").length
+              })
+            }).catch(() => null);
+            const pr = probe?.[0]?.result;
+            if (pr?.hasEmailBtn || pr?.pwCount > 0) break;
+          }
+
+          const step2 = await chrome.scripting.executeScript({
+            target: { tabId: targetTabId },
+            func: async () => {
+              const emailGateBtn = document.querySelector("[data-automation-id='SignInWithEmailButton']");
+              let clickedEmailGate = false;
+              if (emailGateBtn) {
+                emailGateBtn.click();
+                clickedEmailGate = true;
+                for (let i = 0; i < 18; i++) {
+                  await new Promise(r => setTimeout(r, 300));
+                  if (document.querySelectorAll("input[type='password']").length > 0) break;
+                }
+              }
+              return {
+                url: location.href,
+                utilClicked: Boolean(window.__jbUtilClicked),
+                clickedEmailGate,
+                signInMounted: Boolean(document.querySelector("[data-automation-id='signInContent']")),
+                emailInputMounted: Boolean(document.querySelector("input[data-automation-id='email']")),
+                pwCount: document.querySelectorAll("input[type='password']").length,
+                hasClickFilter: Boolean(document.querySelector("[data-automation-id='signInContent'] [data-automation-id='click_filter']"))
+              };
+            }
+          });
+          return { applyRes, ...(step2?.[0]?.result || {}) };
+        })()
+      `);
+      console.log("3c. ✅ Live Production NVIDIA Workday Modal + Email Auth Gate Verified:", JSON.stringify(liveWdJobUrl), JSON.stringify(liveEntryRes, null, 2));
+      if (
+        liveEntryRes.utilClicked !== false ||
+        !(liveEntryRes.applyRes?.clickedModalChoice || /\/apply\/applyManually/i.test(liveEntryRes.url || "")) ||
+        !liveEntryRes.signInMounted ||
+        !liveEntryRes.emailInputMounted ||
+        liveEntryRes.pwCount < 1
+      ) {
+        throw new Error("Live production NVIDIA Workday modal/auth gate assertion failed!");
+      }
+      liveWdCdp.close();
+    }
 
     // 3. Greenhouse Sandbox inside real Chrome extension
     const ghCdp = await openTabAndConnect(`chrome-extension://${extId}/sandbox/greenhouse.html`);
@@ -426,7 +602,11 @@ async function main() {
         .map((a) => `${a.company}:${a.status}`)
         .join(", ")})`
     );
-    if (trackedApps.length < 2 || !trackedApps.some((a) => a.company === "OpenAI" && a.status === "Applied")) {
+    if (
+      trackedApps.length < 3 ||
+      !trackedApps.some((a) => a.company === "OpenAI" && a.status === "Applied") ||
+      !trackedApps.some((a) => a.company === "NVIDIA" && a.status === "Applied")
+    ) {
       throw new Error("Auto-tracker failed to log submitted applications!");
     }
     dashCdp.close();
@@ -492,7 +672,7 @@ async function main() {
     );
     if (liveJobs.length === 0) throw new Error("Live job feed returned 0 matches!");
 
-    console.log("\n🎉 ALL 12 END-TO-END VERIFICATION GATES PASSED 100%!");
+    console.log("\n🎉 ALL 14 END-TO-END VERIFICATION GATES PASSED 100%!");
   } finally {
     if (ChromeProc) ChromeProc.kill("SIGKILL");
     if (srv) srv.kill("SIGKILL");

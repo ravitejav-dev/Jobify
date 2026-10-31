@@ -17,16 +17,20 @@ function buildCandidateChain(requestedModel, settings) {
   const defaults = isProFirst
     ? [
         primary,
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
         "gemini-3.8-flash",
-        "gemini-2.0-flash"
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-flash-lite-latest",
+        "gemini-3-flash-preview"
       ]
     : [
         primary,
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-flash-lite-latest",
         "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
         normalizeModelName(settings?.proModel || "gemini-3.1-pro-preview")
       ];
   return [...new Set(defaults)];
@@ -39,7 +43,7 @@ export async function callGemini({
   jsonMode = false,
   temperature = 0.35,
   maxOutputTokens = 4096,
-  timeoutMs = 15000,
+  timeoutMs = 18000,
   settings = {}
 }) {
   const apiKey = (settings?.geminiApiKey || "").trim();
@@ -89,6 +93,7 @@ export async function callGemini({
 
       const data = await resp.json();
       const text = (data?.candidates?.[0]?.content?.parts || [])
+        .filter((p) => !p.thought)
         .map((p) => p.text || "")
         .join("")
         .trim();

@@ -206,13 +206,44 @@ async function ensureTabScripts(tabId) {
 async function buildAndSaveTailoredResume(jobMeta, state, preferredModel = null) {
   const kw = analyzeJobKeywords(jobMeta.description || "", state.profile);
   const missingList = kw.missing.map((m) => m.keyword);
-  const aiRes = await tailorResumeWithGemini(
-    jobMeta,
-    state.profile,
-    missingList,
-    state.settings,
-    preferredModel
-  );
+  let aiRes = null;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      aiRes = await tailorResumeWithGemini(
+        jobMeta,
+        state.profile,
+        missingList,
+        state.settings,
+        preferredModel
+      );
+      if (aiRes?.tailored) break;
+    } catch (_) {
+      if (attempt === 1) await sleep(1000);
+    }
+  }
+
+  if (!aiRes?.tailored) {
+    const prof = state.profile || {};
+    aiRes = {
+      tailored: {
+        summary: prof.summaryShort || prof.summary || "",
+        skillsCategories: prof.skillsCategories || {},
+        experience: (prof.workExperience || []).map((w) => ({
+          company: w.company,
+          title: w.title,
+          location: w.location,
+          period: w.period,
+          bullets: (w.bullets || w.highlights || []).slice(0, 4)
+        })),
+        projects: prof.projects || []
+      },
+      modelUsed: "profile-fallback",
+      requestedModel: preferredModel || state.settings?.primaryModel || "gemini-3-flash-preview",
+      fellBack: true
+    };
+  }
+
   const pdfOut = await generateTailoredResumePdf(aiRes.tailored, state.profile, state.settings);
   const postScore = scoreResumeATS(state.profile, jobMeta.description || "", aiRes.tailored);
   const safeComp = String(jobMeta.company || "Target")
@@ -239,9 +270,39 @@ async function buildAndSaveTailoredResume(jobMeta, state, preferredModel = null)
 }
 
 async function buildAndSaveCoverLetter(jobMeta, state, tone = "Concise & Technical") {
-  const aiCl = await generateCoverLetterWithGemini(jobMeta, state.profile, tone, state.settings);
+  let coverLetterText = "";
+  let modelUsed = "fallback-template";
+  let fellBack = false;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const aiCl = await generateCoverLetterWithGemini(jobMeta, state.profile, tone, state.settings);
+      if (aiCl?.coverLetter?.trim()) {
+        coverLetterText = aiCl.coverLetter.trim();
+        modelUsed = aiCl.modelUsed || "gemini";
+        fellBack = Boolean(aiCl.fellBack);
+        break;
+      }
+    } catch (_) {
+      if (attempt === 1) await sleep(1000);
+    }
+  }
+
+  if (!coverLetterText) {
+    const p = state.profile?.personal || {};
+    const comp = jobMeta.company || "your engineering team";
+    const role = jobMeta.title || "Software & AI Engineer";
+    coverLetterText =
+      `Dear ${jobMeta.company ? jobMeta.company + " Hiring Team," : "Hiring Team,"}\n\n` +
+      `I am writing to apply for the ${role} role at ${comp}. As a ${p.currentTitle || "Senior AI Solutions Engineer"} at ${p.currentCompany || "GlobalLogic (Client: Google AI)"}, I architect autonomous browser-agent evaluation sandboxes, synthetic multi-service test pipelines across 48 personas and 9 cloud services, and high-throughput LLM regression infrastructure.\n\n` +
+      `Over the past two years supporting Google AI, I built 13 full-stack sandboxed web applications for agentic testing, delivered 19 Side-by-Side (SxS) evaluation plugins, and ranked #1 of 11 engineers in platform throughput across 2,000+ batches and 460+ workflows while reducing sandbox initialization latency by 70%.\n\n` +
+      `With an M.S. in Computer Science from Clark University and hands-on production experience across Python, TypeScript, React, FastAPI, LangGraph, Docker, Kubernetes, and GCP, I would welcome the opportunity to contribute to ${comp}'s engineering roadmap.\n\n` +
+      `Best regards,\n${p.fullName || "Raviteja Velanati"}`;
+    fellBack = true;
+  }
+
   const pdfOut = await generateCoverLetterPdf(
-    aiCl.coverLetter,
+    coverLetterText,
     { company: jobMeta.company, role: jobMeta.title },
     state.profile,
     state.settings
@@ -256,9 +317,9 @@ async function buildAndSaveCoverLetter(jobMeta, state, tone = "Concise & Technic
     role: jobMeta.title || "AI / Software Engineer",
     url: jobMeta.url || "",
     fileName,
-    coverLetter: aiCl.coverLetter,
-    modelUsed: aiCl.modelUsed,
-    fellBack: aiCl.fellBack,
+    coverLetter: coverLetterText,
+    modelUsed,
+    fellBack,
     pdfBase64: pdfOut.pdfBase64
   });
   return saved;
@@ -423,6 +484,165 @@ async function fetchOtpDualEngine(state, { tabUrl = "", sinceEpochMs = 0, sender
   });
 }
 
+function extractVerificationLinkFromRawText(subj, bodyText) {
+  const combined = `${subj || ""}\n${bodyText || ""}`
+    .replace(/&amp;/gi, "&")
+    .replace(/&#38;/g, "&")
+    .replace(/=\r?\n/g, "");
+  if (!/verify|activate|confirm|workday|candidate|account|welcome/i.test(combined)) {
+    return null;
+  }
+  const urls = [...combined.matchAll(/https?:\/\/[^\s"'<>)\]]+/gi)].map((m) =>
+    m[0].replace(/[.,;!?]+$/, "")
+  );
+  const filtered = urls.filter(
+    (u) =>
+      !/unsubscribe|privacy|terms|support\.google|linkedin\.com|twitter\.com|facebook\.com|instagram\.com|fonts\.googleapis|\.(png|jpg|jpeg|gif|svg|css|ico)(\?|$)/i.test(
+        u
+      )
+  );
+  return (
+    filtered.find((u) =>
+      /verify|activate|confirm|validation|token=|myworkdayjobs\.com|myworkdaysite\.com|wd\d+\.myworkday/i.test(u)
+    ) || null
+  );
+}
+
+async function fetchVerificationLinkDualEngine(state, { tabUrl = "", sinceEpochMs = 0, senderFilter = "" } = {}) {
+  const companionUrl = state.settings?.companionServerUrl || "http://127.0.0.1:18765";
+
+  // 1. Local E2E Sandbox Verification Link Inbox
+  if (/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//i.test(tabUrl)) {
+    try {
+      const sResp = await fetch(`${companionUrl}/api/sandbox-otp`);
+      if (sResp.ok) {
+        const sData = await sResp.json();
+        if (
+          sData?.verificationUrl &&
+          (!sinceEpochMs || (sData.timestampMs || 0) >= sinceEpochMs - 30000)
+        ) {
+          return {
+            ok: true,
+            verificationUrl: sData.verificationUrl,
+            subject: sData.subject,
+            from: sData.from,
+            source: "sandbox"
+          };
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. Companion Python IMAP Endpoint
+  if (state.credentials?.portalEmail && state.credentials?.gmailAppPassword) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 7500);
+      const resp = await fetch(`${companionUrl}/api/imap-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: state.credentials.portalEmail,
+          appPassword: state.credentials.gmailAppPassword,
+          senderFilter,
+          sinceEpochMs
+        }),
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data?.verificationUrl) {
+          return {
+            ok: true,
+            verificationUrl: data.verificationUrl,
+            subject: data.subject,
+            from: data.from,
+            source: "imap"
+          };
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 3. Zero-Backend Signed-In Chrome Gmail Session Reader
+  let gmailTabId = null;
+  let createdTempTab = false;
+  try {
+    const existingTabs = await chrome.tabs.query({ url: "https://mail.google.com/*" });
+    if (existingTabs.length > 0 && existingTabs[0].id) {
+      gmailTabId = existingTabs[0].id;
+    } else {
+      const tempTab = await chrome.tabs.create({
+        url: "https://mail.google.com/mail/u/0/feed/atom",
+        active: false
+      });
+      gmailTabId = tempTab.id;
+      createdTempTab = true;
+      await waitForTabComplete(gmailTabId, 6500);
+    }
+    const scriptRes = await chrome.scripting.executeScript({
+      target: { tabId: gmailTabId },
+      func: async () => {
+        const feeds = ["https://mail.google.com/mail/u/0/feed/atom", "https://mail.google.com/mail/u/1/feed/atom"];
+        const xmlPayloads = [];
+        for (const u of feeds) {
+          try {
+            const r = await fetch(u, { credentials: "include", cache: "no-store" });
+            if (r.ok) {
+              const t = await r.text();
+              if (t && t.includes("<feed")) xmlPayloads.push(t);
+            }
+          } catch (_) {}
+        }
+        return { xmlPayloads };
+      }
+    });
+    const minTs = sinceEpochMs > 0 ? sinceEpochMs - 120000 : 0;
+    for (const xml of scriptRes?.[0]?.result?.xmlPayloads || []) {
+      const entryBlocks = [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/gi)].map((m) => m[1]);
+      for (const block of entryBlocks) {
+        const title = (block.match(/<title>([\s\S]*?)<\/title>/i)?.[1] || "").trim();
+        const summary = (block.match(/<summary>([\s\S]*?)<\/summary>/i)?.[1] || "").trim();
+        const issued = (block.match(/<issued>([\s\S]*?)<\/issued>/i)?.[1] || "").trim();
+        if (minTs > 0 && issued) {
+          const parsed = Date.parse(issued);
+          if (!Number.isNaN(parsed) && parsed < minTs) continue;
+        }
+        const vUrl = extractVerificationLinkFromRawText(title, summary);
+        if (vUrl) {
+          return { ok: true, verificationUrl: vUrl, subject: title, source: "chrome_gmail_session" };
+        }
+      }
+    }
+  } catch (_) {
+  } finally {
+    if (createdTempTab && gmailTabId) {
+      chrome.tabs.remove(gmailTabId).catch(() => {});
+    }
+  }
+
+  return { ok: false, verificationUrl: null };
+}
+
+async function activateEmailVerificationLink(verificationUrl) {
+  if (!verificationUrl) return false;
+  let tempTabId = null;
+  try {
+    const t = await chrome.tabs.create({ url: verificationUrl, active: false });
+    tempTabId = t.id;
+    await waitForTabComplete(tempTabId, 9000);
+    await sleep(1400);
+    return true;
+  } catch (_) {
+    return false;
+  } finally {
+    if (tempTabId) {
+      chrome.tabs.remove(tempTabId).catch(() => {});
+    }
+  }
+}
+
 async function runAutofillPassAcrossFrames(tabId, opts) {
   const execFn = async (frameOpts) => {
     if (!window.__JOBIFY_ADAPTERS__?.runFrameAutofill) {
@@ -531,6 +751,9 @@ async function inspectTabFrames(tabId, topJobMeta = null) {
       isSubmittedConfirmation: false,
       otpChallenge: { detected: false },
       isStandaloneAuthWall: false,
+      hasApplyChoiceModal: false,
+      needsEmailVerificationBanner: false,
+      hasCandidateForm: false,
       inventory: { totalFields: 0, emptyFieldsCount: 0, emptyRequiredCount: 0, requiresCoverLetter: false, fields: [] },
       hasApplyButton: false,
       hasNextButton: false,
@@ -544,6 +767,9 @@ async function inspectTabFrames(tabId, topJobMeta = null) {
   const submittedFrame = valid.find((v) => v.isSubmittedConfirmation);
   const otpFrame = valid.find((v) => v.otpChallenge?.detected);
   const authFrame = valid.find((v) => v.isStandaloneAuthWall);
+  const hasApplyChoiceModal = valid.some((v) => v.hasApplyChoiceModal);
+  const needsEmailVerificationBanner = valid.some((v) => v.needsEmailVerificationBanner);
+  const hasCandidateForm = valid.some((v) => v.hasCandidateForm);
   const richestFormFrame = [...valid].sort((a, b) => (b.inventory?.totalFields || 0) - (a.inventory?.totalFields || 0))[0];
   const richestMetaFrame = [...valid].sort(
     (a, b) => (b.jobMeta?.description?.length || 0) - (a.jobMeta?.description?.length || 0)
@@ -561,7 +787,13 @@ async function inspectTabFrames(tabId, topJobMeta = null) {
     otpFrameId: otpFrame?.frameId ?? 0,
     isSubmittedConfirmation: Boolean(submittedFrame),
     otpChallenge: otpFrame?.otpChallenge || { detected: false },
-    isStandaloneAuthWall: Boolean(authFrame) && totalFields <= 3,
+    hasApplyChoiceModal,
+    needsEmailVerificationBanner,
+    hasCandidateForm,
+    isStandaloneAuthWall:
+      Boolean(authFrame) &&
+      !hasApplyChoiceModal &&
+      !valid.some((v) => v.frameId !== authFrame.frameId && v.hasCandidateForm),
     inventory: {
       totalFields,
       emptyFieldsCount,
@@ -569,7 +801,11 @@ async function inspectTabFrames(tabId, topJobMeta = null) {
       requiresCoverLetter,
       fields: richestFormFrame?.inventory?.fields || []
     },
-    hasApplyButton: valid.some((v) => v.hasApplyButton) && totalFields === 0 && !authFrame,
+    hasApplyButton:
+      (hasApplyChoiceModal || valid.some((v) => v.hasApplyButton)) &&
+      !hasCandidateForm &&
+      !authFrame &&
+      !otpFrame,
     hasNextButton: valid.some((v) => v.hasNextButton),
     hasSubmitButton: valid.some((v) => v.hasSubmitButton),
     jobMeta: richestMetaFrame?.jobMeta || topFrame.jobMeta || topJobMeta || {}
@@ -589,7 +825,7 @@ function findSpawnedChildTab(openerTabId, sinceMs) {
 }
 
 // End-to-End Autonomous Full Auto-Apply Workflow:
-// Pull Job Details -> Tailor Resume (+ Cover Letter if needed) -> Click Apply Now -> Login/Create Account (+ Verify Password) -> Read Email OTP -> Extract & Cleanly Fill 1-by-1 -> Next -> Auto-Submit
+// Pull Job Details -> Tailor Resume (+ Cover Letter if needed) -> Click Apply / Modal Apply Manually -> SSO Email Gate -> Create Account / Login (+ Verify Password + Email Link/OTP) -> Extract & Cleanly Fill 1-by-1 -> Next -> Auto-Submit
 async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
   if (!initialTabId) {
     return { ok: false, error: "No active job tab provided." };
@@ -605,11 +841,40 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
   let tailoredResume = null;
   let tailoredCoverLetter = null;
   let authOrSubmitTriggerMs = Date.now();
+  const authHistory = { triedSignIn: false, createdAccount: false, verifiedEmailLink: false };
   const swKeepAliveTimer = setInterval(() => {
     try {
       chrome.runtime.getPlatformInfo(() => {});
     } catch (_) {}
   }, 12000);
+
+  const pollAndActivateVerificationLink = async (currentState, screenUrl) => {
+    for (let poll = 1; poll <= 10; poll++) {
+      if (autoApplyAbortFlag) throw new Error("Stopped by user.");
+      await broadcastAutoApplyProgress(tabId, {
+        stage: "verifying_email_link",
+        stepLabel: `📧 Checking Email for Verification Link (${poll}/10)`,
+        detail: `Looking for account activation email in ${currentState.credentials.portalEmail}...`
+      });
+      const linkRes = await fetchVerificationLinkDualEngine(currentState, {
+        tabUrl: screenUrl,
+        sinceEpochMs: authOrSubmitTriggerMs
+      });
+      if (linkRes?.ok && linkRes.verificationUrl) {
+        await broadcastAutoApplyProgress(tabId, {
+          stage: "activating_email_link",
+          stepLabel: "🔗 Activating Candidate Account via Email Link",
+          detail: `Verified via ${linkRes.source} — completing portal sign-in...`
+        });
+        await activateEmailVerificationLink(linkRes.verificationUrl);
+        authHistory.verifiedEmailLink = true;
+        await sleep(700);
+        return true;
+      }
+      await sleep(2400);
+    }
+    return false;
+  };
 
   try {
     let state = await getAllState();
@@ -661,18 +926,22 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
 
     if (autoApplyAbortFlag) throw new Error("Stopped by user.");
 
-    // Step 2: Click "Apply Now" / "Apply Manually" if we are on the job posting gate
+    // Step 2: Click "Apply Now" / Workday "Apply" -> "Apply Manually" modal if on the job posting gate
     const preApplyCheck = await inspectTabFrames(tabId, jobMeta);
+    let applyGateClicks = 0;
     if (
-      preApplyCheck.hasApplyButton &&
-      !preApplyCheck.isStandaloneAuthWall &&
-      !preApplyCheck.otpChallenge?.detected &&
-      preApplyCheck.inventory.totalFields === 0
+      preApplyCheck.hasApplyChoiceModal ||
+      (preApplyCheck.hasApplyButton &&
+        !preApplyCheck.isStandaloneAuthWall &&
+        !preApplyCheck.otpChallenge?.detected)
     ) {
+      applyGateClicks++;
       await broadcastAutoApplyProgress(tabId, {
         stage: "clicking_apply",
-        stepLabel: "🖱️ Step 2: Clicking Apply Now",
-        detail: "Opening application portal..."
+        stepLabel: preApplyCheck.hasApplyChoiceModal
+          ? "🖱️ Step 2: Selecting 'Apply Manually'"
+          : "🖱️ Step 2: Clicking Apply & Selecting Manual Flow",
+        detail: "Opening candidate application portal..."
       });
       const clickTs = Date.now();
       authOrSubmitTriggerMs = clickTs;
@@ -687,20 +956,22 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         })
         .catch(() => {});
 
-      await sleep(1500);
+      await sleep(1200);
       const childTab = findSpawnedChildTab(tabId, clickTs);
       if (childTab?.id) {
         tabId = childTab.id;
         await waitForTabComplete(tabId, 12000);
       } else {
-        await waitForTabSettle(tabId, 600, 8000);
+        await waitForTabSettle(tabId, 700, 8500);
       }
       await ensureTabScripts(tabId);
     }
 
-    // Step 3..5: Autonomous Auth + Email OTP + Field Inventory -> Clean 1-by-1 Fill -> Next -> Submit Loop
+    // Step 3..6: Autonomous Modal/Apply Gate + Multi-Stage Auth + Email OTP/Link + Clean 1-by-1 Fill + Next + Submit Loop
     let authAttempts = 0;
-    for (let stepIdx = 1; stepIdx <= 12; stepIdx++) {
+    let retriedSubmitValidation = false;
+
+    for (let stepIdx = 1; stepIdx <= 18; stepIdx++) {
       if (autoApplyAbortFlag) throw new Error("Stopped by user.");
 
       await ensureTabScripts(tabId);
@@ -735,6 +1006,39 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
           tailoredResumeFile: tailoredResume?.fileName || null,
           coverLetterFile: tailoredCoverLetter?.fileName || null
         };
+      }
+
+      // Check A2: Open "Start Your Application" Choice Modal ("Apply Manually") OR Secondary Tab Apply Gate!
+      if ((screen.hasApplyChoiceModal || (screen.hasApplyButton && !screen.hasCandidateForm)) && applyGateClicks < 3) {
+        applyGateClicks++;
+        await broadcastAutoApplyProgress(tabId, {
+          stage: "clicking_apply",
+          stepLabel: screen.hasApplyChoiceModal
+            ? "🖱️ Selecting 'Apply Manually' in Modal"
+            : "🖱️ Clicking Apply Entry Button",
+          detail: "Advancing past portal entry gate..."
+        });
+        const gateTs = Date.now();
+        authOrSubmitTriggerMs = gateTs;
+        await chrome.scripting
+          .executeScript({
+            target: { tabId, allFrames: true },
+            func: async () => {
+              if (!window.__JOBIFY_ADAPTERS__?.clickApplyEntryButton) return null;
+              return await window.__JOBIFY_ADAPTERS__.clickApplyEntryButton();
+            }
+          })
+          .catch(() => {});
+
+        await sleep(1100);
+        const childTab = findSpawnedChildTab(tabId, gateTs);
+        if (childTab?.id) {
+          tabId = childTab.id;
+          await waitForTabComplete(tabId, 12000);
+        } else {
+          await waitForTabSettle(tabId, 700, 8000);
+        }
+        continue;
       }
 
       // Check B: Email OTP / Security Code Challenge Detected!
@@ -790,26 +1094,60 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         continue;
       }
 
-      // Check C: Standalone Portal Login / Signup Wall (+ Verify Password)
-      if (screen.isStandaloneAuthWall && authAttempts < 3) {
+      // Check B2: Email Verification / Activation Link Banner Detected!
+      if (screen.needsEmailVerificationBanner && !authHistory.verifiedEmailLink) {
+        const activated = await pollAndActivateVerificationLink(state, screen.url);
+        if (activated) {
+          await waitForTabSettle(tabId, 900, 5000);
+          continue;
+        }
+      }
+
+      // Check C: Standalone Portal Auth ("Sign in with email" -> Create Account <-> Sign In -> Post-Signup Sign In!)
+      if (screen.isStandaloneAuthWall && authAttempts < 6) {
         authAttempts++;
         authOrSubmitTriggerMs = Date.now();
         await broadcastAutoApplyProgress(tabId, {
           stage: "portal_auth",
-          stepLabel: "🔐 Portal Login / Create Account",
-          detail: `Using ${state.credentials.portalEmail} (auto-handling Verify Password if needed)...`
+          stepLabel: screen.hasEmailAuthGate
+            ? "🔐 Selecting 'Sign in with Email' & Authenticating"
+            : authHistory.createdAccount
+            ? "🔐 Completing Post-Signup Portal Sign In"
+            : "🔐 Portal Sign In / Create Account",
+          detail: `Using ${state.credentials.portalEmail} (handling Create Account + Sign In + Verify Password)...`
         });
 
-        await chrome.scripting.executeScript({
-          target: { tabId, allFrames: true },
-          func: async (creds) => {
-            if (!window.__JOBIFY_ADAPTERS__?.performAutonomousAuth) return null;
-            return await window.__JOBIFY_ADAPTERS__.performAutonomousAuth(creds);
-          },
-          args: [state.credentials]
-        });
+        const authExec = await chrome.scripting
+          .executeScript({
+            target: { tabId, allFrames: true },
+            func: async (creds, history) => {
+              if (!window.__JOBIFY_ADAPTERS__?.performAutonomousAuth) return null;
+              return await window.__JOBIFY_ADAPTERS__.performAutonomousAuth(creds, history);
+            },
+            args: [state.credentials, authHistory]
+          })
+          .catch(() => []);
 
-        await waitForTabSettle(tabId, 1600, 7500);
+        let needsVerifyLinkNow = false;
+        for (const entry of authExec || []) {
+          const r = entry?.result;
+          if (!r) continue;
+          if (r.createdAccount) authHistory.createdAccount = true;
+          if (r.triedSignIn) authHistory.triedSignIn = true;
+          if (r.needsEmailVerification) needsVerifyLinkNow = true;
+        }
+
+        const childTabAfterAuth = findSpawnedChildTab(tabId, authOrSubmitTriggerMs);
+        if (childTabAfterAuth?.id) {
+          tabId = childTabAfterAuth.id;
+          await waitForTabComplete(tabId, 12000);
+        } else {
+          await waitForTabSettle(tabId, 1500, 7500);
+        }
+
+        if (needsVerifyLinkNow && !authHistory.verifiedEmailLink) {
+          await pollAndActivateVerificationLink(state, screen.url);
+        }
         continue;
       }
 
@@ -888,6 +1226,15 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         const postSubmit = await inspectTabFrames(tabId, jobMeta);
         if (postSubmit.otpChallenge?.detected) {
           // Loop continues so Check B reads & enters Greenhouse/ATS post-submit security code!
+          continue;
+        }
+        if (
+          !postSubmit.isSubmittedConfirmation &&
+          postSubmit.hasSubmitButton &&
+          postSubmit.inventory.emptyRequiredCount > 0 &&
+          !retriedSubmitValidation
+        ) {
+          retriedSubmitValidation = true;
           continue;
         }
 

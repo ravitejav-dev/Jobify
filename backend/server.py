@@ -23,7 +23,14 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("JOBIFY_PORT", "18765"))
-SANDBOX_OTP_STORE = {"otp": None, "subject": "", "from": "", "timestampMs": 0}
+SANDBOX_OTP_STORE = {
+    "otp": None,
+    "verificationUrl": None,
+    "accountVerified": False,
+    "subject": "",
+    "from": "",
+    "timestampMs": 0,
+}
 
 
 def tex_escape(text: str) -> str:
@@ -230,6 +237,28 @@ def extract_otp_from_email_text(subj: str, body_text: str) -> str | None:
     return None
 
 
+def extract_verification_link_from_email(subj: str, body_text: str, raw_html: str = "") -> str | None:
+    combined = f"{subj}\n{body_text}\n{raw_html}".replace("&amp;", "&").replace("&#38;", "&")
+    if not re.search(r"verify|activate|confirm|workday|candidate|account|welcome", combined, re.IGNORECASE):
+        return None
+    href_urls = re.findall(r'href=["\'](https?://[^"\'>\s]+)["\']', raw_html or "", flags=re.IGNORECASE)
+    text_urls = [m.group(0).rstrip(".,;!?") for m in re.finditer(r"https?://[^\s\"'<>)\]]+", f"{subj}\n{body_text}")]
+    for u in href_urls + text_urls:
+        if re.search(
+            r"unsubscribe|privacy|terms|support\.google|linkedin\.com|twitter\.com|facebook\.com|\.(png|jpg|jpeg|gif|svg|css|ico)(\?|$)",
+            u,
+            re.IGNORECASE,
+        ):
+            continue
+        if re.search(
+            r"verify|activate|confirm|validation|token=|myworkdayjobs\.com|myworkdaysite\.com|wd\d+\.myworkday",
+            u,
+            re.IGNORECASE,
+        ):
+            return u
+    return None
+
+
 def fetch_latest_imap_otp(
     email_addr: str, app_password: str, sender_filter: str = "", since_epoch_ms: int = 0
 ) -> dict:
@@ -258,6 +287,7 @@ def fetch_latest_imap_otp(
             continue
         plain_parts = []
         html_parts = []
+        raw_html_parts = []
         if msg.is_multipart():
             for part in msg.walk():
                 ctype = part.get_content_type()
@@ -268,21 +298,35 @@ def fetch_latest_imap_otp(
                 if ctype == "text/plain":
                     plain_parts.append(decoded)
                 elif ctype == "text/html":
+                    raw_html_parts.append(decoded)
                     html_parts.append(re.sub(r"<[^>]+>", " ", decoded))
         else:
             raw_bytes = msg.get_payload(decode=True) or b""
             decoded = raw_bytes.decode("utf-8", errors="ignore")
             if msg.get_content_type() == "text/html":
+                raw_html_parts.append(decoded)
                 html_parts.append(re.sub(r"<[^>]+>", " ", decoded))
             else:
                 plain_parts.append(decoded)
         body_text = "\n".join(plain_parts) if plain_parts else "\n".join(html_parts)
+        raw_html = "\n".join(raw_html_parts)
         otp_val = extract_otp_from_email_text(subj, body_text)
-        if otp_val:
+        verify_url = extract_verification_link_from_email(subj, body_text, raw_html)
+        if otp_val or verify_url:
             mail.logout()
-            return {"otp": otp_val, "subject": subj, "from": frm, "source": "imap"}
+            return {
+                "otp": otp_val,
+                "verificationUrl": verify_url,
+                "subject": subj,
+                "from": frm,
+                "source": "imap",
+            }
     mail.logout()
-    return {"otp": None, "message": "Connected to Gmail INBOX; no matching verification code in recent emails."}
+    return {
+        "otp": None,
+        "verificationUrl": None,
+        "message": "Connected to Gmail INBOX; no matching verification code or link in recent emails.",
+    }
 
 
 GREENHOUSE_HTML = """<!DOCTYPE html>
@@ -763,6 +807,455 @@ AUTO_APPLY_SANDBOX_HTML = """<!DOCTYPE html>
 </html>
 """
 
+WORKDAY_FULL_E2E_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Principal AI Agents &amp; Evaluation Engineer | NVIDIA Workday Careers</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; background: #f3f5f8; color: #1f2937; margin: 0; padding: 0 0 80px; }
+    header { background: #0b132b; color: #fff; padding: 12px 28px; display: flex; align-items: center; justify-content: space-between; }
+    .hdr-right { display: flex; align-items: center; gap: 12px; }
+    .hdr-search { padding: 7px 12px; border-radius: 6px; border: 1px solid #334155; font-size: 13px; }
+    .util-signin { background: transparent; color: #fff; border: 1px solid #64748b; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+    .wrap { max-width: 820px; margin: 28px auto; padding: 0 20px; }
+    .card { background: #fff; border: 1px solid #dbe1e8; border-radius: 12px; padding: 28px; box-shadow: 0 4px 16px rgba(15,23,42,0.05); }
+    .btn-primary { background: #76b900; color: #0f172a; border: none; padding: 11px 22px; border-radius: 8px; font-weight: 700; font-size: 14px; cursor: pointer; text-decoration: none; display: inline-block; }
+    .btn-outline { background: #fff; color: #1e293b; border: 1px solid #cbd5e1; padding: 11px 18px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; display: block; width: 100%; margin: 10px 0; text-align: center; text-decoration: none; box-sizing: border-box; }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,0.55); display: none; align-items: center; justify-content: center; z-index: 9999; }
+    .modal-box { background: #fff; border-radius: 12px; width: 420px; padding: 26px; box-shadow: 0 18px 40px rgba(0,0,0,0.22); }
+    .row { margin-bottom: 15px; }
+    label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; color: #1e293b; }
+    input[type="text"], input[type="email"], input[type="password"], input[type="url"], input[type="tel"], select, textarea {
+      width: 100%; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 7px; font-size: 14px; box-sizing: border-box;
+    }
+    .click-filter-wrap { position: relative; display: inline-block; width: 100%; margin-top: 12px; }
+    .wd-hidden-submit { width: 100%; padding: 11px; background: #0284c7; color: #fff; border: none; border-radius: 8px; font-weight: 700; font-size: 14px; }
+    .wd-click-filter { position: absolute; inset: 0; opacity: 0; cursor: pointer; z-index: 5; }
+    .err-box { display: none; background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+    .verify-banner { display: none; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+    .prompt-menu { border: 1px solid #cbd5e1; border-radius: 7px; margin-top: 4px; background: #fff; display: none; }
+    .prompt-opt { padding: 8px 12px; cursor: pointer; font-size: 13px; }
+    .prompt-opt:hover { background: #f1f5f9; }
+    .chip { display: inline-block; background: #e0f2fe; color: #0369a1; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+    .spin-row { display: flex; gap: 10px; }
+    .spin-row input { width: 90px; text-align: center; }
+  </style>
+</head>
+<body data-automation-id="workdayApplicationRoot">
+  <header role="banner">
+    <div><strong data-automation-id="companyName">NVIDIA</strong> Workday Careers</div>
+    <div class="hdr-right">
+      <input id="keywordSearchInput" class="hdr-search" type="text" placeholder="Search for Jobs" />
+      <button type="button" data-automation-id="utilityButtonSignIn" class="util-signin" id="hdr-signin-trap">Sign In</button>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <!-- STAGE 1: WORKDAY JOB POSTING -->
+    <div id="wd-stage-job" class="card">
+      <div style="font-size:12px; font-weight:700; color:#4d7c0f;">NVIDIA EXTERNAL CAREER SITE</div>
+      <h2 data-automation-id="jobPostingHeader" style="margin:6px 0;">Principal AI Agents &amp; Evaluation Engineer</h2>
+      <div data-automation-id="locations" style="font-size:13px; color:#475569; margin-bottom:14px;">Santa Clara, CA • Hybrid • Base Salary Range: $185,000 - $235,000 USD</div>
+      <div data-automation-id="jobPostingDescription" style="font-size:14px; line-height:1.55; margin-bottom:20px;">
+        NVIDIA is hiring a Principal AI Agents &amp; Evaluation Engineer to build autonomous browser and multi-agent evaluation pipelines,
+        synthetic data sandboxes, distributed telemetry, and LLM tooling. Required skills: Python, TypeScript, React, FastAPI, LangGraph,
+        Docker, Kubernetes, GCP, PyTorch, Playwright, RAG, and CI/CD.
+      </div>
+      <a href="#apply" role="button" data-automation-id="adventureButton" id="wd-adventure-btn" class="btn-primary">Apply</a>
+    </div>
+
+    <!-- ASYNC WORKDAY "START YOUR APPLICATION" MODAL -->
+    <div id="wd-apply-modal" class="modal-backdrop" data-automation-id="wd-popup-frame" role="dialog" aria-label="Start Your Application">
+      <div class="modal-box">
+        <h3 style="margin-top:0;">Start Your Application</h3>
+        <p style="font-size:13px; color:#475569;">Principal AI Agents &amp; Evaluation Engineer</p>
+        <a href="#autofill" role="button" data-automation-id="autofillWithResume" id="wd-opt-autofill" class="btn-outline">Autofill with Resume</a>
+        <a href="#manual" role="button" data-automation-id="applyManually" id="wd-opt-manual" class="btn-outline">Apply Manually</a>
+        <a href="#last" role="button" data-automation-id="useMyLastApplication" id="wd-opt-last" class="btn-outline">Use My Last Application</a>
+        <button type="button" data-automation-id="applyWithLinkedIn" id="wd-opt-linkedin" class="btn-outline">Apply with LinkedIn</button>
+      </div>
+    </div>
+
+    <!-- STAGE 2: WORKDAY SSO GATE ("Sign in with email") -->
+    <div id="wd-stage-sso" class="card" style="display:none;">
+      <h2 style="margin-top:0;">Sign In to Apply</h2>
+      <p style="font-size:13px; color:#475569;">Choose how you would like to sign in to your NVIDIA Candidate Account</p>
+      <button type="button" id="wd-sso-google" class="btn-outline">Sign in with Google</button>
+      <button type="button" id="wd-sso-linkedin" class="btn-outline">Sign in with LinkedIn</button>
+      <button type="button" data-automation-id="SignInWithEmailButton" id="wd-sso-email" class="btn-outline" style="border-color:#0284c7; color:#0284c7;">Sign in with email</button>
+    </div>
+
+    <!-- STAGE 3: WORKDAY signInContent (Sign In <-> Create Account + Read More + opacity:0 Checkbox + opacity:0 click_filter + Email Verify Link) -->
+    <div id="wd-stage-auth" class="card" data-automation-id="signInContent" style="display:none;">
+      <h2 id="wd-auth-heading" style="margin-top:0;">Sign In</h2>
+      <div id="wd-auth-err" data-automation-id="errorMessage" role="alert" class="err-box"></div>
+      <div id="wd-verify-banner" class="verify-banner">
+        Verify your email address — check your email to activate your account before signing in.
+      </div>
+
+      <!-- SIGN IN VIEW -->
+      <div id="wd-signin-view">
+        <div class="row">
+          <label for="wd-si-email">Email Address *</label>
+          <input id="wd-si-email" type="text" autocomplete="email" data-automation-id="email" />
+        </div>
+        <div class="row">
+          <label for="wd-si-pw">Password *</label>
+          <input id="wd-si-pw" type="password" data-automation-id="password" />
+        </div>
+        <div class="click-filter-wrap">
+          <button type="submit" aria-hidden="true" tabindex="-1" data-automation-id="signInSubmitButton" class="wd-hidden-submit">Sign In</button>
+          <div role="button" aria-label="Submit" data-automation-id="click_filter" id="wd-signin-click-filter" class="wd-click-filter"></div>
+        </div>
+        <div style="margin-top:14px; font-size:13px;">
+          Don't have an account yet?
+          <button type="button" data-automation-id="createAccountLink" id="wd-to-create" style="background:none;border:none;color:#0284c7;font-weight:700;cursor:pointer;">Create Account</button>
+        </div>
+      </div>
+
+      <!-- CREATE ACCOUNT VIEW -->
+      <div id="wd-create-view" style="display:none;">
+        <div class="row">
+          <label for="wd-ca-email">Email Address *</label>
+          <input id="wd-ca-email" type="text" autocomplete="email" data-automation-id="email" />
+        </div>
+        <div class="row">
+          <label for="wd-ca-pw">Password *</label>
+          <input id="wd-ca-pw" type="password" data-automation-id="password" />
+        </div>
+        <div class="row">
+          <label for="wd-ca-pw2">Verify New Password *</label>
+          <input id="wd-ca-pw2" type="password" data-automation-id="verifyPassword" />
+        </div>
+        <div class="row" style="background:#f8fafc; padding:10px; border-radius:8px; border:1px solid #e2e8f0; font-size:12px;">
+          <div>Candidate Privacy Notice: By creating an account you consent to processing your application data...</div>
+          <button type="button" data-automation-id="createAccountExpandButton" id="wd-read-more" style="background:none;border:none;color:#0284c7;font-weight:700;padding:4px 0;cursor:pointer;">Read More</button>
+        </div>
+        <div class="row" style="position:relative; display:flex; align-items:center; gap:8px;">
+          <input id="wd-terms-cb" type="checkbox" data-automation-id="createAccountCheckbox" style="opacity:0; position:absolute; width:16px; height:16px;" />
+          <label for="wd-terms-cb" style="margin:0; cursor:pointer; padding-left:22px;">Yes, I have read and consent to the terms and conditions *</label>
+        </div>
+        <div class="click-filter-wrap">
+          <button type="submit" aria-hidden="true" tabindex="-1" data-automation-id="createAccountSubmitButton" class="wd-hidden-submit">Create Account</button>
+          <div role="button" aria-label="Create Account" data-automation-id="click_filter" id="wd-create-click-filter" class="wd-click-filter"></div>
+        </div>
+        <div style="margin-top:14px; font-size:13px;">
+          Already have an account?
+          <button type="button" data-automation-id="signInLink" id="wd-to-signin" style="background:none;border:none;color:#0284c7;font-weight:700;cursor:pointer;">Sign In</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- STAGE 4: WORKDAY WIZARD STEP 1 (My Information) -->
+    <div id="wd-stage-w1" class="card" data-automation-id="applyFlowPage" style="display:none;">
+      <h2 style="margin-top:0;">My Information (Step 1 of 3)</h2>
+      <div class="row" data-automation-id="formField-sourcePrompt">
+        <label for="wd-source-search">How Did You Hear About Us? *</label>
+        <div data-automation-id="multiSelectContainer" id="wd-source-container">
+          <div id="wd-source-chip-holder"></div>
+          <input id="wd-source-search" data-automation-id="searchBox" type="text" placeholder="Search" />
+          <div id="wd-source-menu" class="prompt-menu" role="listbox">
+            <div class="prompt-opt" role="option" data-automation-id="promptOption" data-val="LinkedIn">LinkedIn</div>
+            <div class="prompt-opt" role="option" data-automation-id="promptOption" data-val="Company Website">Company Website</div>
+            <div class="prompt-opt" role="option" data-automation-id="promptOption" data-val="Employee Referral">Employee Referral</div>
+          </div>
+        </div>
+      </div>
+      <div class="row"><label for="legalNameSection_firstName">First Name *</label><input id="legalNameSection_firstName" type="text" required /></div>
+      <div class="row"><label for="legalNameSection_lastName">Last Name *</label><input id="legalNameSection_lastName" type="text" required /></div>
+      <div class="row"><label for="addressSection_addressLine1">Address Line 1 *</label><input id="addressSection_addressLine1" type="text" required /></div>
+      <div class="row"><label for="addressSection_city">City *</label><input id="addressSection_city" type="text" required /></div>
+      <div class="row">
+        <label for="addressSection_countryRegion">State *</label>
+        <select id="addressSection_countryRegion" required>
+          <option value="">Select One</option>
+          <option value="California">California</option>
+          <option value="Massachusetts">Massachusetts</option>
+          <option value="New York">New York</option>
+          <option value="Texas">Texas</option>
+        </select>
+      </div>
+      <div class="row"><label for="addressSection_postalCode">Postal Code *</label><input id="addressSection_postalCode" type="text" required /></div>
+      <div class="row">
+        <label for="phone-device-type">Phone Device Type *</label>
+        <select id="phone-device-type" required>
+          <option value="">Select One</option>
+          <option value="Cellular">Cellular</option>
+          <option value="Landline">Landline</option>
+        </select>
+      </div>
+      <div class="row"><label for="phone-number">Phone Number *</label><input id="phone-number" type="tel" required /></div>
+      <button type="button" data-automation-id="bottom-navigation-next-button" id="wd-w1-next" class="btn-primary">Save and Continue</button>
+    </div>
+
+    <!-- STAGE 5: WORKDAY WIZARD STEP 2 (My Experience & Disclosures) -->
+    <div id="wd-stage-w2" class="card" data-automation-id="applyFlowPage" style="display:none;">
+      <h2 style="margin-top:0;">My Experience &amp; Voluntary Disclosures (Step 2 of 3)</h2>
+      <div class="row"><label for="wd-e2e-resume">Resume / CV (PDF) *</label><input id="wd-e2e-resume" type="file" accept=".pdf" required /></div>
+      <div class="row"><label for="wd-e2e-linkedin">LinkedIn Profile URL *</label><input id="wd-e2e-linkedin" type="url" required /></div>
+      <div class="row">
+        <label for="wd-e2e-auth">Are you legally authorized to work in the United States? *</label>
+        <select id="wd-e2e-auth" required><option value="">Select One</option><option value="Yes">Yes</option><option value="No">No</option></select>
+      </div>
+      <div class="row">
+        <label for="wd-e2e-sponsor">Will you now or in the future require visa sponsorship? *</label>
+        <select id="wd-e2e-sponsor" required><option value="">Select One</option><option value="Yes">Yes</option><option value="No">No</option></select>
+      </div>
+      <div class="row">
+        <label for="wd-e2e-gender">Gender *</label>
+        <select id="wd-e2e-gender" required><option value="">Select One</option><option value="Male">Male</option><option value="Female">Female</option><option value="Decline to Self-Identify">Decline to Self-Identify</option></select>
+      </div>
+      <fieldset class="row" style="border:1px solid #e2e8f0; border-radius:8px; padding:12px;">
+        <legend style="font-size:13px; font-weight:600;">Voluntary Self-Identification of Disability (Form CC-305) *</legend>
+        <div class="row"><label for="selfIdentifiedDisabilityData--name">Name *</label><input id="selfIdentifiedDisabilityData--name" type="text" required /></div>
+        <div class="row"><label for="selfIdentifiedDisabilityData--employeeId">Employee ID (if applicable)</label><input id="selfIdentifiedDisabilityData--employeeId" type="text" /></div>
+        <div class="row">
+          <label for="selfIdentifiedDisabilityData--disabilityStatus">Disability Status *</label>
+          <select id="selfIdentifiedDisabilityData--disabilityStatus" required>
+            <option value="">Select One</option>
+            <option value="Yes, I have a disability, or have had one in the past">Yes, I have a disability, or have had one in the past</option>
+            <option value="No, I do not have a disability and have not had one in the past">No, I do not have a disability and have not had one in the past</option>
+            <option value="I do not want to answer">I do not want to answer</option>
+          </select>
+        </div>
+        <div class="spin-row">
+          <div><label for="selfIdentifiedDisabilityData--dateSignedOn-dateSectionMonth-input">MM</label><input id="selfIdentifiedDisabilityData--dateSignedOn-dateSectionMonth-input" role="spinbutton" type="text" required /></div>
+          <div><label for="selfIdentifiedDisabilityData--dateSignedOn-dateSectionDay-input">DD</label><input id="selfIdentifiedDisabilityData--dateSignedOn-dateSectionDay-input" role="spinbutton" type="text" required /></div>
+          <div><label for="selfIdentifiedDisabilityData--dateSignedOn-dateSectionYear-input">YYYY</label><input id="selfIdentifiedDisabilityData--dateSignedOn-dateSectionYear-input" role="spinbutton" type="text" required /></div>
+        </div>
+      </fieldset>
+      <div class="row">
+        <label for="wd-e2e-optional">Additional Optional Comments (Optional)</label>
+        <textarea id="wd-e2e-optional" rows="2" placeholder="Optional note — leave blank unless needed"></textarea>
+      </div>
+      <button type="button" data-automation-id="bottom-navigation-next-button" id="wd-w2-next" class="btn-primary">Save and Continue</button>
+    </div>
+
+    <!-- STAGE 6: WORKDAY WIZARD STEP 3 (Review & Submit) -->
+    <div id="wd-stage-w3" class="card" data-automation-id="applyFlowPage" style="display:none;">
+      <h2 style="margin-top:0;">Review Your Application (Step 3 of 3)</h2>
+      <p style="font-size:14px; color:#334155;">All required fields have been validated. Click Submit below to complete your NVIDIA application.</p>
+      <button type="button" data-automation-id="bottom-navigation-next-button" id="wd-w3-submit" class="btn-primary">Submit</button>
+    </div>
+
+    <!-- STAGE 7: CONFIRMATION -->
+    <div id="wd-stage-done" class="card" data-automation-id="thankYouMessage" style="display:none; border-color:#22c55e;">
+      <h2 style="color:#15803d; margin-top:0;">Congratulations! Thank you for submitting your application to NVIDIA.</h2>
+      <p>Your candidate profile for Principal AI Agents &amp; Evaluation Engineer has been received.</p>
+    </div>
+  </div>
+
+  <script>
+    window.__WD_E2E_AUDIT__ = {
+      headerSignInTrapClicked: false,
+      usedLinkedInOrLastAppTrap: false,
+      clickedAdventure: false,
+      clickedApplyManually: false,
+      clickedSignInWithEmail: false,
+      triedSignInFirst: false,
+      switchedToCreateAccount: false,
+      readMoreExpanded: false,
+      termsChecked: false,
+      accountCreatedViaClickFilter: false,
+      emailLinkVerified: false,
+      signedInAfterCreateViaClickFilter: false,
+      howDidYouHear: "",
+      step1: null,
+      step2: null,
+      submitted: false
+    };
+
+    let registeredEmail = null;
+    let registeredPw = null;
+
+    document.getElementById("hdr-signin-trap").addEventListener("click", () => {
+      window.__WD_E2E_AUDIT__.headerSignInTrapClicked = true;
+    });
+
+    document.getElementById("wd-adventure-btn").addEventListener("click", (e) => {
+      e.preventDefault();
+      window.__WD_E2E_AUDIT__.clickedAdventure = true;
+      // Realistic async Workday modal mount (850ms)
+      setTimeout(() => {
+        document.getElementById("wd-apply-modal").style.display = "flex";
+      }, 850);
+    });
+
+    for (const trapId of ["wd-opt-autofill", "wd-opt-last", "wd-opt-linkedin"]) {
+      document.getElementById(trapId).addEventListener("click", (e) => {
+        e.preventDefault();
+        window.__WD_E2E_AUDIT__.usedLinkedInOrLastAppTrap = true;
+      });
+    }
+
+    document.getElementById("wd-opt-manual").addEventListener("click", (e) => {
+      e.preventDefault();
+      window.__WD_E2E_AUDIT__.clickedApplyManually = true;
+      document.getElementById("wd-apply-modal").style.display = "none";
+      document.getElementById("wd-stage-job").style.display = "none";
+      document.getElementById("wd-stage-sso").style.display = "block";
+    });
+
+    document.getElementById("wd-sso-email").addEventListener("click", () => {
+      window.__WD_E2E_AUDIT__.clickedSignInWithEmail = true;
+      document.getElementById("wd-stage-sso").style.display = "none";
+      document.getElementById("wd-stage-auth").style.display = "block";
+    });
+
+    document.getElementById("wd-to-create").addEventListener("click", () => {
+      window.__WD_E2E_AUDIT__.switchedToCreateAccount = true;
+      document.getElementById("wd-auth-err").style.display = "none";
+      document.getElementById("wd-auth-heading").textContent = "Create Account";
+      document.getElementById("wd-signin-view").style.display = "none";
+      document.getElementById("wd-create-view").style.display = "block";
+    });
+
+    document.getElementById("wd-to-signin").addEventListener("click", () => {
+      document.getElementById("wd-auth-err").style.display = "none";
+      document.getElementById("wd-auth-heading").textContent = "Sign In";
+      document.getElementById("wd-create-view").style.display = "none";
+      document.getElementById("wd-signin-view").style.display = "block";
+    });
+
+    document.getElementById("wd-read-more").addEventListener("click", () => {
+      window.__WD_E2E_AUDIT__.readMoreExpanded = true;
+      document.getElementById("wd-read-more").textContent = "Show Less";
+    });
+
+    document.getElementById("wd-create-click-filter").addEventListener("click", async () => {
+      const em = document.getElementById("wd-ca-email").value.trim();
+      const pw = document.getElementById("wd-ca-pw").value;
+      const pw2 = document.getElementById("wd-ca-pw2").value;
+      const cb = document.getElementById("wd-terms-cb").checked;
+      const errBox = document.getElementById("wd-auth-err");
+      if (!em || !pw || pw !== pw2 || !cb) {
+        errBox.textContent = "Unable to create account: please fill matching passwords and accept terms.";
+        errBox.style.display = "block";
+        return;
+      }
+      registeredEmail = em.toLowerCase();
+      registeredPw = pw;
+      window.__WD_E2E_AUDIT__.termsChecked = cb;
+      window.__WD_E2E_AUDIT__.accountCreatedViaClickFilter = true;
+
+      // Publish email activation link to sandbox mailbox
+      await fetch("/api/sandbox-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          verificationUrl: "http://127.0.0.1:18765/sandbox/verify-account?token=wd_nvidia_99",
+          accountVerified: false,
+          subject: "Verify your NVIDIA Workday Candidate Account",
+          from: "nvidia@myworkday.com"
+        })
+      });
+
+      // Transition to Step 2: Sign In with email verification banner (exact two-stage Workday flow!)
+      errBox.style.display = "none";
+      document.getElementById("wd-create-view").style.display = "none";
+      document.getElementById("wd-signin-view").style.display = "block";
+      document.getElementById("wd-auth-heading").textContent = "Sign In";
+      document.getElementById("wd-verify-banner").style.display = "block";
+    });
+
+    document.getElementById("wd-signin-click-filter").addEventListener("click", async () => {
+      const em = document.getElementById("wd-si-email").value.trim().toLowerCase();
+      const pw = document.getElementById("wd-si-pw").value;
+      const errBox = document.getElementById("wd-auth-err");
+
+      if (!registeredEmail || em !== registeredEmail || pw !== registeredPw) {
+        window.__WD_E2E_AUDIT__.triedSignInFirst = true;
+        errBox.textContent = "Invalid username or password. Please try again or create an account.";
+        errBox.style.display = "block";
+        return;
+      }
+
+      const st = await fetch("/api/sandbox-otp").then(r => r.json()).catch(() => ({}));
+      if (!st.accountVerified) {
+        errBox.textContent = "Your account has not been verified yet. Please click the link in the email we sent you.";
+        errBox.style.display = "block";
+        return;
+      }
+
+      window.__WD_E2E_AUDIT__.emailLinkVerified = true;
+      window.__WD_E2E_AUDIT__.signedInAfterCreateViaClickFilter = true;
+      errBox.style.display = "none";
+      document.getElementById("wd-stage-auth").style.display = "none";
+      document.getElementById("wd-stage-w1").style.display = "block";
+    });
+
+    // Workday multiSelectContainer searchBox behavior
+    const srcInp = document.getElementById("wd-source-search");
+    const srcMenu = document.getElementById("wd-source-menu");
+    srcInp.addEventListener("focus", () => { srcMenu.style.display = "block"; });
+    srcInp.addEventListener("click", () => { srcMenu.style.display = "block"; });
+    srcInp.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        srcMenu.style.display = "block";
+      }
+    });
+    document.querySelectorAll("#wd-source-menu .prompt-opt").forEach((opt) => {
+      opt.addEventListener("click", () => {
+        const val = opt.dataset.val;
+        window.__WD_E2E_AUDIT__.howDidYouHear = val;
+        document.getElementById("wd-source-chip-holder").innerHTML =
+          `<span class="chip" data-automation-id="selectedItem">${val}</span>`;
+        srcInp.value = "";
+        srcMenu.style.display = "none";
+      });
+    });
+
+    document.getElementById("wd-w1-next").addEventListener("click", () => {
+      window.__WD_E2E_AUDIT__.step1 = {
+        howDidYouHear: window.__WD_E2E_AUDIT__.howDidYouHear,
+        firstName: document.getElementById("legalNameSection_firstName").value,
+        lastName: document.getElementById("legalNameSection_lastName").value,
+        streetAddress: document.getElementById("addressSection_addressLine1").value,
+        city: document.getElementById("addressSection_city").value,
+        state: document.getElementById("addressSection_countryRegion").value,
+        postalCode: document.getElementById("addressSection_postalCode").value,
+        phoneDeviceType: document.getElementById("phone-device-type").value,
+        phone: document.getElementById("phone-number").value
+      };
+      if (!window.__WD_E2E_AUDIT__.step1.firstName || !window.__WD_E2E_AUDIT__.step1.state) return;
+      document.getElementById("wd-stage-w1").style.display = "none";
+      document.getElementById("wd-stage-w2").style.display = "block";
+    });
+
+    document.getElementById("wd-w2-next").addEventListener("click", () => {
+      const rf = document.getElementById("wd-e2e-resume").files[0];
+      window.__WD_E2E_AUDIT__.step2 = {
+        resumeFile: rf ? rf.name : null,
+        resumeBytes: rf ? rf.size : 0,
+        linkedin: document.getElementById("wd-e2e-linkedin").value,
+        workAuth: document.getElementById("wd-e2e-auth").value,
+        sponsorship: document.getElementById("wd-e2e-sponsor").value,
+        gender: document.getElementById("wd-e2e-gender").value,
+        cc305Name: document.getElementById("selfIdentifiedDisabilityData--name").value,
+        cc305EmployeeId: document.getElementById("selfIdentifiedDisabilityData--employeeId").value,
+        cc305Disability: document.getElementById("selfIdentifiedDisabilityData--disabilityStatus").value,
+        signMonth: document.getElementById("selfIdentifiedDisabilityData--dateSignedOn-dateSectionMonth-input").value,
+        signDay: document.getElementById("selfIdentifiedDisabilityData--dateSignedOn-dateSectionDay-input").value,
+        signYear: document.getElementById("selfIdentifiedDisabilityData--dateSignedOn-dateSectionYear-input").value,
+        optionalComments: document.getElementById("wd-e2e-optional").value
+      };
+      if (!rf || !window.__WD_E2E_AUDIT__.step2.workAuth) return;
+      document.getElementById("wd-stage-w2").style.display = "none";
+      document.getElementById("wd-stage-w3").style.display = "block";
+    });
+
+    document.getElementById("wd-w3-submit").addEventListener("click", () => {
+      window.__WD_E2E_AUDIT__.submitted = true;
+      document.getElementById("wd-stage-w3").style.display = "none";
+      document.getElementById("wd-stage-done").style.display = "block";
+    });
+  </script>
+</body>
+</html>
+"""
+
 
 class JobifyHandler(BaseHTTPRequestHandler):
     def _send_cors(self):
@@ -801,9 +1294,22 @@ class JobifyHandler(BaseHTTPRequestHandler):
             return self._send_html(GREENHOUSE_HTML)
         if path == "/sandbox/workday":
             return self._send_html(WORKDAY_HTML)
+        if path == "/sandbox/workday-full-e2e":
+            SANDBOX_OTP_STORE["otp"] = None
+            SANDBOX_OTP_STORE["verificationUrl"] = None
+            SANDBOX_OTP_STORE["accountVerified"] = False
+            return self._send_html(WORKDAY_FULL_E2E_HTML)
+        if path == "/sandbox/verify-account":
+            SANDBOX_OTP_STORE["accountVerified"] = True
+            return self._send_html(
+                "<!DOCTYPE html><html><body><h2>Candidate Account Email Verified!</h2><p>You may return to Workday and sign in.</p></body></html>"
+            )
         if path == "/sandbox/lever":
             return self._send_html(LEVER_HTML)
         if path == "/sandbox/auto-apply":
+            SANDBOX_OTP_STORE["otp"] = None
+            SANDBOX_OTP_STORE["verificationUrl"] = None
+            SANDBOX_OTP_STORE["accountVerified"] = False
             return self._send_html(AUTO_APPLY_SANDBOX_HTML)
         if path == "/api/sandbox-otp":
             return self._send_json(200, {"ok": True, **SANDBOX_OTP_STORE})
@@ -814,6 +1320,7 @@ class JobifyHandler(BaseHTTPRequestHandler):
                 "sandboxes": [
                     f"http://127.0.0.1:{PORT}/sandbox/greenhouse",
                     f"http://127.0.0.1:{PORT}/sandbox/workday",
+                    f"http://127.0.0.1:{PORT}/sandbox/workday-full-e2e",
                     f"http://127.0.0.1:{PORT}/sandbox/lever",
                     f"http://127.0.0.1:{PORT}/sandbox/auto-apply",
                 ],
@@ -841,7 +1348,12 @@ class JobifyHandler(BaseHTTPRequestHandler):
                 return self._send_json(500, {"ok": False, "error": str(exc)})
 
         if self.path == "/api/sandbox-otp":
-            SANDBOX_OTP_STORE["otp"] = body.get("otp")
+            if "otp" in body:
+                SANDBOX_OTP_STORE["otp"] = body.get("otp")
+            if "verificationUrl" in body:
+                SANDBOX_OTP_STORE["verificationUrl"] = body.get("verificationUrl")
+            if "accountVerified" in body:
+                SANDBOX_OTP_STORE["accountVerified"] = bool(body.get("accountVerified"))
             SANDBOX_OTP_STORE["subject"] = body.get("subject", "Sandbox OTP")
             SANDBOX_OTP_STORE["from"] = body.get("from", "no-reply@sandbox.local")
             SANDBOX_OTP_STORE["timestampMs"] = int(time.time() * 1000)
@@ -861,7 +1373,14 @@ class JobifyHandler(BaseHTTPRequestHandler):
 
         if self.path == "/api/gemini-generate":
             api_key = (body.get("apiKey") or "").strip()
-            models = body.get("models") or ["gemini-3-flash-preview", "gemini-2.5-flash"]
+            models = body.get("models") or [
+                "gemini-3.8-flash",
+                "gemini-3.6-flash",
+                "gemini-3.5-flash",
+                "gemini-3.5-flash-lite",
+                "gemini-flash-lite-latest",
+                "gemini-3-flash-preview",
+            ]
             req_body = body.get("requestBody") or {}
             trace = []
             for mdl in models:
@@ -876,7 +1395,7 @@ class JobifyHandler(BaseHTTPRequestHandler):
                     with urllib.request.urlopen(req, timeout=22) as resp:
                         data = json.loads(resp.read().decode("utf-8"))
                         parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-                        txt = "".join(p.get("text", "") for p in parts).strip()
+                        txt = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
                         if txt:
                             return self._send_json(200, {"ok": True, "text": txt, "modelUsed": mdl})
                         trace.append(f"{mdl}: empty")

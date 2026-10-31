@@ -45,6 +45,7 @@ python3 backend/server.py
 Local test sandboxes served on port `18765`:
 - **Greenhouse Sandbox**: `http://127.0.0.1:18765/sandbox/greenhouse`
 - **Workday + Account Signup Sandbox**: `http://127.0.0.1:18765/sandbox/workday`
+- **Workday Full-Flow End-to-End Sandbox (Modal + SSO Gate + 2-Stage Auth + Email Link + 3-Step Wizard)**: `http://127.0.0.1:18765/sandbox/workday-full-e2e`
 - **Lever Sandbox**: `http://127.0.0.1:18765/sandbox/lever`
 - **Full Autonomous Auto-Apply Sandbox (5-Stage E2E)**: `http://127.0.0.1:18765/sandbox/auto-apply`
 
@@ -52,14 +53,14 @@ Local test sandboxes served on port `18765`:
 
 ## ⭐ Implemented Features (Simplify Free + Simplify+ Premium + Full Auto-Apply)
 
-### 🚀 End-to-End Autonomous Full Auto-Apply (`START_FULL_AUTO_APPLY`)
-Click **`🚀 Full Auto-Apply (Tailor → Login → Fill → Submit)`** in either the floating Copilot Drawer or Toolbar Popup on any job posting page:
+### 🚀 End-to-End Autonomous Tailor & Auto-Apply (`START_FULL_AUTO_APPLY`)
+Click **`🚀 Tailor & Apply`** directly on the floating bottom-right pill, **`🚀 Tailor Resume & Auto-Apply End-to-End`** inside `✨ AI Studio` / `🎯 Keywords`, or **`🚀 Tailor Resume & Auto-Apply (End-to-End)`** in the Toolbar Popup on any job posting page:
 1. **Job Detail & JD Salary Extraction**: Extracts role requirements, cover-letter requirements, and posted annual/hourly compensation ranges (dynamically using the JD's salary when stated, or falling back to `$120,000` / `$50/hr`).
-2. **AI Resume + On-Demand Cover Letter Tailoring**: Compiles a tailored single-column ATS `.pdf` resume with Gemini (and automatically generates + compiles a tailored Cover Letter `.pdf` whenever requested by the JD or required by the form).
-3. **Smart `Apply Now` Entry**: Clicks `Apply` / `Apply Now` / Workday `Apply Manually`, seamlessly following same-tab routes, SPA modals, embedded iframes, or newly spawned child tabs.
-4. **Sharp Portal Login / Signup + Verify Password**: Signs in with your Vault email & password, and if no account exists yet, automatically switches to **Create Account**, fills **Password + Verify/Confirm Password**, and checks privacy/terms consent boxes.
-5. **Dual-Engine Email OTP Auto-Reader**: Automatically reads 6–8 digit OTPs and Greenhouse 8-character security codes from your signed-in Chrome Gmail session (zero server required) or Companion IMAP, fills single or 4–8 split OTP boxes, and clicks Verify.
-6. **Clean Needed-Only 1-by-1 Field Filling + Multi-Step Submit**: Inventories all fields on each wizard step first, fills strictly required/relevant fields one by one (leaving optional "Additional Information" fluff boxes untouched), advances through `Next / Save & Continue`, auto-submits, and logs the role as **`Applied`** in the Jobify Tracker.
+2. **AI Resume + On-Demand Cover Letter Tailoring**: Compiles a tailored single-column ATS `.pdf` resume with Gemini (and automatically generates + compiles a tailored Cover Letter `.pdf` whenever requested by the JD or required by the form). A separate **`📄 Tailor & Download PDF Only`** button remains available in `✨ AI Studio` whenever you only want to download a PDF.
+3. **Smart `Apply Now` & Multi-Option Modal Entry**: Clicks `Apply` / `Apply Now` (even on job pages with site-wide search bars), automatically waits for async `"Start Your Application"` modals (such as Workday's `Autofill with Resume` / `Apply Manually` / `Use My Last Application` / `Apply with LinkedIn`), selects **`Apply Manually`**, and follows same-tab routes, SPA modals, embedded iframes, or newly spawned child tabs.
+4. **Multi-Stage Portal Auth (`Sign in with email` + `Create Account` ↔ `Sign In` + `click_filter`)**: Navigates SSO choice gates (`Sign in with email`), email-first two-step logins, Workday's `opacity: 0` `click_filter` submit overlays & `Read More` / `opacity: 0` terms checkboxes, and two-step **Create Account → Email Verification Link → Sign In** flows without touching top-navbar `Sign In` buttons.
+5. **Dual-Engine Email OTP & Verification Link Auto-Reader**: Automatically reads 6–8 digit OTPs, Greenhouse 8-character security codes, and account verification links from your signed-in Chrome Gmail session (zero server required) or Companion IMAP — filling OTP boxes or activating verification links in the background.
+6. **Clean Needed-Only 1-by-1 Field Filling + Multi-Step Submit**: Inventories all fields on each wizard step first, fills strictly required/relevant fields one by one (including Workday `searchBox` multi-selects, `addressSection_countryRegion` state selectors, and spinbutton dates while leaving optional fluff boxes untouched), advances through `Next / Save & Continue`, auto-submits, and logs the role as **`Applied`** in the Jobify Tracker.
 
 ### Core & Simplify+ Features
 - **Universal + Production ATS 1-Click Autofill (`extension/content/ats_adapters.js`)**:
