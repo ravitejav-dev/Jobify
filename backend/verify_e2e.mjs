@@ -99,6 +99,9 @@ async function main() {
   let srv = null;
 
   try {
+    srv = spawn("python3", [path.join(ROOT, "backend/server.py")], { stdio: "pipe" });
+    await sleep(600);
+
     ChromeProc = spawn(
       "/usr/bin/google-chrome",
       [
@@ -211,11 +214,84 @@ async function main() {
     }
     liveGhCdp.close();
 
-    // 2. Greenhouse Sandbox inside real Chrome extension
+    // 2. FULL AUTONOMOUS AUTO-APPLY E2E (Job Page -> Tailor Resume & Cover Letter -> Click Apply Now -> Login Fail -> Switch to Create Account + Verify Password -> 6-Box Email OTP -> Step 1 -> Save & Continue -> Step 2 Clean Needed-Only -> Auto-Submit)
+    const autoCdp = await openTabAndConnect("http://127.0.0.1:18765/sandbox/auto-apply");
+    for (let i = 0; i < 20; i++) {
+      const hasWidget = await autoCdp
+        .eval(`Boolean(document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-pill"))`)
+        .catch(() => false);
+      if (hasWidget) break;
+      await sleep(300);
+    }
+    await autoCdp.eval(`
+      (async () => {
+        const sr = document.getElementById("jobify-copilot-host").shadowRoot;
+        sr.getElementById("jb-pill").click();
+        await new Promise(r => setTimeout(r, 250));
+        sr.getElementById("jb-btn-full-auto").click();
+      })()
+    `);
+
+    let autoAudit = null;
+    for (let waitIdx = 0; waitIdx < 80; waitIdx++) {
+      await sleep(1000);
+      autoAudit = await autoCdp.eval(`window.__AUTO_APPLY_AUDIT__`).catch(() => null);
+      if (autoAudit?.submitted) break;
+    }
+    await sleep(800);
+    const autoStatus = await swCdp.eval(`chrome.storage.local.get("jobify_auto_apply_session").then(r => r.jobify_auto_apply_session)`);
+    console.log("3. ✅ Full Autonomous Auto-Apply E2E Verified (5 Stages):", JSON.stringify({
+      autoStatus,
+      audit: {
+        ...autoAudit,
+        step2: autoAudit?.step2
+          ? {
+              ...autoAudit.step2,
+              requiredEssayPreview: (autoAudit.step2.requiredEssay || "").slice(0, 75) + "...",
+              optionalExtraStayedBlank: autoAudit.step2.optionalExtra === ""
+            }
+          : null
+      }
+    }, null, 2));
+
+    if (
+      !autoAudit?.clickedApplyNow ||
+      !autoAudit?.signInAttempted ||
+      !autoAudit?.switchedToSignup ||
+      !autoAudit?.signupVerifiedMatch ||
+      !autoAudit?.otpVerified ||
+      !autoAudit?.submitted ||
+      autoAudit.step1?.streetAddress !== "39861 Potrero Dr" ||
+      autoAudit.step1?.linkedin !== "https://www.linkedin.com/in/raviteja-velanati/" ||
+      autoAudit.step1?.github !== "https://github.com/ravitejav-dev" ||
+      autoAudit.step1?.portfolio !== "https://3-d-portfolio-999a6bwm3-ravitejav-devs-projects.vercel.app" ||
+      autoAudit.step1?.workAuth !== "Yes" ||
+      autoAudit.step1?.sponsorship !== "Yes" ||
+      autoAudit.step1?.visaStatus !== "H-1B" ||
+      autoAudit.step1?.citizenship !== "India" ||
+      autoAudit.step1?.yoeDecimal !== "3.5" ||
+      autoAudit.step1?.yoeInt !== "3" ||
+      !/(150,?000|165,?000|180,?000)/.test(autoAudit.step1?.desiredSalary || "") ||
+      autoAudit.step1?.resumeFile !== "Raviteja_Velanati_OpenAI_Resume.pdf" ||
+      autoAudit.step1?.resumeBytes < 1000 ||
+      autoAudit.step1?.coverLetterFile !== "Raviteja_Velanati_OpenAI_Cover_Letter.pdf" ||
+      autoAudit.step1?.coverLetterBytes < 1000 ||
+      autoAudit.step2?.govClearance !== "No" ||
+      autoAudit.step2?.gender !== "Male" ||
+      autoAudit.step2?.sexualOrientation !== "Heterosexual / Straight" ||
+      autoAudit.step2?.lgbtq !== "No" ||
+      (autoAudit.step2?.requiredEssay || "").length < 30 ||
+      autoAudit.step2?.optionalExtra !== ""
+    ) {
+      throw new Error("Full Autonomous Auto-Apply E2E assertion failed!");
+    }
+    autoCdp.close();
+
+    // 3. Greenhouse Sandbox inside real Chrome extension
     const ghCdp = await openTabAndConnect(`chrome-extension://${extId}/sandbox/greenhouse.html`);
     const pillMounted = await ghCdp.eval(`Boolean(document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-pill"))`);
     const pillScore = await ghCdp.eval(`document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-pill-score")?.textContent`);
-    console.log(`3. ✅ Greenhouse Sandbox Shadow-DOM Copilot Pill Mounted: ${pillMounted} (${pillScore})`);
+    console.log(`4. ✅ Greenhouse Sandbox Shadow-DOM Copilot Pill Mounted: ${pillMounted} (${pillScore})`);
     if (!pillMounted) throw new Error("Shadow-DOM pill missing on Greenhouse sandbox!");
 
     await ghCdp.eval(`
@@ -342,12 +418,16 @@ async function main() {
     }
     lvCdp.close();
 
-    // 5. Verify Dashboard & Auto-Tracked Application
+    // 5. Verify Dashboard & Auto-Tracked Applications (OpenAI Full Auto-Apply + Anthropic Greenhouse)
     const dashCdp = await openTabAndConnect(`chrome-extension://${extId}/dashboard/dashboard.html`);
     const trackedApps = await dashCdp.eval(`chrome.runtime.sendMessage({ type: "GET_ALL_STATE" }).then(r => r.state.applications)`);
-    console.log(`7. ✅ Dashboard & Auto-Tracker Verified: ${trackedApps.length} application automatically logged (${trackedApps[0]?.company} — ${trackedApps[0]?.status})`);
-    if (trackedApps.length < 1 || trackedApps[0].status !== "Applied") {
-      throw new Error("Auto-tracker failed to log submitted Greenhouse application!");
+    console.log(
+      `7. ✅ Dashboard & Auto-Tracker Verified: ${trackedApps.length} applications automatically logged (${trackedApps
+        .map((a) => `${a.company}:${a.status}`)
+        .join(", ")})`
+    );
+    if (trackedApps.length < 2 || !trackedApps.some((a) => a.company === "OpenAI" && a.status === "Applied")) {
+      throw new Error("Auto-tracker failed to log submitted applications!");
     }
     dashCdp.close();
     swCdp.close();
@@ -364,9 +444,6 @@ async function main() {
       ...DEFAULT_SETTINGS,
       geminiApiKey: localSecrets.geminiApiKey || process.env.GEMINI_API_KEY || DEFAULT_SETTINGS.geminiApiKey
     };
-
-    srv = spawn("python3", [path.join(ROOT, "backend/server.py")], { stdio: "pipe" });
-    await sleep(900);
 
     const jobMeta = {
       company: "Anthropic",

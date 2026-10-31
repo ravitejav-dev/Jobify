@@ -18,6 +18,7 @@
   let analysis = null;
   let latestTailoredRecord = null;
   let latestCoverLetterRecord = null;
+  let autoApplyStatus = null;
   let shadowRoot = null;
   let hostEl = null;
   let drawerOpen = false;
@@ -73,7 +74,10 @@
     pageMeta = adapters.extractJobMetadata(document);
 
     const stateResp = await safeSendMessage({ type: "GET_ALL_STATE" });
-    if (stateResp?.ok) appState = stateResp.state;
+    if (stateResp?.ok) {
+      appState = stateResp.state;
+      if (stateResp.autoApplyStatus) autoApplyStatus = stateResp.autoApplyStatus;
+    }
 
     if (pageMeta.isRelevantPage) {
       const anResp = await safeSendMessage({ type: "ANALYZE_JOB_PAGE", payload: { jobMeta: pageMeta } });
@@ -419,7 +423,35 @@
           border-radius: 8px; padding: 9px 10px; margin-bottom: 7px; color: #e2e8f0;
         }
         .jb-ref-link:hover { border-color: #818cf8; }
+        .jb-btn.auto-hero {
+          background: linear-gradient(135deg, #059669 0%, #0284c7 100%);
+          color: #fff; box-shadow: 0 4px 16px rgba(5, 150, 105, 0.42);
+        }
+        .jb-hud {
+          position: fixed; right: 16px; bottom: 72px; width: 320px;
+          background: rgba(15, 23, 42, 0.96); color: #f8fafc;
+          border: 1px solid #10b981; border-radius: 12px;
+          padding: 10px 12px; box-shadow: 0 14px 34px rgba(2, 6, 23, 0.65);
+          display: none; flex-direction: column; gap: 5px;
+          z-index: 2147483646;
+        }
+        .jb-hud.visible { display: flex; }
+        .jb-hud-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .jb-hud-title { font-size: 12px; font-weight: 800; color: #6ee7b7; }
+        .jb-hud-detail { font-size: 11px; color: #cbd5e1; line-height: 1.35; }
+        .jb-hud-stop {
+          background: #ef4444; color: #fff; border: none; border-radius: 6px;
+          padding: 3px 8px; font-size: 10.5px; font-weight: 700; cursor: pointer; flex-shrink: 0;
+        }
       </style>
+
+      <div class="jb-hud" id="jb-hud">
+        <div class="jb-hud-top">
+          <span class="jb-hud-title" id="jb-hud-title">🚀 Full Auto-Apply Running...</span>
+          <button class="jb-hud-stop" id="jb-hud-stop">⏹ Stop</button>
+        </div>
+        <div class="jb-hud-detail" id="jb-hud-detail">Initializing...</div>
+      </div>
 
       <div class="jb-pill" id="jb-pill" title="Open Jobify Copilot">
         <span class="jb-pill-logo">⚡ Jobify</span>
@@ -459,6 +491,12 @@
       drawerOpen = true;
       renderDrawer();
     });
+    shadowRoot.getElementById("jb-hud-stop").addEventListener("click", async () => {
+      await safeSendMessage({ type: "STOP_FULL_AUTO_APPLY" });
+      if (autoApplyStatus) autoApplyStatus.running = false;
+      renderAutoApplyHud();
+      showToast("⏹ Stopped Full Auto-Apply.", "warn");
+    });
     shadowRoot.getElementById("jb-close-drawer").addEventListener("click", () => {
       drawerOpen = false;
       shadowRoot.getElementById("jb-drawer").classList.remove("open");
@@ -478,7 +516,33 @@
       });
     });
 
+    renderAutoApplyHud();
     renderDrawer();
+  }
+
+  function renderAutoApplyHud() {
+    if (!shadowRoot) return;
+    const hud = shadowRoot.getElementById("jb-hud");
+    const titleEl = shadowRoot.getElementById("jb-hud-title");
+    const detailEl = shadowRoot.getElementById("jb-hud-detail");
+    const stopBtn = shadowRoot.getElementById("jb-hud-stop");
+    if (!hud) return;
+
+    const isRecentDone =
+      autoApplyStatus &&
+      !autoApplyStatus.running &&
+      (autoApplyStatus.completed || autoApplyStatus.error) &&
+      Date.now() - (autoApplyStatus.updatedAt || 0) < 12000;
+
+    if (autoApplyStatus?.running || isRecentDone) {
+      hud.classList.add("visible");
+      titleEl.textContent = autoApplyStatus.stepLabel || "🚀 Full Auto-Apply";
+      detailEl.textContent = autoApplyStatus.detail || "";
+      stopBtn.style.display = autoApplyStatus.running ? "inline-block" : "none";
+      hud.style.borderColor = autoApplyStatus.error ? "#f59e0b" : "#10b981";
+    } else {
+      hud.classList.remove("visible");
+    }
   }
 
   function renderDrawer() {
@@ -487,6 +551,7 @@
     if (pillScore && analysis?.match?.matchScore) {
       pillScore.textContent = `${analysis.match.matchScore}% Match`;
     }
+    renderAutoApplyHud();
     const drawer = shadowRoot.getElementById("jb-drawer");
     if (drawerOpen) {
       drawer.classList.add("open");
@@ -515,6 +580,10 @@
         )
         .join("");
 
+      const jdCompBadge = pageMeta?.compensation?.raw
+        ? `<div style="margin-top:6px;"><span class="jb-chip green">💰 JD Salary Detected: ${escapeHtml(pageMeta.compensation.raw)}</span></div>`
+        : "";
+
       body.innerHTML = `
         <div class="jb-card">
           <div class="jb-job-title">${escapeHtml(pageMeta?.title || document.title)}</div>
@@ -523,12 +592,17 @@
             <span>${escapeHtml(pageMeta?.company || "")}</span>
             ${pageMeta?.location ? `<span>• ${escapeHtml(pageMeta.location)}</span>` : ""}
           </div>
+          ${jdCompBadge}
           ${dealbreakers
             .map((d) => `<div style="margin-top:8px;"><span class="jb-chip red">⚠️ ${escapeHtml(d)}</span></div>`)
             .join("")}
         </div>
 
         <div class="jb-card">
+          <button class="jb-btn auto-hero" id="jb-btn-full-auto" style="margin-bottom:10px;">
+            ${autoApplyStatus?.running ? "⏳ Auto-Apply Running... (Click to Stop)" : "🚀 Full Auto-Apply (Tailor → Login → Fill → Submit)"}
+          </button>
+
           <label class="jb-label">Resume PDF to Auto-Attach</label>
           <select class="jb-select" id="jb-resume-select" style="margin-bottom:10px;">
             ${tailoredOpts}
@@ -559,9 +633,31 @@
 
         <div class="jb-card" style="font-size:11.5px;color:#94a3b8;">
           <strong style="color:#e2e8f0;">Active Portal Account Vault:</strong><br/>
-          ${escapeHtml(creds.portalEmail)} • Auto-Create Login Ready
+          ${escapeHtml(creds.portalEmail)} • Login + Verify Password + Email OTP Ready
         </div>
       `;
+
+      body.querySelector("#jb-btn-full-auto").addEventListener("click", async () => {
+        if (autoApplyStatus?.running) {
+          await safeSendMessage({ type: "STOP_FULL_AUTO_APPLY" });
+          autoApplyStatus.running = false;
+          renderDrawer();
+          showToast("⏹ Stopped Full Auto-Apply.", "warn");
+          return;
+        }
+        drawerOpen = false;
+        renderDrawer();
+        await safeSendMessage({
+          type: "START_FULL_AUTO_APPLY",
+          payload: {
+            options: {
+              autoSubmit: true,
+              tailorResume: true,
+              jobMeta: pageMeta
+            }
+          }
+        });
+      });
 
       body.querySelector("#jb-btn-autofill").addEventListener("click", async (e) => {
         const b = e.currentTarget;
@@ -977,7 +1073,8 @@
     "TOGGLE_COPILOT_DRAWER",
     "TRIGGER_AUTOFILL",
     "TRIGGER_LOCAL_AUTOFILL",
-    "EXECUTE_AUTOPILOT_STEP"
+    "EXECUTE_AUTOPILOT_STEP",
+    "AUTO_APPLY_PROGRESS"
   ]);
 
   // Listen for Popup / Sidepanel / Autopilot commands strictly in top frame so analytics/reCAPTCHA iframes never hijack responses
@@ -986,6 +1083,15 @@
       return false;
     }
     (async () => {
+      if (msg.type === "AUTO_APPLY_PROGRESS") {
+        autoApplyStatus = msg.payload || null;
+        if (!document.getElementById("jobify-copilot-host") && pageMeta?.isRelevantPage) {
+          mountWidget();
+        }
+        renderAutoApplyHud();
+        if (drawerOpen && activeTab === "autofill") renderTabContent();
+        return { ok: true };
+      }
       if (msg.type === "GET_PAGE_CONTEXT") {
         await refreshStateAndAnalyze();
         return { ok: true, pageMeta, analysis };

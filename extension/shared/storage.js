@@ -1,12 +1,13 @@
 // Unified Chrome Storage Manager for Jobify Copilot
 import {
+  PROFILE_SCHEMA_VERSION,
   DEFAULT_PROFILE,
   DEFAULT_SETTINGS,
   DEFAULT_CREDENTIALS_VAULT,
   DEFAULT_SAVED_ANSWERS
 } from "./default_profile.js";
 
-const KEYS = {
+export const STORAGE_KEYS = {
   PROFILE: "jobify_profile",
   SETTINGS: "jobify_settings",
   CREDENTIALS: "jobify_credentials_vault",
@@ -15,8 +16,10 @@ const KEYS = {
   TAILORED_RESUMES: "jobify_tailored_resumes",
   COVER_LETTERS: "jobify_cover_letters",
   AUTOPILOT_QUEUE: "jobify_autopilot_queue",
-  AUTOPILOT_LOGS: "jobify_autopilot_logs"
+  AUTOPILOT_LOGS: "jobify_autopilot_logs",
+  AUTO_APPLY_SESSION: "jobify_auto_apply_session"
 };
+const KEYS = STORAGE_KEYS;
 
 let cachedLocalSecrets = null;
 async function loadOptionalLocalSecrets() {
@@ -50,7 +53,31 @@ export async function ensureInitialized() {
     ...(secrets.gmailAppPassword ? { gmailAppPassword: secrets.gmailAppPassword } : {})
   };
 
-  if (!existing[KEYS.PROFILE]) patch[KEYS.PROFILE] = DEFAULT_PROFILE;
+  if (!existing[KEYS.PROFILE]) {
+    patch[KEYS.PROFILE] = DEFAULT_PROFILE;
+  } else if ((existing[KEYS.PROFILE].profileSchemaVersion || 1) < PROFILE_SCHEMA_VERSION) {
+    const prev = existing[KEYS.PROFILE];
+    const customResumes = (prev.resumes || []).filter((r) => r.customBase64);
+    patch[KEYS.PROFILE] = {
+      ...DEFAULT_PROFILE,
+      ...prev,
+      profileSchemaVersion: PROFILE_SCHEMA_VERSION,
+      personal: {
+        ...prev.personal,
+        ...DEFAULT_PROFILE.personal
+      },
+      workAuthAndEEO: {
+        ...prev.workAuthAndEEO,
+        ...DEFAULT_PROFILE.workAuthAndEEO
+      },
+      preferences: {
+        ...prev.preferences,
+        ...DEFAULT_PROFILE.preferences
+      },
+      resumes: [...customResumes, ...DEFAULT_PROFILE.resumes]
+    };
+  }
+
   if (!existing[KEYS.SETTINGS]) {
     patch[KEYS.SETTINGS] = seededSettings;
   } else if (!existing[KEYS.SETTINGS].geminiApiKey && secrets.geminiApiKey) {
@@ -67,7 +94,13 @@ export async function ensureInitialized() {
     };
   }
 
-  if (!existing[KEYS.SAVED_ANSWERS]) patch[KEYS.SAVED_ANSWERS] = DEFAULT_SAVED_ANSWERS;
+  if (!existing[KEYS.SAVED_ANSWERS]) {
+    patch[KEYS.SAVED_ANSWERS] = DEFAULT_SAVED_ANSWERS;
+  } else if ((existing[KEYS.PROFILE]?.profileSchemaVersion || 1) < PROFILE_SCHEMA_VERSION) {
+    patch[KEYS.SAVED_ANSWERS] = existing[KEYS.SAVED_ANSWERS].map((sa) =>
+      sa.id === "sa_salary" ? DEFAULT_SAVED_ANSWERS.find((d) => d.id === "sa_salary") || sa : sa
+    );
+  }
   if (!existing[KEYS.APPLICATIONS]) patch[KEYS.APPLICATIONS] = [];
   if (!existing[KEYS.TAILORED_RESUMES]) patch[KEYS.TAILORED_RESUMES] = [];
   if (!existing[KEYS.COVER_LETTERS]) patch[KEYS.COVER_LETTERS] = [];

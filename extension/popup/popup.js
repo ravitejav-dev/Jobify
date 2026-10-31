@@ -62,6 +62,34 @@ async function initPopup() {
     document.getElementById("page-score").textContent = "Standby";
   }
 
+  document.getElementById("btn-full-auto")?.addEventListener("click", async (e) => {
+    if (!tab?.id) return;
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    setStatus("🚀 Launching Full Auto-Apply (Tailor → Login → Fill → Submit)...");
+    const resp = await chrome.runtime
+      .sendMessage({
+        type: "START_FULL_AUTO_APPLY",
+        payload: {
+          tabId: tab.id,
+          options: {
+            autoSubmit: true,
+            tailorResume: true,
+            preferredModel: modelSel.value,
+            jobMeta: pageCtx?.pageMeta || null
+          }
+        }
+      })
+      .catch(() => null);
+    btn.disabled = false;
+    if (resp?.ok) {
+      setStatus("🚀 Auto-Apply running! Watch live progress on the job tab.");
+      setTimeout(() => window.close(), 900);
+    } else {
+      setStatus(`⚠️ ${resp?.error || "Open an http/https job tab first."}`);
+    }
+  });
+
   document.getElementById("btn-autofill").addEventListener("click", async (e) => {
     if (!tab?.id) return;
     const btn = e.currentTarget;

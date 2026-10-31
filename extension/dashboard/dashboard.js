@@ -910,14 +910,19 @@ function renderVaultAndProfile(c) {
           <div><label class="field-lbl">Email</label><input class="input" id="pf-email" value="${esc(p.email)}" /></div>
           <div><label class="field-lbl">Phone</label><input class="input" id="pf-phone" value="${esc(p.phone)}" /></div>
         </div>
+        <div class="form-row">
+          <label class="field-lbl">Street Address</label>
+          <input class="input" id="pf-street" value="${esc(p.streetAddress || "")}" placeholder="39861 Potrero Dr" />
+        </div>
         <div class="grid-3 form-row">
           <div><label class="field-lbl">City</label><input class="input" id="pf-city" value="${esc(p.city)}" /></div>
           <div><label class="field-lbl">State</label><input class="input" id="pf-state" value="${esc(p.state)}" /></div>
           <div><label class="field-lbl">Postal Code</label><input class="input" id="pf-zip" value="${esc(p.postalCode)}" /></div>
         </div>
-        <div class="grid-2 form-row">
+        <div class="grid-3 form-row">
           <div><label class="field-lbl">LinkedIn URL</label><input class="input" id="pf-li" value="${esc(p.linkedin)}" /></div>
-          <div><label class="field-lbl">GitHub / Portfolio URL</label><input class="input" id="pf-gh" value="${esc(p.github)}" /></div>
+          <div><label class="field-lbl">GitHub URL</label><input class="input" id="pf-gh" value="${esc(p.github)}" /></div>
+          <div><label class="field-lbl">Portfolio Website</label><input class="input" id="pf-port" value="${esc(p.portfolio || "")}" /></div>
         </div>
         <div class="grid-3 form-row">
           <div>
@@ -935,8 +940,22 @@ function renderVaultAndProfile(c) {
             </select>
           </div>
           <div>
+            <label class="field-lbl">Current US Visa Status</label>
+            <input class="input" id="pf-visa" value="${esc(eeo.visaStatus || "H-1B")}" />
+          </div>
+        </div>
+        <div class="grid-3 form-row">
+          <div>
+            <label class="field-lbl">Citizenship</label>
+            <input class="input" id="pf-cit" value="${esc(eeo.citizenship || "India")}" />
+          </div>
+          <div>
+            <label class="field-lbl">Default Target Salary ($)</label>
+            <input class="input" type="number" id="pf-target-sal" value="${esc(eeo.desiredSalaryTarget || 120000)}" />
+          </div>
+          <div>
             <label class="field-lbl">Min Salary Dealbreaker ($)</label>
-            <input class="input" type="number" id="pf-sal" value="${esc(STATE.profile.preferences?.minSalary || 145000)}" />
+            <input class="input" type="number" id="pf-sal" value="${esc(STATE.profile.preferences?.minSalary || 115000)}" />
           </div>
         </div>
         <button class="btn primary" id="pf-save-btn">💾 Save Profile & Preferences</button>
@@ -954,7 +973,7 @@ function renderVaultAndProfile(c) {
             <input class="input" type="text" id="vc-pass" value="${esc(creds.portalPassword)}" />
           </div>
           <div>
-            <label class="field-lbl">Gmail App Password (IMAP OTP)</label>
+            <label class="field-lbl">Gmail App Password (Optional — Chrome Gmail OTP Also Active)</label>
             <input class="input" type="text" id="vc-app-pass" value="${esc(creds.gmailAppPassword)}" />
           </div>
         </div>
@@ -977,7 +996,7 @@ function renderVaultAndProfile(c) {
         </div>
         <div style="display:flex;gap:10px;">
           <button class="btn primary" id="vc-save-btn">💾 Save Vault & API Settings</button>
-          <button class="btn secondary" id="vc-test-imap">📨 Test IMAP OTP Fetch</button>
+          <button class="btn secondary" id="vc-test-imap">📨 Test Gmail OTP Reader</button>
         </div>
       </div>
     </div>
@@ -1014,14 +1033,19 @@ function renderVaultAndProfile(c) {
     next.personal.fullName = `${next.personal.firstName} ${next.personal.lastName}`.trim();
     next.personal.email = c.querySelector("#pf-email").value.trim();
     next.personal.phone = c.querySelector("#pf-phone").value.trim();
+    next.personal.streetAddress = c.querySelector("#pf-street").value.trim();
     next.personal.city = c.querySelector("#pf-city").value.trim();
     next.personal.state = c.querySelector("#pf-state").value.trim();
     next.personal.postalCode = c.querySelector("#pf-zip").value.trim();
     next.personal.linkedin = c.querySelector("#pf-li").value.trim();
     next.personal.github = c.querySelector("#pf-gh").value.trim();
+    next.personal.portfolio = c.querySelector("#pf-port").value.trim();
     next.workAuthAndEEO.authorizedUS = c.querySelector("#pf-auth").value;
     next.workAuthAndEEO.requireSponsorship = c.querySelector("#pf-spons").value;
-    next.preferences.minSalary = Number(c.querySelector("#pf-sal").value || 145000);
+    next.workAuthAndEEO.visaStatus = c.querySelector("#pf-visa").value.trim() || "H-1B";
+    next.workAuthAndEEO.citizenship = c.querySelector("#pf-cit").value.trim() || "India";
+    next.workAuthAndEEO.desiredSalaryTarget = Number(c.querySelector("#pf-target-sal").value || 120000);
+    next.preferences.minSalary = Number(c.querySelector("#pf-sal").value || 115000);
 
     await chrome.runtime.sendMessage({ type: "UPDATE_PROFILE", payload: { profile: next } });
     await reloadState();

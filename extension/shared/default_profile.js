@@ -1,7 +1,9 @@
 // Jobify Pre-Analyzed Candidate Profile & Vault (Extracted from Raviteja Velanati's Master & 1-Page Resumes)
 
+export const PROFILE_SCHEMA_VERSION = 2;
+
 export const DEFAULT_SETTINGS = {
-  geminiApiKey: "", // Loaded from gitignored shared/local_secrets.js or entered once in Jobify Vault UI
+  geminiApiKey: "", // Loaded from gitignored shared/local_secrets.json or entered once in Jobify Vault UI
   primaryModel: "gemini-3.8-flash",
   proModel: "gemini-3.1-pro-preview",
   enableSmartFallback: true,
@@ -17,17 +19,18 @@ export const DEFAULT_SETTINGS = {
   autoSaveSubmittedJobs: true,
   autoAttachResumePdf: true,
   defaultResumeVariant: "one_page", // "one_page" | "master"
-  autopilotMode: "safe_review" // "safe_review" (pause before final submit) | "full_auto" (auto-submit supported forms)
+  autopilotMode: "full_auto" // "full_auto" (autonomous tailor -> apply -> fill -> submit) | "safe_review" (pause before final submit)
 };
 
 export const DEFAULT_CREDENTIALS_VAULT = {
   portalEmail: "ravitejavelanati11@gmail.com",
-  portalPassword: "", // Loaded from gitignored shared/local_secrets.js or entered once in Jobify Vault UI
+  portalPassword: "", // Loaded from gitignored shared/local_secrets.json or entered once in Jobify Vault UI
   gmailAppPassword: "",
   autoFillPortalSignups: true
 };
 
 export const DEFAULT_PROFILE = {
+  profileSchemaVersion: PROFILE_SCHEMA_VERSION,
   personal: {
     firstName: "Raviteja",
     middleName: "",
@@ -39,20 +42,22 @@ export const DEFAULT_PROFILE = {
     phone: "(774) 810-8481",
     phoneDigits: "7748108481",
     phoneCountryCode: "+1",
-    streetAddress: "",
+    streetAddress: "39861 Potrero Dr",
     city: "Newark",
     state: "California",
     stateCode: "CA",
     postalCode: "94560",
     country: "United States",
     locationDisplay: "Newark, California, United States",
-    linkedin: "https://www.linkedin.com/in/ravitejavelanati",
-    linkedinAlt: "https://www.linkedin.com/in/raviteja-velanati",
-    github: "https://github.com/ravitejavelanati",
-    portfolio: "",
+    linkedin: "https://www.linkedin.com/in/raviteja-velanati/",
+    linkedinAlt: "https://www.linkedin.com/in/ravitejavelanati",
+    github: "https://github.com/ravitejav-dev",
+    portfolio: "https://3-d-portfolio-999a6bwm3-ravitejav-devs-projects.vercel.app",
     currentCompany: "GlobalLogic (Client: Google AI)",
     currentTitle: "Senior AI Solutions Engineer – Responsible AI & Novel AI Testing",
-    yearsOfExperience: "3",
+    yearsOfExperience: "3.5",
+    yearsOfExperienceInt: "3",
+    yearsOfExperienceRange: "3-4 years",
     totalYearsNumeric: 3.5,
     highestDegree: "Master's Degree",
     headline: "AI/ML Platform & GenAI Engineer | LLM Evaluation, Agentic AI Infrastructure & Full-Stack Systems"
@@ -61,20 +66,35 @@ export const DEFAULT_PROFILE = {
   workAuthAndEEO: {
     authorizedUS: "Yes",
     requireSponsorship: "Yes",
-    visaStatus: "F-1 STEM OPT",
+    visaStatus: "H-1B",
+    citizenship: "India",
     willingToRelocate: "Yes",
     workArrangement: "Hybrid / Remote / On-site",
     earliestStartDate: "2 weeks notice",
     noticePeriodWeeks: "2",
-    desiredSalaryMin: 155000,
-    desiredSalaryTarget: 180000,
-    desiredSalaryDisplay: "$160,000 - $195,000",
+    useJdSalaryWhenAvailable: true,
+    desiredSalaryMin: 120000,
+    desiredSalaryMax: 140000,
+    desiredSalaryTarget: 120000,
+    desiredSalaryRangeNumeric: "120000-140000",
+    desiredSalaryDisplay: "$120,000 - $140,000",
+    desiredHourlyMin: 50,
+    desiredHourlyMax: 60,
+    desiredHourlyTarget: 50,
+    desiredHourlyDisplay: "$50/hr",
+    desiredHourlyRangeDisplay: "$50/hr - $60/hr",
+    governmentOrClearance: "No",
+    securityClearance: "No",
+    relativesAtCompany: "No",
     gender: "Male",
     hispanicOrLatino: "No",
     raceEthnicity: "Asian",
+    sexualOrientation: "Straight",
+    lgbtq: "No",
+    transgender: "No",
     veteranStatus: "I am not a protected veteran",
     disabilityStatus: "No, I do not have a disability and have not had one in the past",
-    howDidYouHear: "Company Career Site / LinkedIn",
+    howDidYouHear: "LinkedIn",
     previouslyEmployedAtCompany: "No",
     over18: "Yes",
     backgroundCheckConsent: "Yes"
@@ -107,7 +127,7 @@ export const DEFAULT_PROFILE = {
       "Seattle",
       "New York"
     ],
-    minSalary: 145000,
+    minSalary: 115000,
     dealbreakerExcludeKeywords: [
       "US Citizens Only",
       "Active Top Secret Clearance",
@@ -347,7 +367,7 @@ export const DEFAULT_SAVED_ANSWERS = [
     id: "sa_salary",
     questionPattern: "salary|compensation|pay expectation|total comp",
     questionLabel: "What are your salary / compensation expectations?",
-    answer: "$160,000 - $195,000 base salary depending on total compensation, equity, and location, though I am flexible for the right AI/Platform engineering opportunity.",
+    answer: "$120,000 - $140,000",
     tags: ["compensation"]
   },
   {

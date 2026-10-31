@@ -8,6 +8,7 @@ Provides:
 
 import base64
 import email
+import email.utils
 import imaplib
 import json
 import os
@@ -15,9 +16,14 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("JOBIFY_PORT", "18765"))
+SANDBOX_OTP_STORE = {"otp": None, "subject": "", "from": "", "timestampMs": 0}
 
 
 def tex_escape(text: str) -> str:
@@ -55,7 +61,8 @@ def build_resume_latex(tailored: dict, profile: dict) -> str:
     city_state = tex_escape(f"{p.get('city', 'Newark')}, {p.get('stateCode', 'CA')}")
     mail = tex_escape(p.get("email", "ravitejavelanati11@gmail.com"))
     phone = tex_escape(p.get("phone", "(774) 810-8481"))
-    li = tex_escape(re.sub(r"^https?://(www\.)?", "", p.get("linkedin", "linkedin.com/in/ravitejavelanati")))
+    li = tex_escape(re.sub(r"^https?://(www\.)?", "", p.get("linkedin", "linkedin.com/in/raviteja-velanati")).rstrip("/"))
+    gh = tex_escape(re.sub(r"^https?://(www\.)?", "", p.get("github", "github.com/ravitejav-dev")).rstrip("/"))
     summary = tex_escape(tailored.get("summary") or profile.get("summaryShort") or profile.get("summary", ""))
 
     skills_cats = tailored.get("skillsCategories") or profile.get("skillsCategories") or {}
@@ -118,7 +125,7 @@ def build_resume_latex(tailored: dict, profile: dict) -> str:
 \begin{{document}}
 \begin{{center}}
   {{\LARGE \textbf{{{name}}}}} \\[2pt]
-  \small {city_state} $|$ {mail} $|$ {phone} $|$ {li}
+  \small {city_state} $|$ {mail} $|$ {phone} $|$ {li} $|$ {gh}
 \end{{center}}
 \vspace{{-4pt}}
 
@@ -192,34 +199,90 @@ def compile_latex_to_base64(tex_source: str) -> str:
             return base64.b64encode(pf.read()).decode("ascii")
 
 
-def fetch_latest_imap_otp(email_addr: str, app_password: str, sender_filter: str = "") -> dict:
+def extract_otp_from_email_text(subj: str, body_text: str) -> str | None:
+    combined = f"{subj}\n{body_text}"
+    # 1. Greenhouse 8-char alphanumeric security code ("paste this code into the security code field: Ab3x9K2m")
+    gh_match = re.search(
+        r"(?:security\s*code|verification\s*code|paste\s*this\s*code[^:]*:|passcode\s*(?:is|:))\s*([A-Za-z0-9]{6,8})\b",
+        combined,
+        re.IGNORECASE,
+    )
+    if gh_match:
+        cand = gh_match.group(1)
+        if re.search(r"\d", cand) and cand not in {"94560"}:
+            return cand
+
+    # 2. Contextual 6-8 digit numeric code near verification keywords
+    ctx_num = re.search(
+        r"(?:code|otp|passcode|verify|verification|pin)[^0-9]{0,40}\b(\d{6,8})\b",
+        combined,
+        re.IGNORECASE,
+    )
+    if ctx_num:
+        return ctx_num.group(1)
+
+    # 3. Any standalone 6-digit code in verification-themed emails
+    if re.search(r"verify|verification|security\s*code|passcode|one-time|otp|confirm\s*your\s*email", combined, re.IGNORECASE):
+        for m in re.finditer(r"\b(\d{6})\b", combined):
+            val = m.group(1)
+            if val not in {"120000", "140000", "115000", "150000", "180000", "000000"}:
+                return val
+    return None
+
+
+def fetch_latest_imap_otp(
+    email_addr: str, app_password: str, sender_filter: str = "", since_epoch_ms: int = 0
+) -> dict:
     clean_pw = (app_password or "").replace(" ", "")
     mail = imaplib.IMAP4_SSL("imap.gmail.com", timeout=12)
     mail.login(email_addr, clean_pw)
     mail.select("INBOX", readonly=True)
     _, data = mail.search(None, "ALL")
-    ids = data[0].split()[-15:]
+    ids = data[0].split()[-18:]
     ids.reverse()
+    min_epoch_sec = (since_epoch_ms / 1000.0) - 120 if since_epoch_ms > 0 else 0
     for mid in ids:
         _, msg_data = mail.fetch(mid, "(RFC822)")
         msg = email.message_from_bytes(msg_data[0][1])
         frm = msg.get("From", "")
         subj = msg.get("Subject", "")
+        date_hdr = msg.get("Date", "")
+        if min_epoch_sec > 0 and date_hdr:
+            try:
+                dt = email.utils.parsedate_to_datetime(date_hdr)
+                if dt and dt.timestamp() < min_epoch_sec:
+                    continue
+            except Exception:
+                pass
         if sender_filter and sender_filter.lower() not in (frm + " " + subj).lower():
             continue
-        body_text = ""
+        plain_parts = []
+        html_parts = []
         if msg.is_multipart():
             for part in msg.walk():
-                if part.get_content_type() == "text/plain":
-                    body_text += part.get_payload(decode=True).decode("utf-8", errors="ignore")
+                ctype = part.get_content_type()
+                payload_bytes = part.get_payload(decode=True)
+                if not payload_bytes:
+                    continue
+                decoded = payload_bytes.decode("utf-8", errors="ignore")
+                if ctype == "text/plain":
+                    plain_parts.append(decoded)
+                elif ctype == "text/html":
+                    html_parts.append(re.sub(r"<[^>]+>", " ", decoded))
         else:
-            body_text = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
-        otp_match = re.search(r"\b(\d{6})\b", subj + " " + body_text)
-        if otp_match:
+            raw_bytes = msg.get_payload(decode=True) or b""
+            decoded = raw_bytes.decode("utf-8", errors="ignore")
+            if msg.get_content_type() == "text/html":
+                html_parts.append(re.sub(r"<[^>]+>", " ", decoded))
+            else:
+                plain_parts.append(decoded)
+        body_text = "\n".join(plain_parts) if plain_parts else "\n".join(html_parts)
+        otp_val = extract_otp_from_email_text(subj, body_text)
+        if otp_val:
             mail.logout()
-            return {"otp": otp_match.group(1), "subject": subj, "from": frm}
+            return {"otp": otp_val, "subject": subj, "from": frm, "source": "imap"}
     mail.logout()
-    return {"otp": None, "message": "Connected to Gmail INBOX; no 6-digit code in last 15 emails."}
+    return {"otp": None, "message": "Connected to Gmail INBOX; no matching verification code in recent emails."}
 
 
 GREENHOUSE_HTML = """<!DOCTYPE html>
@@ -439,6 +502,268 @@ LEVER_HTML = """<!DOCTYPE html>
 """
 
 
+AUTO_APPLY_SANDBOX_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI Evaluation &amp; Autonomous Agents Engineer - OpenAI | Career Portal</title>
+  <style>
+    body { font-family: Inter, system-ui, sans-serif; max-width: 840px; margin: 32px auto; padding: 0 20px; background: #f8fafc; color: #0f172a; }
+    .card { background: #fff; border: 1px solid #cbd5e1; border-radius: 12px; padding: 26px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(15,23,42,0.05); }
+    .field { margin-bottom: 14px; }
+    label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 5px; }
+    input[type="text"], input[type="email"], input[type="password"], input[type="tel"], input[type="url"], input[type="number"], select, textarea {
+      width: 100%; box-sizing: border-box; padding: 9px 11px; border: 1px solid #94a3b8; border-radius: 7px; font-size: 14px;
+    }
+    textarea { min-height: 90px; }
+    .btn { background: #4f46e5; color: #fff; border: none; padding: 11px 22px; border-radius: 8px; font-weight: 700; font-size: 14px; cursor: pointer; }
+    .btn.secondary { background: #e2e8f0; color: #1e293b; margin-left: 8px; }
+    .otp-row { display: flex; gap: 10px; margin: 14px 0; }
+    .otp-box { width: 46px !important; height: 50px; text-align: center; font-size: 20px; font-weight: 700; }
+    .err-box { display: none; background: #fee2e2; border: 1px solid #ef4444; color: #991b1b; padding: 10px 12px; border-radius: 7px; margin-bottom: 12px; font-size: 13px; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="card" id="job-header-card">
+    <div data-company-name="OpenAI" style="font-weight:700;color:#4f46e5;">OpenAI</div>
+    <h1 class="app-title" data-jobify-title>AI Evaluation &amp; Autonomous Agents Engineer</h1>
+    <div class="location" data-jobify-location>San Francisco, CA • Hybrid</div>
+    <div id="content" data-jobify-jd style="margin-top:12px;line-height:1.55;color:#334155;">
+      <p>We are hiring an AI Evaluation &amp; Autonomous Agents Engineer to build end-to-end browser-agent benchmarks, synthetic user state evaluation pipelines, adversarial red-teaming suites, and real-time OpenTelemetry reliability dashboards.</p>
+      <p><strong>Tech Stack:</strong> Python, TypeScript, React, LangGraph, Playwright, Docker, Kubernetes, GCP, BigQuery, PyTorch, RAG, and Vector Databases.</p>
+      <p><strong>Compensation:</strong> Base salary range for this role is $150,000 - $180,000 USD annually plus equity.</p>
+      <p><strong>Application Note:</strong> Please attach a tailored cover letter describing your evaluation platform work along with your resume.</p>
+    </div>
+    <div id="stage-posting" style="margin-top:18px;">
+      <button type="button" class="btn" id="btn-apply-now" data-jobify-apply-btn="true">Apply Now</button>
+    </div>
+  </div>
+
+  <!-- Stage 2: Login -> Auto-Switch to Create Account + Verify Password -->
+  <div class="card" id="stage-auth" style="display:none;" data-jobify-auth-step-only="true">
+    <div id="signin-pane">
+      <h2>Candidate Portal Sign In</h2>
+      <div id="auth-err" class="err-box" role="alert">Account not found for this email address. Please create an account.</div>
+      <div class="field"><label for="si_email">Email Address *</label><input id="si_email" type="email" autocomplete="username" /></div>
+      <div class="field"><label for="si_pw">Password *</label><input id="si_pw" type="password" autocomplete="current-password" /></div>
+      <button type="button" class="btn" id="btn-signin">Sign In</button>
+      <button type="button" class="btn secondary" id="btn-switch-signup" data-jobify-switch-signup="true">Create Account</button>
+    </div>
+
+    <div id="signup-pane" style="display:none;">
+      <h2>Create Candidate Account</h2>
+      <div id="signup-err" class="err-box" role="alert"></div>
+      <div class="field"><label for="su_email">Email Address *</label><input id="su_email" type="email" autocomplete="email" /></div>
+      <div class="field"><label for="su_pw">Password *</label><input id="su_pw" name="password" type="password" autocomplete="new-password" /></div>
+      <div class="field"><label for="su_pw2">Verify Password *</label><input id="su_pw2" name="verifyPassword" data-automation-id="verifyPassword" type="password" autocomplete="new-password" /></div>
+      <div class="field">
+        <label><input type="checkbox" id="su_terms" name="terms_consent" data-jobify-auth-consent="true" /> I agree to the Candidate Privacy Terms and Account Creation</label>
+      </div>
+      <button type="button" class="btn" id="btn-create-submit" data-jobify-auth-submit="true">Create Account</button>
+    </div>
+  </div>
+
+  <!-- Stage 3: 6-Digit Email OTP Challenge -->
+  <div class="card" id="stage-otp" style="display:none;">
+    <h2>Verify Your Email Address</h2>
+    <p style="font-size:13.5px;color:#475569;">We sent a 6-digit verification code to <strong>ravitejavelanati11@gmail.com</strong>. Enter the code below to continue.</p>
+    <div id="otp-err" class="err-box" role="alert">Invalid verification code.</div>
+    <div class="otp-row">
+      <input type="text" maxlength="1" class="otp-box" data-otp-idx="0" />
+      <input type="text" maxlength="1" class="otp-box" data-otp-idx="1" />
+      <input type="text" maxlength="1" class="otp-box" data-otp-idx="2" />
+      <input type="text" maxlength="1" class="otp-box" data-otp-idx="3" />
+      <input type="text" maxlength="1" class="otp-box" data-otp-idx="4" />
+      <input type="text" maxlength="1" class="otp-box" data-otp-idx="5" />
+    </div>
+    <button type="button" class="btn" id="btn-verify-otp" data-jobify-otp-submit="true">Verify Code</button>
+  </div>
+
+  <!-- Stage 4: Multi-Step Application Wizard (Step 1 of 2) -->
+  <form id="stage-step1" class="card" style="display:none;">
+    <h2>Application — Step 1 of 2: Candidate Information &amp; Documents</h2>
+    <div class="field"><label for="s1_fn">First Name *</label><input id="s1_fn" name="first_name" type="text" required /></div>
+    <div class="field"><label for="s1_ln">Last Name *</label><input id="s1_ln" name="last_name" type="text" required /></div>
+    <div class="field"><label for="s1_em">Email *</label><input id="s1_em" name="email" type="email" required /></div>
+    <div class="field"><label for="s1_ph">Phone Number *</label><input id="s1_ph" name="phone" type="tel" required /></div>
+    <div class="field"><label for="s1_st">Street Address *</label><input id="s1_st" name="street_address" type="text" required /></div>
+    <div class="field"><label for="s1_ct">City *</label><input id="s1_ct" name="city" type="text" required /></div>
+    <div class="field"><label for="s1_state">State *</label><input id="s1_state" name="state" type="text" required /></div>
+    <div class="field"><label for="s1_zip">Zip / Postal Code *</label><input id="s1_zip" name="postal_code" type="text" required /></div>
+    <div class="field"><label for="s1_li">LinkedIn Profile *</label><input id="s1_li" name="linkedin" type="url" required /></div>
+    <div class="field"><label for="s1_gh">GitHub URL *</label><input id="s1_gh" name="github" type="url" required /></div>
+    <div class="field"><label for="s1_pf">Portfolio Website *</label><input id="s1_pf" name="portfolio" type="url" required /></div>
+    <div class="field">
+      <label for="s1_wa">Are you legally authorized to work in the United States? *</label>
+      <select id="s1_wa" required><option value="">Select...</option><option value="Yes">Yes</option><option value="No">No</option></select>
+    </div>
+    <div class="field">
+      <label for="s1_sp">Will you now or in the future require visa sponsorship? *</label>
+      <select id="s1_sp" required><option value="">Select...</option><option value="Yes">Yes</option><option value="No">No</option></select>
+    </div>
+    <div class="field">
+      <label for="s1_visa">Current U.S. Visa / Immigration Status *</label>
+      <select id="s1_visa" required><option value="">Select...</option><option value="U.S. Citizen">U.S. Citizen</option><option value="H-1B">H-1B</option><option value="F-1 OPT">F-1 OPT</option></select>
+    </div>
+    <div class="field"><label for="s1_cit">Country of Citizenship *</label><input id="s1_cit" name="citizenship" type="text" required /></div>
+    <div class="field"><label for="s1_yoe_dec">Years of Professional Software &amp; AI Experience *</label><input id="s1_yoe_dec" type="number" step="0.5" required /></div>
+    <div class="field"><label for="s1_yoe_int">Completed Full Years of Experience (Whole Number) *</label><input id="s1_yoe_int" type="number" step="1" required /></div>
+    <div class="field"><label for="s1_sal">Desired Annual Base Salary *</label><input id="s1_sal" name="desired_salary" type="text" required /></div>
+    <div class="field"><label for="s1_res">Resume / CV (PDF) *</label><input id="s1_res" name="resume" type="file" accept=".pdf" required /></div>
+    <div class="field"><label for="s1_cl">Cover Letter (PDF) *</label><input id="s1_cl" name="cover_letter" type="file" accept=".pdf" required /></div>
+    <button type="button" class="btn" id="btn-step1-next" data-jobify-next="true">Save &amp; Continue</button>
+  </form>
+
+  <!-- Stage 5: Multi-Step Application Wizard (Step 2 of 2) -->
+  <form id="stage-step2" class="card" style="display:none;">
+    <h2>Application — Step 2 of 2: Compliance, EEO &amp; Role Questions</h2>
+    <div class="field">
+      <label for="s2_gov">Have you previously worked for the U.S. Government or hold an active security clearance? *</label>
+      <select id="s2_gov" required><option value="">Select...</option><option value="Yes">Yes</option><option value="No">No</option></select>
+    </div>
+    <div class="field">
+      <label for="s2_gen">Gender *</label>
+      <select id="s2_gen" required><option value="">Select...</option><option value="Male">Male</option><option value="Female">Female</option><option value="Decline to self-identify">Decline to self-identify</option></select>
+    </div>
+    <div class="field">
+      <label for="s2_so">Sexual Orientation *</label>
+      <select id="s2_so" required><option value="">Select...</option><option value="Heterosexual / Straight">Heterosexual / Straight</option><option value="Gay or Lesbian">Gay or Lesbian</option><option value="Bisexual">Bisexual</option><option value="Prefer not to say">Prefer not to say</option></select>
+    </div>
+    <div class="field">
+      <label for="s2_lgbtq">Do you identify as LGBTQ+? *</label>
+      <select id="s2_lgbtq" required><option value="">Select...</option><option value="Yes">Yes</option><option value="No">No</option><option value="Prefer not to say">Prefer not to say</option></select>
+    </div>
+    <div class="field">
+      <label for="s2_essay">Describe how you build reliable LLM evaluation and synthetic testing pipelines. *</label>
+      <textarea id="s2_essay" required></textarea>
+    </div>
+    <div class="field">
+      <label for="s2_opt_extra">Additional information or anything else you would like us to know (Optional)</label>
+      <textarea id="s2_opt_extra"></textarea>
+    </div>
+    <button type="submit" class="btn" id="btn-final-submit" data-jobify-submit="true">Submit Application</button>
+  </form>
+
+  <div class="card" id="submit-banner" style="display:none;background:#dcfce7;border-color:#22c55e;color:#14532d;" data-jobify-submitted="true">
+    <h2>Thank you for applying to OpenAI!</h2>
+    <p>Your application has been submitted and confirmed.</p>
+  </div>
+
+  <script>
+    window.__AUTO_APPLY_AUDIT__ = {
+      clickedApplyNow: false,
+      signInAttempted: false,
+      switchedToSignup: false,
+      signupVerifiedMatch: false,
+      otpVerified: false,
+      step1: null,
+      step2: null,
+      submitted: false
+    };
+
+    document.getElementById("btn-apply-now").addEventListener("click", () => {
+      window.__AUTO_APPLY_AUDIT__.clickedApplyNow = true;
+      document.getElementById("stage-posting").style.display = "none";
+      document.getElementById("stage-auth").style.display = "block";
+    });
+
+    document.getElementById("btn-signin").addEventListener("click", () => {
+      window.__AUTO_APPLY_AUDIT__.signInAttempted = true;
+      document.getElementById("auth-err").style.display = "block";
+    });
+
+    document.getElementById("btn-switch-signup").addEventListener("click", () => {
+      window.__AUTO_APPLY_AUDIT__.switchedToSignup = true;
+      document.getElementById("signin-pane").style.display = "none";
+      document.getElementById("signup-pane").style.display = "block";
+    });
+
+    document.getElementById("btn-create-submit").addEventListener("click", async () => {
+      const em = document.getElementById("su_email").value.trim();
+      const pw = document.getElementById("su_pw").value;
+      const pw2 = document.getElementById("su_pw2").value;
+      const terms = document.getElementById("su_terms").checked;
+      const errEl = document.getElementById("signup-err");
+      if (!em || pw.length < 8 || pw !== pw2 || !terms) {
+        errEl.textContent = "Please fill email, matching passwords, and accept terms.";
+        errEl.style.display = "block";
+        return;
+      }
+      window.__AUTO_APPLY_AUDIT__.signupEmail = em;
+      window.__AUTO_APPLY_AUDIT__.signupVerifiedMatch = pw === pw2 && pw.length >= 8 && terms;
+      await fetch("/api/sandbox-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          otp: "482917",
+          subject: "Your OpenAI Careers verification code is 482917",
+          from: "no-reply@openai.com"
+        })
+      });
+      document.getElementById("stage-auth").style.display = "none";
+      document.getElementById("stage-otp").style.display = "block";
+    });
+
+    document.getElementById("btn-verify-otp").addEventListener("click", () => {
+      const code = Array.from(document.querySelectorAll(".otp-box")).map((b) => b.value.trim()).join("");
+      if (code !== "482917") {
+        document.getElementById("otp-err").style.display = "block";
+        return;
+      }
+      window.__AUTO_APPLY_AUDIT__.otpVerified = true;
+      document.getElementById("stage-otp").style.display = "none";
+      document.getElementById("stage-step1").style.display = "block";
+    });
+
+    document.getElementById("btn-step1-next").addEventListener("click", () => {
+      window.__AUTO_APPLY_AUDIT__.step1 = {
+        firstName: document.getElementById("s1_fn").value,
+        lastName: document.getElementById("s1_ln").value,
+        email: document.getElementById("s1_em").value,
+        phone: document.getElementById("s1_ph").value,
+        streetAddress: document.getElementById("s1_st").value,
+        city: document.getElementById("s1_ct").value,
+        state: document.getElementById("s1_state").value,
+        zip: document.getElementById("s1_zip").value,
+        linkedin: document.getElementById("s1_li").value,
+        github: document.getElementById("s1_gh").value,
+        portfolio: document.getElementById("s1_pf").value,
+        workAuth: document.getElementById("s1_wa").value,
+        sponsorship: document.getElementById("s1_sp").value,
+        visaStatus: document.getElementById("s1_visa").value,
+        citizenship: document.getElementById("s1_cit").value,
+        yoeDecimal: document.getElementById("s1_yoe_dec").value,
+        yoeInt: document.getElementById("s1_yoe_int").value,
+        desiredSalary: document.getElementById("s1_sal").value,
+        resumeFile: document.getElementById("s1_res").files[0]?.name || null,
+        resumeBytes: document.getElementById("s1_res").files[0]?.size || 0,
+        coverLetterFile: document.getElementById("s1_cl").files[0]?.name || null,
+        coverLetterBytes: document.getElementById("s1_cl").files[0]?.size || 0
+      };
+      document.getElementById("stage-step1").style.display = "none";
+      document.getElementById("stage-step2").style.display = "block";
+    });
+
+    document.getElementById("stage-step2").addEventListener("submit", (e) => {
+      e.preventDefault();
+      window.__AUTO_APPLY_AUDIT__.step2 = {
+        govClearance: document.getElementById("s2_gov").value,
+        gender: document.getElementById("s2_gen").value,
+        sexualOrientation: document.getElementById("s2_so").value,
+        lgbtq: document.getElementById("s2_lgbtq").value,
+        requiredEssay: document.getElementById("s2_essay").value,
+        optionalExtra: document.getElementById("s2_opt_extra").value
+      };
+      window.__AUTO_APPLY_AUDIT__.submitted = true;
+      document.getElementById("stage-step2").style.display = "none";
+      document.getElementById("submit-banner").style.display = "block";
+    });
+  </script>
+</body>
+</html>
+"""
+
+
 class JobifyHandler(BaseHTTPRequestHandler):
     def _send_cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -478,6 +803,10 @@ class JobifyHandler(BaseHTTPRequestHandler):
             return self._send_html(WORKDAY_HTML)
         if path == "/sandbox/lever":
             return self._send_html(LEVER_HTML)
+        if path == "/sandbox/auto-apply":
+            return self._send_html(AUTO_APPLY_SANDBOX_HTML)
+        if path == "/api/sandbox-otp":
+            return self._send_json(200, {"ok": True, **SANDBOX_OTP_STORE})
         return self._send_json(
             200,
             {
@@ -486,6 +815,7 @@ class JobifyHandler(BaseHTTPRequestHandler):
                     f"http://127.0.0.1:{PORT}/sandbox/greenhouse",
                     f"http://127.0.0.1:{PORT}/sandbox/workday",
                     f"http://127.0.0.1:{PORT}/sandbox/lever",
+                    f"http://127.0.0.1:{PORT}/sandbox/auto-apply",
                 ],
             },
         )
@@ -510,16 +840,54 @@ class JobifyHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 return self._send_json(500, {"ok": False, "error": str(exc)})
 
+        if self.path == "/api/sandbox-otp":
+            SANDBOX_OTP_STORE["otp"] = body.get("otp")
+            SANDBOX_OTP_STORE["subject"] = body.get("subject", "Sandbox OTP")
+            SANDBOX_OTP_STORE["from"] = body.get("from", "no-reply@sandbox.local")
+            SANDBOX_OTP_STORE["timestampMs"] = int(time.time() * 1000)
+            return self._send_json(200, {"ok": True, **SANDBOX_OTP_STORE})
+
         if self.path == "/api/imap-otp":
             try:
                 res = fetch_latest_imap_otp(
                     body.get("email", ""),
                     body.get("appPassword", ""),
                     body.get("senderFilter", ""),
+                    int(body.get("sinceEpochMs") or 0),
                 )
                 return self._send_json(200, {"ok": True, **res})
             except Exception as exc:
                 return self._send_json(400, {"ok": False, "error": str(exc)})
+
+        if self.path == "/api/gemini-generate":
+            api_key = (body.get("apiKey") or "").strip()
+            models = body.get("models") or ["gemini-3-flash-preview", "gemini-2.5-flash"]
+            req_body = body.get("requestBody") or {}
+            trace = []
+            for mdl in models:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(mdl)}:generateContent?key={urllib.parse.quote(api_key)}"
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(req_body).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=22) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                        txt = "".join(p.get("text", "") for p in parts).strip()
+                        if txt:
+                            return self._send_json(200, {"ok": True, "text": txt, "modelUsed": mdl})
+                        trace.append(f"{mdl}: empty")
+                except urllib.error.HTTPError as he:
+                    err_raw = he.read().decode("utf-8", errors="ignore")[:140]
+                    trace.append(f"{mdl}: HTTP {he.code} {err_raw}")
+                    if he.code not in (404, 429, 503):
+                        break
+                except Exception as exc:
+                    trace.append(f"{mdl}: {exc}")
+            return self._send_json(502, {"ok": False, "error": " | ".join(trace)})
 
         return self._send_json(404, {"ok": False, "error": "Unknown endpoint"})
 

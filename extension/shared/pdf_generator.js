@@ -87,7 +87,8 @@ export function buildPureJsResumePdfBase64(tailored, profile) {
     `${p.city || "Newark"}, ${p.stateCode || "CA"}`,
     p.email || "ravitejavelanati11@gmail.com",
     p.phone || "(774) 810-8481",
-    (p.linkedin || "linkedin.com/in/ravitejavelanati").replace(/^https?:\/\/(www\.)?/, "")
+    (p.linkedin || "linkedin.com/in/raviteja-velanati").replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, ""),
+    (p.github || "github.com/ravitejav-dev").replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")
   ].join("  |  ");
   const contactW = estimateTextWidth(contactLine, 8.8, false);
   drawText(contactLine, Math.max(MARGIN_X, (PAGE_W - contactW) / 2), y, 8.8, false);

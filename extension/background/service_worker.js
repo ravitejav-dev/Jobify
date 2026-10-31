@@ -1,5 +1,6 @@
-// Jobify MV3 Background Service Worker
+// Jobify MV3 Background Service Worker — Autonomous Full Auto-Apply, Dual-Engine Gmail OTP & Multi-Frame Autofill
 import {
+  STORAGE_KEYS,
   ensureInitialized,
   getAllState,
   updateProfile,
@@ -25,6 +26,30 @@ import { generateTailoredResumePdf, generateCoverLetterPdf } from "../shared/pdf
 import { fetchPersonalizedRecommendations, buildNetworkCopilotPathways } from "../shared/job_feeds.js";
 
 let autopilotRunning = false;
+let autoApplyRunning = false;
+let autoApplyAbortFlag = false;
+let currentAutoApplyStatus = {
+  running: false,
+  stage: "idle",
+  stepLabel: "Idle",
+  detail: "",
+  completed: false,
+  error: null,
+  updatedAt: 0
+};
+
+const recentSpawnedTabs = [];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+chrome.tabs.onCreated.addListener((tab) => {
+  recentSpawnedTabs.push({
+    id: tab.id,
+    openerTabId: tab.openerTabId || null,
+    url: tab.pendingUrl || tab.url || "",
+    createdAt: Date.now()
+  });
+  if (recentSpawnedTabs.length > 25) recentSpawnedTabs.shift();
+});
 
 chrome.runtime.onInstalled.addListener(async () => {
   await ensureInitialized();
@@ -34,7 +59,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   try {
     const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
     for (const t of tabs) {
-      if (t.id) {
+      if (t.id && !/^https:\/\/mail\.google\.com/i.test(t.url || "")) {
         chrome.scripting
           .executeScript({
             target: { tabId: t.id, allFrames: true },
@@ -53,6 +78,23 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
+async function broadcastAutoApplyProgress(tabId, patch) {
+  currentAutoApplyStatus = {
+    ...currentAutoApplyStatus,
+    ...patch,
+    tabId: tabId || currentAutoApplyStatus.tabId || null,
+    updatedAt: Date.now()
+  };
+  try {
+    await chrome.storage.local.set({ [STORAGE_KEYS.AUTO_APPLY_SESSION]: currentAutoApplyStatus });
+  } catch (_) {}
+  if (tabId) {
+    chrome.tabs
+      .sendMessage(tabId, { type: "AUTO_APPLY_PROGRESS", payload: currentAutoApplyStatus })
+      .catch(() => {});
+  }
+}
+
 async function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = "";
@@ -64,7 +106,6 @@ async function arrayBufferToBase64(buffer) {
 }
 
 async function getResumePdfPayload(variantOrId, state) {
-  // Check if user requested a specific tailored resume id
   if (variantOrId && variantOrId.startsWith("tr_")) {
     const tr = (state.tailoredResumes || []).find((r) => r.id === variantOrId);
     if (tr?.pdfBase64) {
@@ -75,7 +116,6 @@ async function getResumePdfPayload(variantOrId, state) {
       };
     }
   }
-  // Check custom uploaded resume in profile
   const selectedVariant = variantOrId || state.settings?.defaultResumeVariant || "one_page";
   const resumeEntry =
     (state.profile?.resumes || []).find((r) => r.id === selectedVariant) ||
@@ -104,7 +144,7 @@ async function getResumePdfPayload(variantOrId, state) {
   return { fileName, mimeType: "application/pdf", base64 };
 }
 
-function waitForTabComplete(tabId, timeoutMs = 20000) {
+function waitForTabComplete(tabId, timeoutMs = 15000) {
   return new Promise((resolve) => {
     let settled = false;
     const done = () => {
@@ -116,12 +156,30 @@ function waitForTabComplete(tabId, timeoutMs = 20000) {
     };
     const listener = (updatedId, info) => {
       if (updatedId === tabId && info.status === "complete") {
-        setTimeout(done, 1600);
+        setTimeout(done, 900);
       }
     };
     chrome.tabs.onUpdated.addListener(listener);
+    chrome.tabs
+      .get(tabId)
+      .then((t) => {
+        if (t?.status === "complete") {
+          setTimeout(done, 700);
+        }
+      })
+      .catch(() => done());
     setTimeout(done, timeoutMs);
   });
+}
+
+async function waitForTabSettle(tabId, minWaitMs = 1300, maxWaitMs = 7000) {
+  await sleep(minWaitMs);
+  try {
+    const t = await chrome.tabs.get(tabId);
+    if (t?.status === "loading") {
+      await waitForTabComplete(tabId, maxWaitMs);
+    }
+  } catch (_) {}
 }
 
 async function ensureTabScripts(tabId) {
@@ -143,6 +201,226 @@ async function ensureTabScripts(tabId) {
       return false;
     }
   }
+}
+
+async function buildAndSaveTailoredResume(jobMeta, state, preferredModel = null) {
+  const kw = analyzeJobKeywords(jobMeta.description || "", state.profile);
+  const missingList = kw.missing.map((m) => m.keyword);
+  const aiRes = await tailorResumeWithGemini(
+    jobMeta,
+    state.profile,
+    missingList,
+    state.settings,
+    preferredModel
+  );
+  const pdfOut = await generateTailoredResumePdf(aiRes.tailored, state.profile, state.settings);
+  const postScore = scoreResumeATS(state.profile, jobMeta.description || "", aiRes.tailored);
+  const safeComp = String(jobMeta.company || "Target")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_|_$/g, "")
+    .slice(0, 24);
+  const fileName = `Raviteja_Velanati_${safeComp || "Tailored"}_Resume.pdf`;
+
+  const saved = await saveTailoredResume({
+    company: jobMeta.company || "Target Company",
+    role: jobMeta.title || "AI / Software Engineer",
+    url: jobMeta.url || "",
+    fileName,
+    modelUsed: aiRes.modelUsed,
+    requestedModel: aiRes.requestedModel,
+    fellBack: aiRes.fellBack,
+    pdfEngine: pdfOut.engine,
+    atsScore: postScore.totalScore,
+    tailored: aiRes.tailored,
+    pdfBase64: pdfOut.pdfBase64
+  });
+
+  return { record: saved, postScore };
+}
+
+async function buildAndSaveCoverLetter(jobMeta, state, tone = "Concise & Technical") {
+  const aiCl = await generateCoverLetterWithGemini(jobMeta, state.profile, tone, state.settings);
+  const pdfOut = await generateCoverLetterPdf(
+    aiCl.coverLetter,
+    { company: jobMeta.company, role: jobMeta.title },
+    state.profile,
+    state.settings
+  );
+  const safeComp = String(jobMeta.company || "Target")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_|_$/g, "")
+    .slice(0, 24);
+  const fileName = `Raviteja_Velanati_${safeComp || "Cover"}_Cover_Letter.pdf`;
+  const saved = await saveCoverLetter({
+    company: jobMeta.company || "Target Company",
+    role: jobMeta.title || "AI / Software Engineer",
+    url: jobMeta.url || "",
+    fileName,
+    coverLetter: aiCl.coverLetter,
+    modelUsed: aiCl.modelUsed,
+    fellBack: aiCl.fellBack,
+    pdfBase64: pdfOut.pdfBase64
+  });
+  return saved;
+}
+
+// Extract 6-8 digit numeric OTP OR Greenhouse 8-char alphanumeric security code from email text
+function extractOtpCodeFromRawText(subj, bodyText) {
+  const combined = `${subj || ""}\n${bodyText || ""}`;
+  const ghMatch = combined.match(
+    /(?:security\s*code|verification\s*code|paste\s*this\s*code[^:]*:|passcode\s*(?:is|:))\s*([A-Za-z0-9]{6,8})\b/i
+  );
+  if (ghMatch && /\d/.test(ghMatch[1]) && ghMatch[1] !== "94560") {
+    return ghMatch[1];
+  }
+  const ctxNum = combined.match(/(?:code|otp|passcode|verify|verification|pin)[^0-9]{0,40}\b(\d{6,8})\b/i);
+  if (ctxNum) {
+    return ctxNum[1];
+  }
+  if (/verify|verification|security\s*code|passcode|one-time|otp|confirm\s*your\s*email/i.test(combined)) {
+    const allSix = [...combined.matchAll(/\b(\d{6})\b/g)].map((m) => m[1]);
+    const filtered = allSix.find(
+      (v) => !["120000", "140000", "115000", "150000", "180000", "000000"].includes(v)
+    );
+    if (filtered) return filtered;
+  }
+  return null;
+}
+
+// Engine 1: Zero-Backend Signed-In Chrome Gmail Reader (reads Atom feed / basic inbox using existing Chrome session cookies)
+async function fetchOtpFromSignedInChromeGmail({ targetEmail = "", sinceEpochMs = 0, senderFilter = "" } = {}) {
+  let gmailTabId = null;
+  let createdTempTab = false;
+  try {
+    const existingTabs = await chrome.tabs.query({ url: "https://mail.google.com/*" });
+    if (existingTabs.length > 0 && existingTabs[0].id) {
+      gmailTabId = existingTabs[0].id;
+    } else {
+      const tempTab = await chrome.tabs.create({
+        url: "https://mail.google.com/mail/u/0/feed/atom",
+        active: false
+      });
+      gmailTabId = tempTab.id;
+      createdTempTab = true;
+      await waitForTabComplete(gmailTabId, 6500);
+    }
+
+    const scriptRes = await chrome.scripting.executeScript({
+      target: { tabId: gmailTabId },
+      func: async () => {
+        const feeds = [
+          "https://mail.google.com/mail/u/0/feed/atom",
+          "https://mail.google.com/mail/u/1/feed/atom",
+          "https://mail.google.com/mail/u/2/feed/atom"
+        ];
+        const xmlPayloads = [];
+        for (const url of feeds) {
+          try {
+            const r = await fetch(url, { credentials: "include", cache: "no-store" });
+            if (r.ok) {
+              const txt = await r.text();
+              if (txt && txt.includes("<feed")) xmlPayloads.push(txt);
+            }
+          } catch (_) {}
+        }
+        const domPreview = (document.body?.innerText || "").slice(0, 8000);
+        return { xmlPayloads, domPreview };
+      }
+    });
+
+    const { xmlPayloads = [], domPreview = "" } = scriptRes?.[0]?.result || {};
+    const minTs = sinceEpochMs > 0 ? sinceEpochMs - 120000 : 0;
+
+    for (const xml of xmlPayloads) {
+      if (targetEmail && xml.includes("<title>Gmail - Inbox for ") && !xml.toLowerCase().includes(targetEmail.toLowerCase())) {
+        // Still inspect if single account, otherwise prefer matching account feed
+      }
+      const entryBlocks = [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/gi)].map((m) => m[1]);
+      for (const block of entryBlocks) {
+        const title = (block.match(/<title>([\s\S]*?)<\/title>/i)?.[1] || "").replace(/<!\[CDATA\[|\]\]>/g, "").trim();
+        const summary = (block.match(/<summary>([\s\S]*?)<\/summary>/i)?.[1] || "")
+          .replace(/<!\[CDATA\[|\]\]>/g, "")
+          .trim();
+        const author = (block.match(/<email>([\s\S]*?)<\/email>/i)?.[1] || "").trim();
+        const issued = (block.match(/<issued>([\s\S]*?)<\/issued>/i)?.[1] || "").trim();
+        if (minTs > 0 && issued) {
+          const parsed = Date.parse(issued);
+          if (!Number.isNaN(parsed) && parsed < minTs) continue;
+        }
+        if (senderFilter && !`${author} ${title} ${summary}`.toLowerCase().includes(senderFilter.toLowerCase())) {
+          continue;
+        }
+        const otp = extractOtpCodeFromRawText(title, summary);
+        if (otp) {
+          return { ok: true, otp, subject: title, from: author, source: "chrome_gmail_session" };
+        }
+      }
+    }
+
+    if (domPreview) {
+      const domOtp = extractOtpCodeFromRawText("Gmail Inbox", domPreview);
+      if (domOtp) {
+        return { ok: true, otp: domOtp, subject: "Gmail Web Session", from: "Gmail", source: "chrome_gmail_dom" };
+      }
+    }
+    return { ok: false, otp: null };
+  } catch (_) {
+    return { ok: false, otp: null };
+  } finally {
+    if (createdTempTab && gmailTabId) {
+      chrome.tabs.remove(gmailTabId).catch(() => {});
+    }
+  }
+}
+
+async function fetchOtpDualEngine(state, { tabUrl = "", sinceEpochMs = 0, senderFilter = "" } = {}) {
+  const companionUrl = state.settings?.companionServerUrl || "http://127.0.0.1:18765";
+
+  // 1. Local E2E Sandbox OTP Inbox (when testing on localhost / 127.0.0.1)
+  if (/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//i.test(tabUrl)) {
+    try {
+      const sResp = await fetch(`${companionUrl}/api/sandbox-otp`);
+      if (sResp.ok) {
+        const sData = await sResp.json();
+        if (sData?.otp && (!sinceEpochMs || (sData.timestampMs || 0) >= sinceEpochMs - 30000)) {
+          return { ok: true, otp: sData.otp, subject: sData.subject, from: sData.from, source: "sandbox" };
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. Companion Python IMAP OTP Endpoint (when Gmail App Password is active)
+  if (state.credentials?.portalEmail && state.credentials?.gmailAppPassword) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 7000);
+      const resp = await fetch(`${companionUrl}/api/imap-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: state.credentials.portalEmail,
+          appPassword: state.credentials.gmailAppPassword,
+          senderFilter,
+          sinceEpochMs
+        }),
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data?.otp) {
+          return { ok: true, otp: data.otp, subject: data.subject, from: data.from, source: "imap" };
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 3. Zero-Backend Signed-In Chrome Gmail Session Reader
+  return await fetchOtpFromSignedInChromeGmail({
+    targetEmail: state.credentials?.portalEmail || "",
+    sinceEpochMs,
+    senderFilter
+  });
 }
 
 async function runAutofillPassAcrossFrames(tabId, opts) {
@@ -170,6 +448,7 @@ async function runAutofillPassAcrossFrames(tabId, opts) {
   let filledCount = 0;
   let openQuestionsCount = 0;
   let clickedApplyGate = false;
+  let requiresCoverLetter = false;
   let bestMeta = null;
   const filledFieldsLog = [];
 
@@ -179,11 +458,19 @@ async function runAutofillPassAcrossFrames(tabId, opts) {
     filledCount += Number(r.filledCount || 0);
     openQuestionsCount += Number(r.openQuestionsCount || 0);
     if (r.clickedApplyGate) clickedApplyGate = true;
+    if (r.requiresCoverLetter) requiresCoverLetter = true;
     if (Array.isArray(r.filledFieldsLog)) filledFieldsLog.push(...r.filledFieldsLog);
     if (r.jobMeta && (!bestMeta || r.filledCount > 0)) bestMeta = r.jobMeta;
   }
 
-  return { filledCount, filledFieldsLog, openQuestionsCount, clickedApplyGate, jobMeta: bestMeta };
+  return {
+    filledCount,
+    filledFieldsLog,
+    openQuestionsCount,
+    clickedApplyGate,
+    requiresCoverLetter,
+    jobMeta: bestMeta
+  };
 }
 
 async function executeMultiFrameAutofill(tabId, opts = {}) {
@@ -191,7 +478,6 @@ async function executeMultiFrameAutofill(tabId, opts = {}) {
 
   const injected = await ensureTabScripts(tabId);
   if (!injected) {
-    // Fallback for extension-internal sandbox pages (chrome-extension://) where executeScript is disallowed
     const localResp = await chrome.tabs
       .sendMessage(tabId, { type: "TRIGGER_LOCAL_AUTOFILL", payload: opts })
       .catch(() => null);
@@ -201,7 +487,6 @@ async function executeMultiFrameAutofill(tabId, opts = {}) {
 
   let pass = await runAutofillPassAcrossFrames(tabId, opts);
 
-  // If clicking an "Apply" button navigated the tab (e.g. Lever /apply or Workday), wait for navigation and fill automatically
   if (pass.filledCount === 0 && pass.clickedApplyGate) {
     await waitForTabComplete(tabId, 5500);
     await ensureTabScripts(tabId);
@@ -209,6 +494,468 @@ async function executeMultiFrameAutofill(tabId, opts = {}) {
   }
 
   return { ok: true, ...pass };
+}
+
+async function inspectTabFrames(tabId, topJobMeta = null) {
+  const state = await getAllState();
+  let frameResults = [];
+  try {
+    frameResults = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: (profile, fallbackMeta) => {
+        if (!window.__JOBIFY_ADAPTERS__?.inspectAutonomousScreenState) return null;
+        return window.__JOBIFY_ADAPTERS__.inspectAutonomousScreenState(profile, fallbackMeta);
+      },
+      args: [state.profile, topJobMeta]
+    });
+  } catch (_) {
+    try {
+      frameResults = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (profile, fallbackMeta) => {
+          if (!window.__JOBIFY_ADAPTERS__?.inspectAutonomousScreenState) return null;
+          return window.__JOBIFY_ADAPTERS__.inspectAutonomousScreenState(profile, fallbackMeta);
+        },
+        args: [state.profile, topJobMeta]
+      });
+    } catch (__) {}
+  }
+
+  const valid = (frameResults || [])
+    .map((entry) => (entry?.result ? { frameId: entry.frameId, ...entry.result } : null))
+    .filter(Boolean);
+
+  if (valid.length === 0) {
+    return {
+      url: "",
+      isSubmittedConfirmation: false,
+      otpChallenge: { detected: false },
+      isStandaloneAuthWall: false,
+      inventory: { totalFields: 0, emptyFieldsCount: 0, emptyRequiredCount: 0, requiresCoverLetter: false, fields: [] },
+      hasApplyButton: false,
+      hasNextButton: false,
+      hasSubmitButton: false,
+      jobMeta: topJobMeta || {}
+    };
+  }
+
+  // Merge across top + embedded ATS iframes (e.g. Greenhouse / Ashby / Workday iframe)
+  const topFrame = valid.find((v) => v.frameId === 0) || valid[0];
+  const submittedFrame = valid.find((v) => v.isSubmittedConfirmation);
+  const otpFrame = valid.find((v) => v.otpChallenge?.detected);
+  const authFrame = valid.find((v) => v.isStandaloneAuthWall);
+  const richestFormFrame = [...valid].sort((a, b) => (b.inventory?.totalFields || 0) - (a.inventory?.totalFields || 0))[0];
+  const richestMetaFrame = [...valid].sort(
+    (a, b) => (b.jobMeta?.description?.length || 0) - (a.jobMeta?.description?.length || 0)
+  )[0];
+
+  const totalFields = valid.reduce((acc, v) => acc + (v.inventory?.totalFields || 0), 0);
+  const emptyFieldsCount = valid.reduce((acc, v) => acc + (v.inventory?.emptyFieldsCount || 0), 0);
+  const emptyRequiredCount = valid.reduce((acc, v) => acc + (v.inventory?.emptyRequiredCount || 0), 0);
+  const requiresCoverLetter = valid.some((v) => v.inventory?.requiresCoverLetter);
+
+  return {
+    url: topFrame.url,
+    activeFormFrameId: richestFormFrame?.frameId ?? 0,
+    authFrameId: authFrame?.frameId ?? 0,
+    otpFrameId: otpFrame?.frameId ?? 0,
+    isSubmittedConfirmation: Boolean(submittedFrame),
+    otpChallenge: otpFrame?.otpChallenge || { detected: false },
+    isStandaloneAuthWall: Boolean(authFrame) && totalFields <= 3,
+    inventory: {
+      totalFields,
+      emptyFieldsCount,
+      emptyRequiredCount,
+      requiresCoverLetter,
+      fields: richestFormFrame?.inventory?.fields || []
+    },
+    hasApplyButton: valid.some((v) => v.hasApplyButton) && totalFields === 0 && !authFrame,
+    hasNextButton: valid.some((v) => v.hasNextButton),
+    hasSubmitButton: valid.some((v) => v.hasSubmitButton),
+    jobMeta: richestMetaFrame?.jobMeta || topFrame.jobMeta || topJobMeta || {}
+  };
+}
+
+function findSpawnedChildTab(openerTabId, sinceMs) {
+  for (let i = recentSpawnedTabs.length - 1; i >= 0; i--) {
+    const item = recentSpawnedTabs[i];
+    if (item.createdAt >= sinceMs - 200 && item.id !== openerTabId) {
+      if (!item.openerTabId || item.openerTabId === openerTabId) {
+        return item;
+      }
+    }
+  }
+  return null;
+}
+
+// End-to-End Autonomous Full Auto-Apply Workflow:
+// Pull Job Details -> Tailor Resume (+ Cover Letter if needed) -> Click Apply Now -> Login/Create Account (+ Verify Password) -> Read Email OTP -> Extract & Cleanly Fill 1-by-1 -> Next -> Auto-Submit
+async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
+  if (!initialTabId) {
+    return { ok: false, error: "No active job tab provided." };
+  }
+  if (autoApplyRunning) {
+    return { ok: false, error: "Full Auto-Apply is already running." };
+  }
+
+  autoApplyRunning = true;
+  autoApplyAbortFlag = false;
+  let tabId = initialTabId;
+  let totalFilledFields = 0;
+  let tailoredResume = null;
+  let tailoredCoverLetter = null;
+  let authOrSubmitTriggerMs = Date.now();
+  const swKeepAliveTimer = setInterval(() => {
+    try {
+      chrome.runtime.getPlatformInfo(() => {});
+    } catch (_) {}
+  }, 12000);
+
+  try {
+    let state = await getAllState();
+    await ensureTabScripts(tabId);
+
+    await broadcastAutoApplyProgress(tabId, {
+      running: true,
+      completed: false,
+      error: null,
+      stage: "extracting_job",
+      stepLabel: "🔍 Step 1: Pulling Job Details & Requirements",
+      detail: "Scanning job description, posted salary & application requirements..."
+    });
+
+    const initialScreen = await inspectTabFrames(tabId, options.jobMeta || null);
+    const jobMeta =
+      initialScreen.jobMeta?.description?.length >= (options.jobMeta?.description?.length || 0)
+        ? initialScreen.jobMeta
+        : options.jobMeta || initialScreen.jobMeta || {};
+
+    // Step 1: Tailor ATS Resume PDF with Gemini
+    if (options.tailorResume !== false && (jobMeta.description || "").length > 40) {
+      await broadcastAutoApplyProgress(tabId, {
+        stage: "tailoring_resume",
+        stepLabel: `✨ Step 1: Tailoring Resume for ${jobMeta.company || "Role"}`,
+        detail: "Injecting missing ATS keywords & compiling single-column PDF..."
+      });
+      try {
+        const trOut = await buildAndSaveTailoredResume(jobMeta, state, options.preferredModel || null);
+        tailoredResume = trOut.record;
+      } catch (tailorErr) {
+        await appendAutopilotLog(`Resume tailor fallback to default PDF: ${tailorErr.message}`, "warn");
+      }
+    }
+
+    if (autoApplyAbortFlag) throw new Error("Stopped by user.");
+
+    // Also tailor Cover Letter upfront if JD explicitly mentions/requests one or form requires one
+    if (jobMeta.mentionsCoverLetter || initialScreen.inventory?.requiresCoverLetter) {
+      await broadcastAutoApplyProgress(tabId, {
+        stage: "tailoring_cover_letter",
+        stepLabel: "📝 Step 1b: Tailoring Cover Letter PDF",
+        detail: "Cover letter requested — drafting concise technical cover letter..."
+      });
+      try {
+        tailoredCoverLetter = await buildAndSaveCoverLetter(jobMeta, state, "Concise & Technical");
+      } catch (_) {}
+    }
+
+    if (autoApplyAbortFlag) throw new Error("Stopped by user.");
+
+    // Step 2: Click "Apply Now" / "Apply Manually" if we are on the job posting gate
+    const preApplyCheck = await inspectTabFrames(tabId, jobMeta);
+    if (
+      preApplyCheck.hasApplyButton &&
+      !preApplyCheck.isStandaloneAuthWall &&
+      !preApplyCheck.otpChallenge?.detected &&
+      preApplyCheck.inventory.totalFields === 0
+    ) {
+      await broadcastAutoApplyProgress(tabId, {
+        stage: "clicking_apply",
+        stepLabel: "🖱️ Step 2: Clicking Apply Now",
+        detail: "Opening application portal..."
+      });
+      const clickTs = Date.now();
+      authOrSubmitTriggerMs = clickTs;
+
+      await chrome.scripting
+        .executeScript({
+          target: { tabId, allFrames: true },
+          func: async () => {
+            if (!window.__JOBIFY_ADAPTERS__?.clickApplyEntryButton) return null;
+            return await window.__JOBIFY_ADAPTERS__.clickApplyEntryButton();
+          }
+        })
+        .catch(() => {});
+
+      await sleep(1500);
+      const childTab = findSpawnedChildTab(tabId, clickTs);
+      if (childTab?.id) {
+        tabId = childTab.id;
+        await waitForTabComplete(tabId, 12000);
+      } else {
+        await waitForTabSettle(tabId, 600, 8000);
+      }
+      await ensureTabScripts(tabId);
+    }
+
+    // Step 3..5: Autonomous Auth + Email OTP + Field Inventory -> Clean 1-by-1 Fill -> Next -> Submit Loop
+    let authAttempts = 0;
+    for (let stepIdx = 1; stepIdx <= 12; stepIdx++) {
+      if (autoApplyAbortFlag) throw new Error("Stopped by user.");
+
+      await ensureTabScripts(tabId);
+      state = await getAllState();
+      const screen = await inspectTabFrames(tabId, jobMeta);
+
+      // Check A: Submission Confirmation Banner Reached!
+      if (screen.isSubmittedConfirmation) {
+        await upsertApplication({
+          company: jobMeta.company || "Target Company",
+          role: jobMeta.title || "AI / Software Engineer",
+          location: jobMeta.location || "",
+          ats: jobMeta.ats || "Career Portal",
+          url: screen.url || jobMeta.url || "",
+          status: "Applied",
+          matchScore: 94,
+          resumeUsed: tailoredResume?.fileName || "Raviteja_Velanati_Resume_1Page.pdf",
+          notes: `Full Auto-Apply submitted (${totalFilledFields} fields filled cleanly).`
+        });
+        await broadcastAutoApplyProgress(tabId, {
+          running: false,
+          completed: true,
+          stage: "completed",
+          stepLabel: "✅ Application Submitted!",
+          detail: `Logged ${jobMeta.company || "Role"} as Applied (${totalFilledFields} fields filled cleanly).`
+        });
+        return {
+          ok: true,
+          submitted: true,
+          tabId,
+          totalFilledFields,
+          tailoredResumeFile: tailoredResume?.fileName || null,
+          coverLetterFile: tailoredCoverLetter?.fileName || null
+        };
+      }
+
+      // Check B: Email OTP / Security Code Challenge Detected!
+      if (screen.otpChallenge?.detected) {
+        let otpCode = null;
+        let otpSource = "";
+        for (let poll = 1; poll <= 14; poll++) {
+          if (autoApplyAbortFlag) throw new Error("Stopped by user.");
+          await broadcastAutoApplyProgress(tabId, {
+            stage: "waiting_otp",
+            stepLabel: `📨 Reading Email OTP (Attempt ${poll}/14)`,
+            detail: `Checking ${state.credentials.portalEmail} for verification code...`
+          });
+          const otpRes = await fetchOtpDualEngine(state, {
+            tabUrl: screen.url,
+            sinceEpochMs: authOrSubmitTriggerMs
+          });
+          if (otpRes?.ok && otpRes.otp) {
+            otpCode = otpRes.otp;
+            otpSource = otpRes.source || "gmail";
+            break;
+          }
+          await sleep(2800);
+        }
+
+        if (!otpCode) {
+          await broadcastAutoApplyProgress(tabId, {
+            running: false,
+            completed: false,
+            stage: "paused_otp",
+            stepLabel: "⏸️ Waiting for Verification Code",
+            detail: `No recent OTP found in ${state.credentials.portalEmail} yet — enter code to finish.`
+          });
+          return { ok: true, submitted: false, pausedForOtp: true, tabId, totalFilledFields };
+        }
+
+        await broadcastAutoApplyProgress(tabId, {
+          stage: "filling_otp",
+          stepLabel: `🔐 Filling OTP Code (${otpCode})`,
+          detail: `Retrieved via ${otpSource} — verifying code & continuing...`
+        });
+
+        await chrome.scripting.executeScript({
+          target: { tabId, allFrames: true },
+          func: async (code) => {
+            if (!window.__JOBIFY_ADAPTERS__?.fillOtpChallengeAndSubmit) return null;
+            return await window.__JOBIFY_ADAPTERS__.fillOtpChallengeAndSubmit(code);
+          },
+          args: [otpCode]
+        });
+
+        await waitForTabSettle(tabId, 1500, 7000);
+        continue;
+      }
+
+      // Check C: Standalone Portal Login / Signup Wall (+ Verify Password)
+      if (screen.isStandaloneAuthWall && authAttempts < 3) {
+        authAttempts++;
+        authOrSubmitTriggerMs = Date.now();
+        await broadcastAutoApplyProgress(tabId, {
+          stage: "portal_auth",
+          stepLabel: "🔐 Portal Login / Create Account",
+          detail: `Using ${state.credentials.portalEmail} (auto-handling Verify Password if needed)...`
+        });
+
+        await chrome.scripting.executeScript({
+          target: { tabId, allFrames: true },
+          func: async (creds) => {
+            if (!window.__JOBIFY_ADAPTERS__?.performAutonomousAuth) return null;
+            return await window.__JOBIFY_ADAPTERS__.performAutonomousAuth(creds);
+          },
+          args: [state.credentials]
+        });
+
+        await waitForTabSettle(tabId, 1600, 7500);
+        continue;
+      }
+
+      // Check D: Application Form Step — Extract Inventory -> On-Demand Cover Letter if Required -> Fill 1-by-1 Cleanly
+      if (screen.inventory.totalFields > 0) {
+        if (screen.inventory.requiresCoverLetter && !tailoredCoverLetter) {
+          await broadcastAutoApplyProgress(tabId, {
+            stage: "tailoring_cover_letter",
+            stepLabel: "📝 Required Cover Letter Detected",
+            detail: "Tailoring custom cover letter PDF for this form..."
+          });
+          try {
+            tailoredCoverLetter = await buildAndSaveCoverLetter(jobMeta, state, "Concise & Technical");
+          } catch (_) {}
+        }
+
+        await broadcastAutoApplyProgress(tabId, {
+          stage: "filling_fields",
+          stepLabel: `✍️ Filling ${screen.inventory.totalFields} Fields Cleanly (1 by 1)`,
+          detail: `Step ${stepIdx}: Filling strictly needed fields & skipping optional fluff...`
+        });
+
+        const fillPass = await executeMultiFrameAutofill(tabId, {
+          resumeChoice: tailoredResume?.id || state.settings?.defaultResumeVariant || "one_page",
+          sequentialOneByOne: true,
+          onlyNeededCleanMode: true,
+          forceOverwrite: false,
+          fillOpenEndedWithAI: true,
+          topJobMeta: jobMeta,
+          coverLetterRecord: tailoredCoverLetter,
+          coverLetterText: tailoredCoverLetter?.coverLetter || "",
+          coverLetterPdfPayload: tailoredCoverLetter?.pdfBase64
+            ? { fileName: tailoredCoverLetter.fileName, base64: tailoredCoverLetter.pdfBase64 }
+            : null
+        });
+
+        totalFilledFields += Number(fillPass?.filledCount || 0);
+      }
+
+      if (autoApplyAbortFlag) throw new Error("Stopped by user.");
+
+      // Advance Wizard ("Next / Continue") OR Final "Submit Application"
+      const allowFinalSubmit = options.autoSubmit !== false;
+      const navExec = await chrome.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        func: async (allowSub) => {
+          if (!window.__JOBIFY_ADAPTERS__?.clickWizardNextOrSubmit) return { action: "none" };
+          return await window.__JOBIFY_ADAPTERS__.clickWizardNextOrSubmit({ allowFinalSubmit: allowSub });
+        },
+        args: [allowFinalSubmit]
+      });
+
+      const actions = (navExec || []).map((e) => e?.result).filter(Boolean);
+      const nextAct = actions.find((a) => a.action === "next");
+      const submitAct = actions.find((a) => a.action === "submit");
+
+      if (nextAct) {
+        await broadcastAutoApplyProgress(tabId, {
+          stage: "advancing_step",
+          stepLabel: `➡️ Advancing Wizard ('${nextAct.buttonText}')`,
+          detail: `Filled ${totalFilledFields} fields so far — loading next page...`
+        });
+        await waitForTabSettle(tabId, 1300, 7000);
+        continue;
+      }
+
+      if (submitAct) {
+        authOrSubmitTriggerMs = Date.now();
+        await broadcastAutoApplyProgress(tabId, {
+          stage: "submitting",
+          stepLabel: `🚀 Submitting Application ('${submitAct.buttonText}')`,
+          detail: "Checking for confirmation or post-submit email security code..."
+        });
+        await waitForTabSettle(tabId, 1800, 7500);
+
+        const postSubmit = await inspectTabFrames(tabId, jobMeta);
+        if (postSubmit.otpChallenge?.detected) {
+          // Loop continues so Check B reads & enters Greenhouse/ATS post-submit security code!
+          continue;
+        }
+
+        await upsertApplication({
+          company: jobMeta.company || "Target Company",
+          role: jobMeta.title || "AI / Software Engineer",
+          location: jobMeta.location || "",
+          ats: jobMeta.ats || "Career Portal",
+          url: postSubmit.url || jobMeta.url || "",
+          status: "Applied",
+          matchScore: 94,
+          resumeUsed: tailoredResume?.fileName || "Raviteja_Velanati_Resume_1Page.pdf",
+          notes: `Full Auto-Apply submitted (${totalFilledFields} fields filled cleanly).`
+        });
+
+        await broadcastAutoApplyProgress(tabId, {
+          running: false,
+          completed: true,
+          stage: "completed",
+          stepLabel: "✅ Application Submitted!",
+          detail: `Logged ${jobMeta.company || "Role"} as Applied (${totalFilledFields} fields filled cleanly).`
+        });
+
+        return {
+          ok: true,
+          submitted: true,
+          tabId,
+          totalFilledFields,
+          tailoredResumeFile: tailoredResume?.fileName || null,
+          coverLetterFile: tailoredCoverLetter?.fileName || null
+        };
+      }
+
+      // Neither Next nor Submit clicked
+      await broadcastAutoApplyProgress(tabId, {
+        running: false,
+        completed: true,
+        stage: "ready_for_review",
+        stepLabel: `✅ Autofilled ${totalFilledFields} Fields Cleanly`,
+        detail: allowFinalSubmit
+          ? "All visible fields filled — review final screen if custom submit control is present."
+          : "Paused before final submit (Review-Before-Submit mode)."
+      });
+      return {
+        ok: true,
+        submitted: false,
+        tabId,
+        totalFilledFields,
+        tailoredResumeFile: tailoredResume?.fileName || null,
+        coverLetterFile: tailoredCoverLetter?.fileName || null
+      };
+    }
+
+    return { ok: true, submitted: false, tabId, totalFilledFields };
+  } catch (err) {
+    await broadcastAutoApplyProgress(tabId, {
+      running: false,
+      completed: false,
+      error: err?.message || String(err),
+      stage: "error",
+      stepLabel: "⚠️ Auto-Apply Paused",
+      detail: err?.message || String(err)
+    });
+    return { ok: false, error: err?.message || String(err), totalFilledFields };
+  } finally {
+    clearInterval(swKeepAliveTimer);
+    autoApplyRunning = false;
+  }
 }
 
 async function runAutopilotQueue() {
@@ -248,12 +995,9 @@ async function runAutopilotQueue() {
         await waitForTabComplete(tab.id, 18000);
         await ensureTabScripts(tab.id);
 
-        const execResp = await chrome.tabs.sendMessage(tab.id, {
-          type: "EXECUTE_AUTOPILOT_STEP",
-          payload: {
-            autoSubmit: state.settings.autopilotMode === "full_auto",
-            tailorFirst: item.tailorFirst !== false
-          }
+        const execResp = await runFullAutoApplyWorkflow(tab.id, {
+          autoSubmit: state.settings.autopilotMode === "full_auto",
+          tailorResume: item.tailorFirst !== false
         });
 
         const updatedState = await getAllState();
@@ -262,27 +1006,16 @@ async function runAutopilotQueue() {
         if (i2 >= 0) {
           q2[i2].status = execResp?.submitted
             ? "Submitted"
-            : execResp?.filledCount > 0
+            : execResp?.totalFilledFields > 0
             ? "Autofilled (Ready)"
             : "Opened / Needs Review";
-          q2[i2].filledCount = execResp?.filledCount || 0;
+          q2[i2].filledCount = execResp?.totalFilledFields || 0;
           q2[i2].completedAt = new Date().toISOString();
           await updateAutopilotQueue(q2);
         }
 
-        await upsertApplication({
-          company: item.company || execResp?.company || "Target Company",
-          role: item.title || execResp?.role || "AI / Software Engineer",
-          location: item.location || "",
-          ats: item.ats || execResp?.ats || "Career Portal",
-          url: item.url,
-          status: execResp?.submitted ? "Applied" : "Bookmarked",
-          matchScore: item.matchScore || execResp?.matchScore || 88,
-          notes: `Autopilot processed (${execResp?.filledCount || 0} fields filled).`
-        });
-
         await appendAutopilotLog(
-          `Completed ${item.company} — ${execResp?.filledCount || 0} fields autofilled${execResp?.submitted ? " & submitted!" : " (paused for review)."}`,
+          `Completed ${item.company} — ${execResp?.totalFilledFields || 0} fields autofilled${execResp?.submitted ? " & submitted!" : " (paused for review)."}`,
           "success"
         );
       } catch (stepErr) {
@@ -310,7 +1043,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     switch (type) {
       case "GET_ALL_STATE": {
-        return { ok: true, state };
+        return { ok: true, state, autoApplyStatus: currentAutoApplyStatus };
       }
 
       case "UPDATE_PROFILE": {
@@ -335,10 +1068,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const referrals = buildNetworkCopilotPathways(jobMeta.company, jobMeta.title);
         if (sender?.tab?.id) {
           chrome.action.setBadgeText({ text: `${match.matchScore}%`, tabId: sender.tab.id }).catch(() => {});
-          chrome.action.setBadgeBackgroundColor({
-            color: match.matchScore >= 80 ? "#10b981" : match.matchScore >= 60 ? "#f59e0b" : "#ef4444",
-            tabId: sender.tab.id
-          }).catch(() => {});
+          chrome.action
+            .setBadgeBackgroundColor({
+              color: match.matchScore >= 80 ? "#10b981" : match.matchScore >= 60 ? "#f59e0b" : "#ef4444",
+              tabId: sender.tab.id
+            })
+            .catch(() => {});
         }
         return { ok: true, match, atsScore, referrals };
       }
@@ -349,76 +1084,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
 
       case "TAILOR_RESUME": {
-        const jobMeta = payload.jobMeta || {};
-        const kw = analyzeJobKeywords(jobMeta.description || "", state.profile);
-        const missingList = kw.missing.map((m) => m.keyword);
-        const aiRes = await tailorResumeWithGemini(
-          jobMeta,
-          state.profile,
-          missingList,
-          state.settings,
+        const out = await buildAndSaveTailoredResume(
+          payload.jobMeta || {},
+          state,
           payload.preferredModel || null
         );
-        const pdfOut = await generateTailoredResumePdf(aiRes.tailored, state.profile, state.settings);
-        const postScore = scoreResumeATS(state.profile, jobMeta.description || "", aiRes.tailored);
-        const safeComp = String(jobMeta.company || "Target")
-          .replace(/[^a-zA-Z0-9]+/g, "_")
-          .replace(/^_|_$/g, "")
-          .slice(0, 24);
-        const fileName = `Raviteja_Velanati_${safeComp || "Tailored"}_Resume.pdf`;
-
-        const saved = await saveTailoredResume({
-          company: jobMeta.company || "Target Company",
-          role: jobMeta.title || "AI / Software Engineer",
-          url: jobMeta.url || "",
-          fileName,
-          modelUsed: aiRes.modelUsed,
-          requestedModel: aiRes.requestedModel,
-          fellBack: aiRes.fellBack,
-          pdfEngine: pdfOut.engine,
-          atsScore: postScore.totalScore,
-          tailored: aiRes.tailored,
-          pdfBase64: pdfOut.pdfBase64
-        });
-
-        return { ok: true, record: saved, postScore };
+        return { ok: true, ...out };
       }
 
       case "GENERATE_COVER_LETTER": {
-        const jobMeta = payload.jobMeta || {};
-        const aiCl = await generateCoverLetterWithGemini(
-          jobMeta,
-          state.profile,
-          payload.tone || "Concise & Technical",
-          state.settings
+        const saved = await buildAndSaveCoverLetter(
+          payload.jobMeta || {},
+          state,
+          payload.tone || "Concise & Technical"
         );
-        const pdfOut = await generateCoverLetterPdf(
-          aiCl.coverLetter,
-          { company: jobMeta.company, role: jobMeta.title },
-          state.profile,
-          state.settings
-        );
-        const safeComp = String(jobMeta.company || "Target")
-          .replace(/[^a-zA-Z0-9]+/g, "_")
-          .replace(/^_|_$/g, "")
-          .slice(0, 24);
-        const fileName = `Raviteja_Velanati_${safeComp || "Cover"}_Cover_Letter.pdf`;
-        const saved = await saveCoverLetter({
-          company: jobMeta.company || "Target Company",
-          role: jobMeta.title || "AI / Software Engineer",
-          url: jobMeta.url || "",
-          fileName,
-          coverLetter: aiCl.coverLetter,
-          modelUsed: aiCl.modelUsed,
-          fellBack: aiCl.fellBack,
-          pdfBase64: pdfOut.pdfBase64
-        });
         return { ok: true, record: saved };
       }
 
       case "ANSWER_APPLICATION_QUESTION": {
         const { questionCtx, jobMeta, saveToVault } = payload;
-        // Check saved answers first if exact match requested and not forcing fresh AI
         if (!payload.forceAi) {
           const labelLow = (questionCtx?.label || "").toLowerCase();
           for (const sa of state.savedAnswers || []) {
@@ -532,6 +1216,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       case "STOP_AUTOPILOT": {
         autopilotRunning = false;
+        autoApplyAbortFlag = true;
         await chrome.alarms.clear("jobify_autopilot_schedule");
         await appendAutopilotLog("Autopilot stopped by user.", "warn");
         return { ok: true };
@@ -547,19 +1232,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { ok: true, intervalMinutes };
       }
 
+      case "START_FULL_AUTO_APPLY": {
+        const targetTabId = payload.tabId || sender?.tab?.id;
+        if (!targetTabId) return { ok: false, error: "No active tab found." };
+        if (payload.awaitCompletion) {
+          return await runFullAutoApplyWorkflow(targetTabId, payload.options || {});
+        }
+        runFullAutoApplyWorkflow(targetTabId, payload.options || {});
+        return { ok: true, started: true, tabId: targetTabId };
+      }
+
+      case "STOP_FULL_AUTO_APPLY": {
+        autoApplyAbortFlag = true;
+        return { ok: true, stopping: true };
+      }
+
+      case "GET_AUTO_APPLY_STATUS": {
+        return { ok: true, status: currentAutoApplyStatus };
+      }
+
       case "FETCH_IMAP_OTP": {
-        const companionUrl = state.settings?.companionServerUrl || "http://127.0.0.1:18765";
-        const resp = await fetch(`${companionUrl}/api/imap-otp`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: state.credentials.portalEmail,
-            appPassword: state.credentials.gmailAppPassword,
-            senderFilter: payload.senderFilter || ""
-          })
+        const res = await fetchOtpDualEngine(state, {
+          tabUrl: sender?.tab?.url || payload.tabUrl || "",
+          sinceEpochMs: payload.sinceEpochMs || 0,
+          senderFilter: payload.senderFilter || ""
         });
-        const data = await resp.json();
-        return { ok: resp.ok, ...data };
+        return res;
       }
 
       case "OPEN_DASHBOARD": {
@@ -625,5 +1323,5 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     .then((res) => sendResponse(res))
     .catch((err) => sendResponse({ ok: false, error: err?.message || String(err) }));
 
-  return true; // Keep message channel open for async response
+  return true;
 });

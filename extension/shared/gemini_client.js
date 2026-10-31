@@ -13,15 +13,22 @@ function buildCandidateChain(requestedModel, settings) {
   if (settings?.enableSmartFallback === false) {
     return [primary];
   }
-  const defaults = [
-    primary,
-    normalizeModelName(settings?.proModel || "gemini-3.1-pro-preview"),
-    "gemini-3.8-flash",
-    "gemini-3.5-flash",
-    "gemini-3-flash-preview",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite"
-  ];
+  const isProFirst = /pro/i.test(primary);
+  const defaults = isProFirst
+    ? [
+        primary,
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
+        "gemini-3.8-flash",
+        "gemini-2.0-flash"
+      ]
+    : [
+        primary,
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        normalizeModelName(settings?.proModel || "gemini-3.1-pro-preview")
+      ];
   return [...new Set(defaults)];
 }
 
@@ -32,6 +39,7 @@ export async function callGemini({
   jsonMode = false,
   temperature = 0.35,
   maxOutputTokens = 4096,
+  timeoutMs = 15000,
   settings = {}
 }) {
   const apiKey = (settings?.geminiApiKey || "").trim();
@@ -58,19 +66,23 @@ export async function callGemini({
       body.generationConfig.responseMimeType = "application/json";
     }
 
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const resp = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: controller.signal
       });
+      clearTimeout(timer);
 
       if (!resp.ok) {
         const errPayload = await resp.json().catch(() => ({}));
         const msg = errPayload?.error?.message || `HTTP ${resp.status}`;
         errors.push(`${model}: [${resp.status}] ${msg.slice(0, 120)}`);
         if (resp.status === 429 || resp.status === 404 || resp.status === 503) {
-          continue; // Try next model in fallback chain
+          continue;
         }
         throw new Error(`${model} error (${resp.status}): ${msg}`);
       }
@@ -94,7 +106,30 @@ export async function callGemini({
         fallbackTrace: errors
       };
     } catch (err) {
-      errors.push(`${model}: ${err.message}`);
+      clearTimeout(timer);
+      errors.push(`${model}: ${err?.name === "AbortError" ? "Timeout" : err.message}`);
+      // If browser outbound HTTPS is restricted (e.g. corporate Chrome policy), try local Companion relay immediately
+      const companionUrl = settings?.companionServerUrl || "http://127.0.0.1:18765";
+      try {
+        const relayResp = await fetch(`${companionUrl}/api/gemini-generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ apiKey, models: chain, requestBody: body })
+        });
+        if (relayResp.ok) {
+          const relayData = await relayResp.json();
+          if (relayData?.ok && relayData.text) {
+            return {
+              text: relayData.text,
+              modelUsed: relayData.modelUsed,
+              requestedModel: chain[0],
+              fellBack: relayData.modelUsed !== chain[0],
+              fallbackTrace: errors
+            };
+          }
+        }
+      } catch (_) {}
+      break;
     }
   }
 
@@ -249,10 +284,13 @@ Output ONLY the body text of the cover letter starting with "Dear ${jobMeta.comp
 
 export async function answerApplicationQuestionWithGemini(questionCtx, jobMeta, profile, savedAnswers = [], settings = {}) {
   const maxChars = questionCtx.maxLength && questionCtx.maxLength > 20 ? questionCtx.maxLength : null;
-  const systemInstruction = `You write concise, natural, first-person job application answers for Raviteja Velanati.
-- Never use AI buzzwords ("delve", "comprehensive", "seamlessly", "leverage", "testament").
-- Ground every technical claim strictly in Raviteja's real work at GlobalLogic (Client: Google AI), MassDigi at WPI, Wipro, and Clark University M.S. CS.
-- Answer directly without preamble or quotation marks.${maxChars ? `\n- STRICT CHARACTER LIMIT: Must be under ${Math.floor(maxChars * 0.9)} characters.` : " Keep open-ended answers to 3-5 crisp sentences (60-110 words) unless it is a short factual field."}`;
+  const isShortInput = questionCtx.fieldType === "input" || questionCtx.fieldType === "select";
+  const systemInstruction = `You write ultra-clean, direct, first-person job application answers for Raviteja Velanati.
+- NEVER add extra explanation, disclaimers, quotation marks, or unrequested details. Output ONLY what the field strictly asks for.
+- Never use AI buzzwords ("delve", "comprehensive", "seamlessly", "leverage", "testament", "thrilled").
+- If Options are provided, output ONLY the exact verbatim text of the single best matching option.
+- If the field is a single-line input or asks a factual question (years of experience, visa status, citizenship, salary, city, date, yes/no), output ONLY the minimal exact value (e.g. "3.5", "H-1B", "India", "120000", "Yes", "No") — NEVER a full sentence.
+- Ground every technical claim strictly in Raviteja's real work at GlobalLogic (Client: Google AI), MassDigi at WPI, Wipro, and Clark University M.S. CS.${maxChars ? `\n- STRICT CHARACTER LIMIT: Must be under ${Math.floor(maxChars * 0.9)} characters.` : isShortInput ? "\n- Keep single-line input answers under 12 words." : "\n- Keep open-ended textarea answers concise: 2-4 crisp sentences (45-85 words max)."}`;
 
   const prompt = `APPLICATION QUESTION: "${questionCtx.label}"
 Field Type: ${questionCtx.fieldType || "textarea"}
