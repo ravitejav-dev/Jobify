@@ -8,12 +8,12 @@
 
 ### 1. Clone & Load in Chrome (One-Time Setup)
 ```bash
-git clone https://github.com/ravitejav-dev/jobify.git
-cd jobify
+git clone https://github.com/ravitejav-dev/Jobify.git
+cd Jobify
 ```
 1. Open Chrome on your personal laptop → `chrome://extensions`
 2. Enable **Developer mode** (top-right toggle).
-3. Click **Load unpacked** → select the **`jobify/extension`** folder.
+3. Click **Load unpacked** → select the **`Jobify/extension`** folder.
 4. Pin **Jobify Copilot** (`J` icon) in your Chrome toolbar.
 
 ### 2. Add Your API Key & Portal Password Locally (Zero Secrets in Git)
