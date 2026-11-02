@@ -15,15 +15,19 @@ function esc(s) {
     .replace(/>/g, "&gt;");
 }
 
-async function initSidePanel() {
-  const resp = await chrome.runtime.sendMessage({ type: "GET_ALL_STATE" });
-  const state = resp?.state || {};
+function setLiveStatus(msg) {
+  const el = document.getElementById("sp-live-status");
+  if (el) el.textContent = msg || "";
+}
+
+async function getActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab;
+}
+
+function renderVaultContent(state) {
   const p = state.profile?.personal || {};
   const creds = state.credentials || {};
-
-  document.getElementById("sp-hub").addEventListener("click", () => {
-    chrome.runtime.sendMessage({ type: "OPEN_DASHBOARD" });
-  });
 
   const fields = [
     ["First Name", p.firstName],
@@ -32,6 +36,7 @@ async function initSidePanel() {
     ["Phone", p.phone],
     ["Location", `${p.city}, ${p.stateCode} ${p.postalCode}`],
     ["LinkedIn", p.linkedin],
+    ["GitHub", p.github],
     ["Portal Email", creds.portalEmail],
     ["Portal Password", creds.portalPassword],
     ["Desired Salary", state.profile?.workAuthAndEEO?.desiredSalaryDisplay],
@@ -99,6 +104,68 @@ async function initSidePanel() {
       navigator.clipboard.writeText(sa?.answer || "");
       notifyCopied("Saved Answer");
     });
+  });
+}
+
+async function initSidePanel() {
+  const resp = await chrome.runtime.sendMessage({ type: "GET_ALL_STATE" });
+  const state = resp?.state || {};
+  renderVaultContent(state);
+
+  if (resp?.autoApplyStatus?.stepLabel) {
+    setLiveStatus(resp.autoApplyStatus.stepLabel);
+  }
+
+  document.getElementById("sp-hub").addEventListener("click", () => {
+    chrome.runtime.sendMessage({ type: "OPEN_DASHBOARD" });
+  });
+
+  document.getElementById("sp-full-auto")?.addEventListener("click", async () => {
+    const tab = await getActiveTab();
+    if (!tab?.id) return setLiveStatus("⚠️ Focus a job tab first.");
+    setLiveStatus("🚀 Tailoring resume, filling & auto-submitting...");
+    const r = await chrome.runtime
+      .sendMessage({
+        type: "START_FULL_AUTO_APPLY",
+        payload: { tabId: tab.id, options: { autoSubmit: true, tailorResume: true } }
+      })
+      .catch(() => null);
+    setLiveStatus(r?.ok ? "🚀 Running on active tab!" : `⚠️ ${r?.error || "Failed"}`);
+  });
+
+  document.getElementById("sp-fast-auto")?.addEventListener("click", async () => {
+    const tab = await getActiveTab();
+    if (!tab?.id) return setLiveStatus("⚠️ Focus a job tab first.");
+    setLiveStatus("⚡ Fast filling & auto-submitting...");
+    const r = await chrome.runtime
+      .sendMessage({
+        type: "START_FULL_AUTO_APPLY",
+        payload: { tabId: tab.id, options: { autoSubmit: true, tailorResume: false } }
+      })
+      .catch(() => null);
+    setLiveStatus(r?.ok ? "⚡ Fast Auto-Apply running!" : `⚠️ ${r?.error || "Failed"}`);
+  });
+
+  document.getElementById("sp-fill-only")?.addEventListener("click", async () => {
+    const tab = await getActiveTab();
+    if (!tab?.id) return setLiveStatus("⚠️ Focus a job tab first.");
+    setLiveStatus("⏳ Filling current screen only...");
+    const r = await chrome.runtime
+      .sendMessage({
+        type: "RUN_TAB_AUTOFILL",
+        payload: { tabId: tab.id, options: { fillOpenEndedWithAI: true } }
+      })
+      .catch(() => null);
+    setLiveStatus(
+      r?.ok && r.filledCount > 0 ? `✍️ Filled ${r.filledCount} field(s) (no submit).` : "⚠️ Expand the application form first."
+    );
+  });
+
+  chrome.storage?.onChanged?.addListener(async (_changes, area) => {
+    if (area !== "local") return;
+    const latest = await chrome.runtime.sendMessage({ type: "GET_ALL_STATE" }).catch(() => null);
+    if (latest?.state) renderVaultContent(latest.state);
+    if (latest?.autoApplyStatus?.stepLabel) setLiveStatus(latest.autoApplyStatus.stepLabel);
   });
 }
 

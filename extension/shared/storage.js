@@ -1,6 +1,7 @@
 // Unified Chrome Storage Manager for Jobify Copilot
 import {
   PROFILE_SCHEMA_VERSION,
+  SETTINGS_SCHEMA_VERSION,
   DEFAULT_PROFILE,
   DEFAULT_SETTINGS,
   DEFAULT_CREDENTIALS_VAULT,
@@ -74,32 +75,55 @@ export async function ensureInitialized() {
         ...prev.preferences,
         ...DEFAULT_PROFILE.preferences
       },
+      workExperience: DEFAULT_PROFILE.workExperience,
+      projects: DEFAULT_PROFILE.projects,
       resumes: [...customResumes, ...DEFAULT_PROFILE.resumes]
     };
   }
 
   if (!existing[KEYS.SETTINGS]) {
     patch[KEYS.SETTINGS] = seededSettings;
-  } else if (!existing[KEYS.SETTINGS].geminiApiKey && secrets.geminiApiKey) {
-    patch[KEYS.SETTINGS] = { ...existing[KEYS.SETTINGS], geminiApiKey: secrets.geminiApiKey };
+  } else {
+    const prevSet = existing[KEYS.SETTINGS];
+    const needsSettingsMigration = (prevSet.settingsSchemaVersion || 1) < SETTINGS_SCHEMA_VERSION;
+    const needsSecretKey = !prevSet.geminiApiKey && secrets.geminiApiKey;
+    const hasRetiredOrSlowModel = /^gemini-(1\.5|2\.0|2\.5|3\.8-flash|3\.6-flash)/i.test(prevSet.primaryModel || "");
+    if (needsSettingsMigration || needsSecretKey || hasRetiredOrSlowModel || prevSet.autoSubmitEnabled === undefined) {
+      patch[KEYS.SETTINGS] = {
+        ...DEFAULT_SETTINGS,
+        ...prevSet,
+        settingsSchemaVersion: SETTINGS_SCHEMA_VERSION,
+        primaryModel: hasRetiredOrSlowModel ? DEFAULT_SETTINGS.primaryModel : prevSet.primaryModel || DEFAULT_SETTINGS.primaryModel,
+        proModel: DEFAULT_SETTINGS.proModel,
+        fallbackChain: DEFAULT_SETTINGS.fallbackChain,
+        autopilotMode: needsSettingsMigration ? "full_auto" : prevSet.autopilotMode || "full_auto",
+        autoSubmitEnabled: prevSet.autoSubmitEnabled !== undefined ? prevSet.autoSubmitEnabled : true,
+        ...(needsSecretKey ? { geminiApiKey: secrets.geminiApiKey } : {})
+      };
+    }
   }
 
   if (!existing[KEYS.CREDENTIALS]) {
     patch[KEYS.CREDENTIALS] = seededCreds;
-  } else if (!existing[KEYS.CREDENTIALS].portalPassword && secrets.portalPassword) {
+  } else if (
+    (!existing[KEYS.CREDENTIALS].portalPassword && secrets.portalPassword) ||
+    (!existing[KEYS.CREDENTIALS].gmailAppPassword && secrets.gmailAppPassword)
+  ) {
     patch[KEYS.CREDENTIALS] = {
       ...existing[KEYS.CREDENTIALS],
-      portalPassword: secrets.portalPassword,
-      ...(secrets.gmailAppPassword ? { gmailAppPassword: secrets.gmailAppPassword } : {})
+      ...(secrets.portalEmail && !existing[KEYS.CREDENTIALS].portalEmail ? { portalEmail: secrets.portalEmail } : {}),
+      ...(secrets.portalPassword && !existing[KEYS.CREDENTIALS].portalPassword ? { portalPassword: secrets.portalPassword } : {}),
+      ...(secrets.gmailAppPassword && !existing[KEYS.CREDENTIALS].gmailAppPassword ? { gmailAppPassword: secrets.gmailAppPassword } : {})
     };
   }
 
   if (!existing[KEYS.SAVED_ANSWERS]) {
     patch[KEYS.SAVED_ANSWERS] = DEFAULT_SAVED_ANSWERS;
   } else if ((existing[KEYS.PROFILE]?.profileSchemaVersion || 1) < PROFILE_SCHEMA_VERSION) {
-    patch[KEYS.SAVED_ANSWERS] = existing[KEYS.SAVED_ANSWERS].map((sa) =>
-      sa.id === "sa_salary" ? DEFAULT_SAVED_ANSWERS.find((d) => d.id === "sa_salary") || sa : sa
-    );
+    patch[KEYS.SAVED_ANSWERS] = existing[KEYS.SAVED_ANSWERS].map((sa) => {
+      const defMatch = DEFAULT_SAVED_ANSWERS.find((d) => d.id === sa.id);
+      return defMatch ? { ...sa, questionPattern: defMatch.questionPattern, answer: sa.id === "sa_salary" ? defMatch.answer : sa.answer } : sa;
+    });
   }
   if (!existing[KEYS.APPLICATIONS]) patch[KEYS.APPLICATIONS] = [];
   if (!existing[KEYS.TAILORED_RESUMES]) patch[KEYS.TAILORED_RESUMES] = [];

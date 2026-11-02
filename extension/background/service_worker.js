@@ -716,48 +716,92 @@ async function executeMultiFrameAutofill(tabId, opts = {}) {
   return { ok: true, ...pass };
 }
 
-async function inspectTabFrames(tabId, topJobMeta = null) {
-  const state = await getAllState();
+async function executeAdapterAcrossTab(tabId, method, args = []) {
   let frameResults = [];
   try {
     frameResults = await chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
-      func: (profile, fallbackMeta) => {
-        if (!window.__JOBIFY_ADAPTERS__?.inspectAutonomousScreenState) return null;
-        return window.__JOBIFY_ADAPTERS__.inspectAutonomousScreenState(profile, fallbackMeta);
+      func: async (fnName, fnArgs) => {
+        const fn = window.__JOBIFY_ADAPTERS__?.[fnName];
+        if (typeof fn !== "function") return null;
+        return await fn(...(fnArgs || []));
       },
-      args: [state.profile, topJobMeta]
+      args: [method, args]
     });
   } catch (_) {
     try {
       frameResults = await chrome.scripting.executeScript({
         target: { tabId },
-        func: (profile, fallbackMeta) => {
-          if (!window.__JOBIFY_ADAPTERS__?.inspectAutonomousScreenState) return null;
-          return window.__JOBIFY_ADAPTERS__.inspectAutonomousScreenState(profile, fallbackMeta);
+        func: async (fnName, fnArgs) => {
+          const fn = window.__JOBIFY_ADAPTERS__?.[fnName];
+          if (typeof fn !== "function") return null;
+          return await fn(...(fnArgs || []));
         },
-        args: [state.profile, topJobMeta]
+        args: [method, args]
       });
-    } catch (__) {}
+    } catch (__) {
+      const rpcResp = await chrome.tabs
+        .sendMessage(tabId, { type: "ADAPTER_RPC", payload: { method, args } })
+        .catch(() => null);
+      if (rpcResp?.ok && rpcResp.result !== undefined) {
+        frameResults = [{ frameId: 0, result: rpcResp.result }];
+      }
+    }
   }
+  return frameResults || [];
+}
+
+async function executeMultiFrameValidationHeal(tabId, opts = {}) {
+  if (!tabId) return { healedCount: 0, remainingErrors: [] };
+  await ensureTabScripts(tabId);
+  const frameResults = await executeAdapterAcrossTab(tabId, "healFormValidationErrors", [opts]);
+
+  let healedCount = 0;
+  const remainingErrors = [];
+  let hardBlocker = { blocked: false, reason: null };
+  for (const entry of frameResults || []) {
+    const r = entry?.result;
+    if (!r) continue;
+    healedCount += Number(r.healedCount || 0);
+    if (Array.isArray(r.remainingErrors?.messages)) {
+      remainingErrors.push(...r.remainingErrors.messages);
+    }
+    if (r.hardBlocker?.blocked) {
+      hardBlocker = r.hardBlocker;
+    }
+  }
+  return { healedCount, remainingErrors, hardBlocker };
+}
+
+async function inspectTabFrames(tabId, topJobMeta = null) {
+  const state = await getAllState();
+  const frameResults = await executeAdapterAcrossTab(tabId, "inspectAutonomousScreenState", [
+    state.profile,
+    topJobMeta
+  ]);
 
   const valid = (frameResults || [])
-    .map((entry) => (entry?.result ? { frameId: entry.frameId, ...entry.result } : null))
+    .map((entry) => (entry?.result ? { frameId: entry.frameId ?? 0, ...entry.result } : null))
     .filter(Boolean);
 
   if (valid.length === 0) {
     return {
       url: "",
+      stepSignature: "",
       isSubmittedConfirmation: false,
       otpChallenge: { detected: false },
       isStandaloneAuthWall: false,
       hasApplyChoiceModal: false,
       needsEmailVerificationBanner: false,
       hasCandidateForm: false,
+      hasValidationErrors: false,
+      validationErrors: [],
+      hardBlocker: { blocked: false, reason: null },
       inventory: { totalFields: 0, emptyFieldsCount: 0, emptyRequiredCount: 0, requiresCoverLetter: false, fields: [] },
       hasApplyButton: false,
       hasNextButton: false,
       hasSubmitButton: false,
+      hasDisabledSubmit: false,
       jobMeta: topJobMeta || {}
     };
   }
@@ -779,9 +823,13 @@ async function inspectTabFrames(tabId, topJobMeta = null) {
   const emptyFieldsCount = valid.reduce((acc, v) => acc + (v.inventory?.emptyFieldsCount || 0), 0);
   const emptyRequiredCount = valid.reduce((acc, v) => acc + (v.inventory?.emptyRequiredCount || 0), 0);
   const requiresCoverLetter = valid.some((v) => v.inventory?.requiresCoverLetter);
+  const validationErrors = valid.flatMap((v) => v.validationErrors || []).slice(0, 8);
+  const hardBlockerFrame = valid.find((v) => v.hardBlocker?.blocked);
+  const stepSignature = valid.map((v) => `${v.frameId}:${v.stepSignature || ""}`).join("||");
 
   return {
     url: topFrame.url,
+    stepSignature,
     activeFormFrameId: richestFormFrame?.frameId ?? 0,
     authFrameId: authFrame?.frameId ?? 0,
     otpFrameId: otpFrame?.frameId ?? 0,
@@ -790,6 +838,9 @@ async function inspectTabFrames(tabId, topJobMeta = null) {
     hasApplyChoiceModal,
     needsEmailVerificationBanner,
     hasCandidateForm,
+    hasValidationErrors: validationErrors.length > 0,
+    validationErrors,
+    hardBlocker: hardBlockerFrame?.hardBlocker || { blocked: false, reason: null },
     isStandaloneAuthWall:
       Boolean(authFrame) &&
       !hasApplyChoiceModal &&
@@ -808,8 +859,50 @@ async function inspectTabFrames(tabId, topJobMeta = null) {
       !otpFrame,
     hasNextButton: valid.some((v) => v.hasNextButton),
     hasSubmitButton: valid.some((v) => v.hasSubmitButton),
+    hasDisabledSubmit: valid.some((v) => v.hasDisabledSubmit),
     jobMeta: richestMetaFrame?.jobMeta || topFrame.jobMeta || topJobMeta || {}
   };
+}
+
+// Accurately verify whether a Submit click succeeded, triggered OTP, or was blocked by form validation
+async function waitForPostSubmitOutcome(tabId, preSubmitScreen, jobMeta, hadHtml5Invalid = false) {
+  await waitForTabSettle(tabId, 450, 3200);
+  let formGoneStreak = 0;
+  let lastScreen = null;
+
+  for (let tick = 0; tick < 12; tick++) {
+    await ensureTabScripts(tabId);
+    const s = await inspectTabFrames(tabId, jobMeta);
+    lastScreen = s;
+
+    if (s.isSubmittedConfirmation) {
+      return { outcome: "confirmed", screen: s };
+    }
+    if (s.otpChallenge?.detected) {
+      return { outcome: "otp", screen: s };
+    }
+
+    const hadFormBefore = Boolean(preSubmitScreen?.hasCandidateForm || (preSubmitScreen?.inventory?.totalFields || 0) > 0);
+    if (hadFormBefore && !s.hasSubmitButton && !s.hasCandidateForm && !s.hasValidationErrors && !s.isStandaloneAuthWall) {
+      formGoneStreak++;
+      if (formGoneStreak >= 2) {
+        return { outcome: "confirmed", screen: s };
+      }
+    } else {
+      formGoneStreak = 0;
+    }
+
+    if (tick >= 1 && s.hasSubmitButton && (s.hasValidationErrors || hadHtml5Invalid || s.hardBlocker?.blocked)) {
+      return { outcome: "validation_blocked", screen: s };
+    }
+
+    await sleep(420);
+  }
+
+  if (lastScreen && !lastScreen.hasSubmitButton && !lastScreen.hasCandidateForm && !lastScreen.hasValidationErrors) {
+    return { outcome: "confirmed", screen: lastScreen };
+  }
+  return { outcome: "still_on_form", screen: lastScreen };
 }
 
 function findSpawnedChildTab(openerTabId, sinceMs) {
@@ -895,33 +988,46 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         ? initialScreen.jobMeta
         : options.jobMeta || initialScreen.jobMeta || {};
 
-    // Step 1: Tailor ATS Resume PDF with Gemini
-    if (options.tailorResume !== false && (jobMeta.description || "").length > 40) {
+    // Step 1: Tailor ATS Resume PDF & Requested Cover Letter PDF in Parallel
+    const needResumeTailor = options.tailorResume !== false && (jobMeta.description || "").length > 40;
+    const needCoverLetter = Boolean(jobMeta.mentionsCoverLetter || initialScreen.inventory?.requiresCoverLetter);
+
+    if (needResumeTailor || needCoverLetter) {
       await broadcastAutoApplyProgress(tabId, {
-        stage: "tailoring_resume",
-        stepLabel: `✨ Step 1: Tailoring Resume for ${jobMeta.company || "Role"}`,
-        detail: "Injecting missing ATS keywords & compiling single-column PDF..."
+        stage: needResumeTailor ? "tailoring_resume" : "tailoring_cover_letter",
+        stepLabel:
+          needResumeTailor && needCoverLetter
+            ? `✨ Step 1: Tailoring Resume & Cover Letter for ${jobMeta.company || "Role"}`
+            : needResumeTailor
+              ? `✨ Step 1: Tailoring Resume for ${jobMeta.company || "Role"}`
+              : "📝 Step 1: Tailoring Cover Letter PDF",
+        detail: "Injecting ATS keywords & compiling publication-grade PDF documents..."
       });
-      try {
-        const trOut = await buildAndSaveTailoredResume(jobMeta, state, options.preferredModel || null);
-        tailoredResume = trOut.record;
-      } catch (tailorErr) {
-        await appendAutopilotLog(`Resume tailor fallback to default PDF: ${tailorErr.message}`, "warn");
+
+      const tasks = [];
+      if (needResumeTailor) {
+        tasks.push(
+          buildAndSaveTailoredResume(jobMeta, state, options.preferredModel || null)
+            .then((trOut) => {
+              tailoredResume = trOut.record;
+            })
+            .catch((tailorErr) =>
+              appendAutopilotLog(`Resume tailor fallback to default PDF: ${tailorErr.message}`, "warn")
+            )
+        );
       }
-    }
-
-    if (autoApplyAbortFlag) throw new Error("Stopped by user.");
-
-    // Also tailor Cover Letter upfront if JD explicitly mentions/requests one or form requires one
-    if (jobMeta.mentionsCoverLetter || initialScreen.inventory?.requiresCoverLetter) {
-      await broadcastAutoApplyProgress(tabId, {
-        stage: "tailoring_cover_letter",
-        stepLabel: "📝 Step 1b: Tailoring Cover Letter PDF",
-        detail: "Cover letter requested — drafting concise technical cover letter..."
-      });
-      try {
-        tailoredCoverLetter = await buildAndSaveCoverLetter(jobMeta, state, "Concise & Technical");
-      } catch (_) {}
+      if (needCoverLetter) {
+        tasks.push(
+          buildAndSaveCoverLetter(jobMeta, state, "Concise & Technical")
+            .then((clRec) => {
+              tailoredCoverLetter = clRec;
+            })
+            .catch(() => {})
+        );
+      }
+      await Promise.all(tasks);
+      // Reload state after parallel storage writes so both tailoredResume & tailoredCoverLetter are reflected
+      state = await getAllState();
     }
 
     if (autoApplyAbortFlag) throw new Error("Stopped by user.");
@@ -946,15 +1052,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
       const clickTs = Date.now();
       authOrSubmitTriggerMs = clickTs;
 
-      await chrome.scripting
-        .executeScript({
-          target: { tabId, allFrames: true },
-          func: async () => {
-            if (!window.__JOBIFY_ADAPTERS__?.clickApplyEntryButton) return null;
-            return await window.__JOBIFY_ADAPTERS__.clickApplyEntryButton();
-          }
-        })
-        .catch(() => {});
+      await executeAdapterAcrossTab(tabId, "clickApplyEntryButton", []);
 
       await sleep(1200);
       const childTab = findSpawnedChildTab(tabId, clickTs);
@@ -967,11 +1065,23 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
       await ensureTabScripts(tabId);
     }
 
-    // Step 3..6: Autonomous Modal/Apply Gate + Multi-Stage Auth + Email OTP/Link + Clean 1-by-1 Fill + Next + Submit Loop
+    // Step 3..6: Autonomous Modal/Apply Gate + Multi-Stage Auth + Email OTP/Link + Clean 1-by-1 Fill + Next + Self-Healing Auto-Submit Loop
     let authAttempts = 0;
-    let retriedSubmitValidation = false;
+    let nextHealAttempts = 0;
+    let submitHealAttempts = 0;
+    let skipNextCleanFillOnce = false;
 
-    for (let stepIdx = 1; stepIdx <= 18; stepIdx++) {
+    const buildHealOptions = (currentState) => ({
+      resumeChoice: tailoredResume?.id || currentState.settings?.defaultResumeVariant || "one_page",
+      topJobMeta: jobMeta,
+      coverLetterRecord: tailoredCoverLetter,
+      coverLetterText: tailoredCoverLetter?.coverLetter || "",
+      coverLetterPdfPayload: tailoredCoverLetter?.pdfBase64
+        ? { fileName: tailoredCoverLetter.fileName, base64: tailoredCoverLetter.pdfBase64 }
+        : null
+    });
+
+    for (let stepIdx = 1; stepIdx <= 20; stepIdx++) {
       if (autoApplyAbortFlag) throw new Error("Stopped by user.");
 
       await ensureTabScripts(tabId);
@@ -1020,15 +1130,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         });
         const gateTs = Date.now();
         authOrSubmitTriggerMs = gateTs;
-        await chrome.scripting
-          .executeScript({
-            target: { tabId, allFrames: true },
-            func: async () => {
-              if (!window.__JOBIFY_ADAPTERS__?.clickApplyEntryButton) return null;
-              return await window.__JOBIFY_ADAPTERS__.clickApplyEntryButton();
-            }
-          })
-          .catch(() => {});
+        await executeAdapterAcrossTab(tabId, "clickApplyEntryButton", []);
 
         await sleep(1100);
         const childTab = findSpawnedChildTab(tabId, gateTs);
@@ -1081,14 +1183,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
           detail: `Retrieved via ${otpSource} — verifying code & continuing...`
         });
 
-        await chrome.scripting.executeScript({
-          target: { tabId, allFrames: true },
-          func: async (code) => {
-            if (!window.__JOBIFY_ADAPTERS__?.fillOtpChallengeAndSubmit) return null;
-            return await window.__JOBIFY_ADAPTERS__.fillOtpChallengeAndSubmit(code);
-          },
-          args: [otpCode]
-        });
+        await executeAdapterAcrossTab(tabId, "fillOtpChallengeAndSubmit", [otpCode]);
 
         await waitForTabSettle(tabId, 1500, 7000);
         continue;
@@ -1117,16 +1212,10 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
           detail: `Using ${state.credentials.portalEmail} (handling Create Account + Sign In + Verify Password)...`
         });
 
-        const authExec = await chrome.scripting
-          .executeScript({
-            target: { tabId, allFrames: true },
-            func: async (creds, history) => {
-              if (!window.__JOBIFY_ADAPTERS__?.performAutonomousAuth) return null;
-              return await window.__JOBIFY_ADAPTERS__.performAutonomousAuth(creds, history);
-            },
-            args: [state.credentials, authHistory]
-          })
-          .catch(() => []);
+        const authExec = await executeAdapterAcrossTab(tabId, "performAutonomousAuth", [
+          state.credentials,
+          authHistory
+        ]);
 
         let needsVerifyLinkNow = false;
         for (const entry of authExec || []) {
@@ -1152,7 +1241,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
       }
 
       // Check D: Application Form Step — Extract Inventory -> On-Demand Cover Letter if Required -> Fill 1-by-1 Cleanly
-      if (screen.inventory.totalFields > 0) {
+      if (screen.inventory.totalFields > 0 && !skipNextCleanFillOnce) {
         if (screen.inventory.requiresCoverLetter && !tailoredCoverLetter) {
           await broadcastAutoApplyProgress(tabId, {
             stage: "tailoring_cover_letter",
@@ -1167,50 +1256,68 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         await broadcastAutoApplyProgress(tabId, {
           stage: "filling_fields",
           stepLabel: `✍️ Filling ${screen.inventory.totalFields} Fields Cleanly (1 by 1)`,
-          detail: `Step ${stepIdx}: Filling strictly needed fields & skipping optional fluff...`
+          detail: `Step ${stepIdx}: Filling needed fields, checkboxes & required questions...`
         });
 
         const fillPass = await executeMultiFrameAutofill(tabId, {
-          resumeChoice: tailoredResume?.id || state.settings?.defaultResumeVariant || "one_page",
+          ...buildHealOptions(state),
           sequentialOneByOne: true,
           onlyNeededCleanMode: true,
           forceOverwrite: false,
-          fillOpenEndedWithAI: true,
-          topJobMeta: jobMeta,
-          coverLetterRecord: tailoredCoverLetter,
-          coverLetterText: tailoredCoverLetter?.coverLetter || "",
-          coverLetterPdfPayload: tailoredCoverLetter?.pdfBase64
-            ? { fileName: tailoredCoverLetter.fileName, base64: tailoredCoverLetter.pdfBase64 }
-            : null
+          fillOpenEndedWithAI: true
         });
 
         totalFilledFields += Number(fillPass?.filledCount || 0);
       }
+      skipNextCleanFillOnce = false;
 
       if (autoApplyAbortFlag) throw new Error("Stopped by user.");
 
       // Advance Wizard ("Next / Continue") OR Final "Submit Application"
-      const allowFinalSubmit = options.autoSubmit !== false;
-      const navExec = await chrome.scripting.executeScript({
-        target: { tabId, allFrames: true },
-        func: async (allowSub) => {
-          if (!window.__JOBIFY_ADAPTERS__?.clickWizardNextOrSubmit) return { action: "none" };
-          return await window.__JOBIFY_ADAPTERS__.clickWizardNextOrSubmit({ allowFinalSubmit: allowSub });
-        },
-        args: [allowFinalSubmit]
-      });
+      const allowFinalSubmit =
+        options.autoSubmit !== undefined
+          ? Boolean(options.autoSubmit)
+          : state.settings?.autoSubmitEnabled !== false;
+
+      const navExec = await executeAdapterAcrossTab(tabId, "clickWizardNextOrSubmit", [
+        { allowFinalSubmit }
+      ]);
 
       const actions = (navExec || []).map((e) => e?.result).filter(Boolean);
       const nextAct = actions.find((a) => a.action === "next");
       const submitAct = actions.find((a) => a.action === "submit");
+      const hasDisabledSubmit = actions.some((a) => a.hasDisabledSubmit);
 
       if (nextAct) {
         await broadcastAutoApplyProgress(tabId, {
           stage: "advancing_step",
           stepLabel: `➡️ Advancing Wizard ('${nextAct.buttonText}')`,
-          detail: `Filled ${totalFilledFields} fields so far — loading next page...`
+          detail: `Filled ${totalFilledFields} fields so far — checking next step...`
         });
-        await waitForTabSettle(tabId, 1300, 7000);
+        await waitForTabSettle(tabId, 1100, 6500);
+
+        const afterNext = await inspectTabFrames(tabId, jobMeta);
+        if (
+          !afterNext.isSubmittedConfirmation &&
+          !afterNext.otpChallenge?.detected &&
+          !afterNext.isStandaloneAuthWall &&
+          (afterNext.stepSignature === screen.stepSignature || afterNext.hasValidationErrors || nextAct.hadHtml5Invalid) &&
+          nextHealAttempts < 3
+        ) {
+          nextHealAttempts++;
+          await broadcastAutoApplyProgress(tabId, {
+            stage: "healing_validation",
+            stepLabel: `🩹 Healing Step Validation (${nextHealAttempts}/3)`,
+            detail:
+              afterNext.validationErrors?.[0] ||
+              "Filling unmarked required fields to advance wizard step..."
+          });
+          const healRes = await executeMultiFrameValidationHeal(tabId, buildHealOptions(state));
+          totalFilledFields += Number(healRes.healedCount || 0);
+          skipNextCleanFillOnce = true;
+        } else {
+          nextHealAttempts = 0;
+        }
         continue;
       }
 
@@ -1219,53 +1326,146 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         await broadcastAutoApplyProgress(tabId, {
           stage: "submitting",
           stepLabel: `🚀 Submitting Application ('${submitAct.buttonText}')`,
-          detail: "Checking for confirmation or post-submit email security code..."
+          detail: "Verifying submission confirmation or post-submit security code..."
         });
-        await waitForTabSettle(tabId, 1800, 7500);
 
-        const postSubmit = await inspectTabFrames(tabId, jobMeta);
-        if (postSubmit.otpChallenge?.detected) {
+        const postRes = await waitForPostSubmitOutcome(
+          tabId,
+          screen,
+          jobMeta,
+          Boolean(submitAct.hadHtml5Invalid)
+        );
+        const postSubmit = postRes.screen || (await inspectTabFrames(tabId, jobMeta));
+
+        if (postRes.outcome === "otp" || postSubmit.otpChallenge?.detected) {
           // Loop continues so Check B reads & enters Greenhouse/ATS post-submit security code!
           continue;
         }
-        if (
-          !postSubmit.isSubmittedConfirmation &&
-          postSubmit.hasSubmitButton &&
-          postSubmit.inventory.emptyRequiredCount > 0 &&
-          !retriedSubmitValidation
-        ) {
-          retriedSubmitValidation = true;
+
+        if (postRes.outcome === "confirmed" || postSubmit.isSubmittedConfirmation) {
+          await upsertApplication({
+            company: jobMeta.company || "Target Company",
+            role: jobMeta.title || "AI / Software Engineer",
+            location: jobMeta.location || "",
+            ats: jobMeta.ats || "Career Portal",
+            url: postSubmit.url || jobMeta.url || "",
+            status: "Applied",
+            matchScore: 94,
+            resumeUsed: tailoredResume?.fileName || "Raviteja_Velanati_Resume_1Page.pdf",
+            notes: `Full Auto-Apply submitted (${totalFilledFields} fields filled cleanly).`
+          });
+
+          await broadcastAutoApplyProgress(tabId, {
+            running: false,
+            completed: true,
+            stage: "completed",
+            stepLabel: "✅ Application Submitted!",
+            detail: `Logged ${jobMeta.company || "Role"} as Applied (${totalFilledFields} fields filled cleanly).`
+          });
+
+          return {
+            ok: true,
+            submitted: true,
+            tabId,
+            totalFilledFields,
+            tailoredResumeFile: tailoredResume?.fileName || null,
+            coverLetterFile: tailoredCoverLetter?.fileName || null
+          };
+        }
+
+        // Submit did NOT confirm yet — check for CAPTCHA or self-heal form validation up to 3 rounds!
+        if (postSubmit.hardBlocker?.blocked) {
+          await upsertApplication({
+            company: jobMeta.company || "Target Company",
+            role: jobMeta.title || "AI / Software Engineer",
+            location: jobMeta.location || "",
+            ats: jobMeta.ats || "Career Portal",
+            url: postSubmit.url || jobMeta.url || "",
+            status: "Saved",
+            matchScore: 92,
+            resumeUsed: tailoredResume?.fileName || "Raviteja_Velanati_Resume_1Page.pdf",
+            notes: `Autofilled ${totalFilledFields} fields — paused on CAPTCHA challenge.`
+          });
+          await broadcastAutoApplyProgress(tabId, {
+            running: false,
+            completed: false,
+            stage: "paused_captcha",
+            stepLabel: "🧩 Complete CAPTCHA to Finish Submit",
+            detail: "All fields are filled — solve the CAPTCHA checkbox and click Submit."
+          });
+          return {
+            ok: true,
+            submitted: false,
+            blockedByCaptcha: true,
+            tabId,
+            totalFilledFields,
+            tailoredResumeFile: tailoredResume?.fileName || null,
+            coverLetterFile: tailoredCoverLetter?.fileName || null
+          };
+        }
+
+        if (submitHealAttempts < 3) {
+          submitHealAttempts++;
+          if (
+            !tailoredCoverLetter &&
+            (postSubmit.inventory?.fields?.some((f) => f.isCoverLetter) ||
+              (postSubmit.validationErrors || []).some((m) => /cover\s*letter/i.test(m)))
+          ) {
+            try {
+              tailoredCoverLetter = await buildAndSaveCoverLetter(jobMeta, state, "Concise & Technical");
+            } catch (_) {}
+          }
+
+          await broadcastAutoApplyProgress(tabId, {
+            stage: "healing_validation",
+            stepLabel: `🩹 Self-Healing Validation & Retrying Submit (${submitHealAttempts}/3)`,
+            detail:
+              postSubmit.validationErrors?.[0] ||
+              "Filling unmarked required fields & consent checkboxes before re-submitting..."
+          });
+
+          const healRes = await executeMultiFrameValidationHeal(tabId, buildHealOptions(state));
+          totalFilledFields += Number(healRes.healedCount || 0);
+          skipNextCleanFillOnce = true;
+          await sleep(250);
           continue;
         }
 
-        await upsertApplication({
-          company: jobMeta.company || "Target Company",
-          role: jobMeta.title || "AI / Software Engineer",
-          location: jobMeta.location || "",
-          ats: jobMeta.ats || "Career Portal",
-          url: postSubmit.url || jobMeta.url || "",
-          status: "Applied",
-          matchScore: 94,
-          resumeUsed: tailoredResume?.fileName || "Raviteja_Velanati_Resume_1Page.pdf",
-          notes: `Full Auto-Apply submitted (${totalFilledFields} fields filled cleanly).`
-        });
-
+        // Honest fallback after 3 full self-heal + re-submit attempts: never falsely claim Applied
+        const blockerMsg =
+          postSubmit.validationErrors?.[0] ||
+          "Form stayed open after submit — scrolled to remaining required field.";
         await broadcastAutoApplyProgress(tabId, {
           running: false,
-          completed: true,
-          stage: "completed",
-          stepLabel: "✅ Application Submitted!",
-          detail: `Logged ${jobMeta.company || "Role"} as Applied (${totalFilledFields} fields filled cleanly).`
+          completed: false,
+          stage: "needs_review",
+          stepLabel: "⚠️ 1 Field Needs Quick Check Before Submit",
+          detail: blockerMsg
         });
-
         return {
           ok: true,
-          submitted: true,
+          submitted: false,
+          validationErrors: postSubmit.validationErrors || [],
           tabId,
           totalFilledFields,
           tailoredResumeFile: tailoredResume?.fileName || null,
           coverLetterFile: tailoredCoverLetter?.fileName || null
         };
+      }
+
+      // If Submit button exists in DOM but is still disabled because of an unmarked required field, heal & unlock it!
+      if (allowFinalSubmit && hasDisabledSubmit && submitHealAttempts < 2) {
+        submitHealAttempts++;
+        await broadcastAutoApplyProgress(tabId, {
+          stage: "healing_validation",
+          stepLabel: `🔓 Unlocking Disabled Submit Button (${submitHealAttempts}/2)`,
+          detail: "Completing remaining unmarked fields to enable Submit..."
+        });
+        const healRes = await executeMultiFrameValidationHeal(tabId, buildHealOptions(state));
+        totalFilledFields += Number(healRes.healedCount || 0);
+        skipNextCleanFillOnce = true;
+        await sleep(300);
+        continue;
       }
 
       // Neither Next nor Submit clicked
@@ -1276,7 +1476,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         stepLabel: `✅ Autofilled ${totalFilledFields} Fields Cleanly`,
         detail: allowFinalSubmit
           ? "All visible fields filled — review final screen if custom submit control is present."
-          : "Paused before final submit (Review-Before-Submit mode)."
+          : "Paused before final submit (Auto-Submit toggle is OFF)."
       });
       return {
         ok: true,
@@ -1448,6 +1648,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { ok: true, record: saved };
       }
 
+      case "COMPILE_COVER_LETTER_PDF": {
+        const coverText = String(payload.coverLetter || payload.coverLetterText || "").trim();
+        if (!coverText) return { ok: false, error: "Cover letter text is empty." };
+        const comp = payload.company || payload.jobMeta?.company || "Target Company";
+        const role = payload.role || payload.jobMeta?.title || "AI / Software Engineer";
+        const pdfOut = await generateCoverLetterPdf(
+          coverText,
+          { company: comp, role },
+          state.profile,
+          state.settings
+        );
+        const safeComp = String(comp)
+          .replace(/[^a-zA-Z0-9]+/g, "_")
+          .replace(/^_|_$/g, "")
+          .slice(0, 24);
+        const fileName = `Raviteja_Velanati_${safeComp || "Cover"}_Cover_Letter.pdf`;
+        const saved = await saveCoverLetter({
+          ...(payload.recordId ? { id: payload.recordId } : {}),
+          company: comp,
+          role,
+          url: payload.url || payload.jobMeta?.url || "",
+          fileName,
+          modelUsed: payload.modelUsed || "edited",
+          fellBack: false,
+          pdfEngine: pdfOut.engine,
+          coverLetter: coverText,
+          pdfBase64: pdfOut.pdfBase64
+        });
+        return {
+          ok: true,
+          pdfBase64: pdfOut.pdfBase64,
+          fileName,
+          engine: pdfOut.engine,
+          record: saved
+        };
+      }
+
       case "ANSWER_APPLICATION_QUESTION": {
         const { questionCtx, jobMeta, saveToVault } = payload;
         if (!payload.forceAi) {
@@ -1582,11 +1819,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "START_FULL_AUTO_APPLY": {
         const targetTabId = payload.tabId || sender?.tab?.id;
         if (!targetTabId) return { ok: false, error: "No active tab found." };
+        const mergedOptions = { ...payload, ...(payload.options || {}) };
         if (payload.awaitCompletion) {
-          return await runFullAutoApplyWorkflow(targetTabId, payload.options || {});
+          return await runFullAutoApplyWorkflow(targetTabId, mergedOptions);
         }
-        runFullAutoApplyWorkflow(targetTabId, payload.options || {});
+        runFullAutoApplyWorkflow(targetTabId, mergedOptions);
         return { ok: true, started: true, tabId: targetTabId };
+      }
+
+      case "LAUNCH_TAB_AND_AUTO_APPLY": {
+        const jobUrl = String(payload.url || "").trim();
+        if (!jobUrl) return { ok: false, error: "Missing job URL." };
+        const createdTab = await chrome.tabs.create({ url: jobUrl, active: true });
+        (async () => {
+          await waitForTabComplete(createdTab.id, 18000);
+          await ensureTabScripts(createdTab.id);
+          await runFullAutoApplyWorkflow(createdTab.id, {
+            autoSubmit:
+              payload.options?.autoSubmit !== undefined
+                ? Boolean(payload.options.autoSubmit)
+                : state.settings?.autoSubmitEnabled !== false,
+            tailorResume: payload.options?.tailorResume !== false,
+            jobMeta: payload.options?.jobMeta || payload.jobMeta || null
+          });
+        })().catch(() => {});
+        return { ok: true, started: true, tabId: createdTab.id };
       }
 
       case "STOP_FULL_AUTO_APPLY": {

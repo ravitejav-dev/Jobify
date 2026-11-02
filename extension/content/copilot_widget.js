@@ -162,31 +162,52 @@
   }
 
   function attachSubmitAutoTracker() {
-    document.addEventListener(
-      "submit",
-      () => {
+    const logManualSubmitIfConfirmed = () => {
+      setTimeout(() => {
         if (!appState?.settings?.autoSaveSubmittedJobs) return;
-        const meta = window.__JOBIFY_ADAPTERS__?.extractJobMetadata(document);
+        if (autoApplyStatus?.running) return;
+        const adapters = window.__JOBIFY_ADAPTERS__;
+        if (!adapters) return;
+        const meta = adapters.extractJobMetadata(document);
         if (!meta?.isRelevantPage) return;
-        chrome.runtime.sendMessage({
-          type: "UPSERT_APPLICATION",
-          payload: {
-            application: {
-              company: meta.company,
-              role: meta.title,
-              location: meta.location,
-              ats: meta.ats,
-              url: meta.url,
-              status: "Applied",
-              matchScore: analysis?.match?.matchScore || 88,
-              resumeUsed:
-                latestTailoredRecord?.fileName ||
-                (appState?.settings?.defaultResumeVariant === "master"
-                  ? "Raviteja_Velanati_Master_Resume.pdf"
-                  : "Raviteja_Velanati_Resume_1Page.pdf")
+        const hasErrors = adapters.detectFormValidationErrors?.(document)?.hasErrors;
+        if (hasErrors) return;
+        const confirmed =
+          adapters.detectSubmissionConfirmation?.(document) ||
+          !adapters.findWizardButtons?.()?.submitBtn;
+        if (!confirmed) return;
+        chrome.runtime
+          .sendMessage({
+            type: "UPSERT_APPLICATION",
+            payload: {
+              application: {
+                company: meta.company,
+                role: meta.title,
+                location: meta.location,
+                ats: meta.ats,
+                url: meta.url,
+                status: "Applied",
+                matchScore: analysis?.match?.matchScore || 88,
+                resumeUsed:
+                  latestTailoredRecord?.fileName ||
+                  (appState?.settings?.defaultResumeVariant === "master"
+                    ? "Raviteja_Velanati_Master_Resume.pdf"
+                    : "Raviteja_Velanati_Resume_1Page.pdf")
+              }
             }
-          }
-        }).catch(() => {});
+          })
+          .catch(() => {});
+      }, 1800);
+    };
+
+    document.addEventListener("submit", logManualSubmitIfConfirmed, true);
+    document.addEventListener(
+      "click",
+      (e) => {
+        const btn = e.target?.closest?.(
+          ".ashby-application-form-submit-button, #submit_app, #btn-submit, [data-jobify-submit], button[type='submit']"
+        );
+        if (btn) logManualSubmitIfConfirmed();
       },
       true
     );
@@ -517,7 +538,7 @@
         type: "START_FULL_AUTO_APPLY",
         payload: {
           options: {
-            autoSubmit: true,
+            autoSubmit: appState?.settings?.autoSubmitEnabled !== false,
             tailorResume: true,
             jobMeta: pageMeta
           }
@@ -561,18 +582,26 @@
     const stopBtn = shadowRoot.getElementById("jb-hud-stop");
     if (!hud) return;
 
+    const isPausedOrAttention =
+      autoApplyStatus &&
+      !autoApplyStatus.running &&
+      (autoApplyStatus.stage === "needs_review" ||
+        autoApplyStatus.stage === "paused_captcha" ||
+        autoApplyStatus.stage === "paused_otp");
+
     const isRecentDone =
       autoApplyStatus &&
       !autoApplyStatus.running &&
-      (autoApplyStatus.completed || autoApplyStatus.error) &&
-      Date.now() - (autoApplyStatus.updatedAt || 0) < 12000;
+      (autoApplyStatus.completed || autoApplyStatus.error || isPausedOrAttention) &&
+      Date.now() - (autoApplyStatus.updatedAt || 0) < (isPausedOrAttention ? 22000 : 12000);
 
     if (autoApplyStatus?.running || isRecentDone) {
       hud.classList.add("visible");
       titleEl.textContent = autoApplyStatus.stepLabel || "🚀 Full Auto-Apply";
       detailEl.textContent = autoApplyStatus.detail || "";
       stopBtn.style.display = autoApplyStatus.running ? "inline-block" : "none";
-      hud.style.borderColor = autoApplyStatus.error ? "#f59e0b" : "#10b981";
+      hud.style.borderColor =
+        autoApplyStatus.error || isPausedOrAttention ? "#f59e0b" : "#10b981";
     } else {
       hud.classList.remove("visible");
     }
@@ -616,6 +645,7 @@
       const jdCompBadge = pageMeta?.compensation?.raw
         ? `<div style="margin-top:6px;"><span class="jb-chip green">💰 JD Salary Detected: ${escapeHtml(pageMeta.compensation.raw)}</span></div>`
         : "";
+      const autoSubOn = appState.settings?.autoSubmitEnabled !== false;
 
       body.innerHTML = `
         <div class="jb-card">
@@ -632,19 +662,28 @@
         </div>
 
         <div class="jb-card">
-          <button class="jb-btn auto-hero" id="jb-btn-full-auto" style="margin-bottom:10px;">
-            ${autoApplyStatus?.running ? "⏳ Auto-Apply Running... (Click to Stop)" : "🚀 Full Auto-Apply (Tailor → Login → Fill → Submit)"}
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:6px 8px;background:#0f172a;border:1px solid #334155;border-radius:8px;font-size:11.5px;">
+            <span style="color:#e2e8f0;font-weight:600;">🎯 Auto-Submit When Ready</span>
+            <input type="checkbox" id="jb-auto-submit-toggle" ${autoSubOn ? "checked" : ""} style="accent-color:#10b981;width:16px;height:16px;cursor:pointer;" />
+          </div>
+
+          <button class="jb-btn auto-hero" id="jb-btn-full-auto" style="margin-bottom:8px;">
+            ${autoApplyStatus?.running ? "⏳ Auto-Apply Running... (Click to Stop)" : `🚀 Full Auto-Apply (Tailor → Login → Fill${autoSubOn ? " → Submit" : ""})`}
+          </button>
+
+          <button class="jb-btn primary" id="jb-btn-fast-auto" style="margin-bottom:10px;">
+            ⚡ Fast Fill &amp; Auto-Submit (Default PDF)
           </button>
 
           <label class="jb-label">Resume PDF to Auto-Attach</label>
-          <select class="jb-select" id="jb-resume-select" style="margin-bottom:10px;">
+          <select class="jb-select" id="jb-resume-select" style="margin-bottom:8px;">
             ${tailoredOpts}
             <option value="one_page" ${!latestTailoredRecord && appState.settings.defaultResumeVariant === "one_page" ? "selected" : ""}>Raviteja_Velanati_Resume_1Page.pdf (1-Page Default)</option>
             <option value="master" ${!latestTailoredRecord && appState.settings.defaultResumeVariant === "master" ? "selected" : ""}>Raviteja_Velanati_Master_Resume.pdf (2-Page Master)</option>
           </select>
 
-          <button class="jb-btn primary" id="jb-btn-autofill">
-            ⚡ 1-Click Autofill Application
+          <button class="jb-btn secondary" id="jb-btn-autofill">
+            ✍️ Fill Current Screen Only (No Submit)
           </button>
 
           <div class="jb-row" style="margin-top:8px;">
@@ -670,6 +709,17 @@
         </div>
       `;
 
+      body.querySelector("#jb-auto-submit-toggle").addEventListener("change", async (e) => {
+        const enabled = Boolean(e.target.checked);
+        appState.settings.autoSubmitEnabled = enabled;
+        await safeSendMessage({
+          type: "UPDATE_SETTINGS",
+          payload: { settings: { autoSubmitEnabled: enabled } }
+        });
+        renderTabContent();
+        showToast(enabled ? "🎯 Auto-Submit enabled!" : "⏸️ Review-Before-Submit mode enabled.", "info");
+      });
+
       body.querySelector("#jb-btn-full-auto").addEventListener("click", async () => {
         if (autoApplyStatus?.running) {
           await safeSendMessage({ type: "STOP_FULL_AUTO_APPLY" });
@@ -684,8 +734,23 @@
           type: "START_FULL_AUTO_APPLY",
           payload: {
             options: {
-              autoSubmit: true,
+              autoSubmit: appState.settings?.autoSubmitEnabled !== false,
               tailorResume: true,
+              jobMeta: pageMeta
+            }
+          }
+        });
+      });
+
+      body.querySelector("#jb-btn-fast-auto").addEventListener("click", async () => {
+        drawerOpen = false;
+        renderDrawer();
+        await safeSendMessage({
+          type: "START_FULL_AUTO_APPLY",
+          payload: {
+            options: {
+              autoSubmit: true,
+              tailorResume: false,
               jobMeta: pageMeta
             }
           }
@@ -700,7 +765,7 @@
           await executeAutofillFromUI({ fillOpenEndedWithAI: true, buttonEl: b });
         } finally {
           b.disabled = false;
-          b.textContent = "⚡ 1-Click Autofill Application";
+          b.textContent = "✍️ Fill Current Screen Only (No Submit)";
         }
       });
 
@@ -996,7 +1061,29 @@
         showToast("📋 Copied Cover Letter!", "success");
       });
 
-      body.querySelector("#jb-dl-cl")?.addEventListener("click", () => {
+      body.querySelector("#jb-dl-cl")?.addEventListener("click", async () => {
+        const editedText = body.querySelector("#jb-cl-text")?.value || "";
+        if (editedText && editedText.trim() !== (latestCoverLetterRecord?.coverLetter || "").trim()) {
+          const recomp = await chrome.runtime
+            .sendMessage({
+              type: "COMPILE_COVER_LETTER_PDF",
+              payload: {
+                coverLetter: editedText,
+                company: pageMeta?.company || latestCoverLetterRecord?.company || "Company",
+                role: pageMeta?.title || latestCoverLetterRecord?.role || "Software Engineer",
+                recordId: latestCoverLetterRecord?.id || null
+              }
+            })
+            .catch(() => null);
+          if (recomp?.ok && recomp.pdfBase64) {
+            latestCoverLetterRecord = {
+              ...latestCoverLetterRecord,
+              coverLetter: editedText,
+              pdfBase64: recomp.pdfBase64,
+              fileName: recomp.fileName
+            };
+          }
+        }
         downloadBase64Pdf(latestCoverLetterRecord.pdfBase64, latestCoverLetterRecord.fileName);
       });
       return;
@@ -1136,7 +1223,8 @@
     "TRIGGER_AUTOFILL",
     "TRIGGER_LOCAL_AUTOFILL",
     "EXECUTE_AUTOPILOT_STEP",
-    "AUTO_APPLY_PROGRESS"
+    "AUTO_APPLY_PROGRESS",
+    "ADAPTER_RPC"
   ]);
 
   // Listen for Popup / Sidepanel / Autopilot commands strictly in top frame so analytics/reCAPTCHA iframes never hijack responses
@@ -1145,6 +1233,12 @@
       return false;
     }
     (async () => {
+      if (msg.type === "ADAPTER_RPC") {
+        const fn = window.__JOBIFY_ADAPTERS__?.[msg.payload?.method];
+        if (typeof fn !== "function") return { ok: false, error: `Unknown adapter method: ${msg.payload?.method}` };
+        const result = await fn(...(msg.payload?.args || []));
+        return { ok: true, result };
+      }
       if (msg.type === "AUTO_APPLY_PROGRESS") {
         autoApplyStatus = msg.payload || null;
         if (!document.getElementById("jobify-copilot-host") && pageMeta?.isRelevantPage) {
@@ -1197,13 +1291,8 @@
         });
         let submitted = false;
         if (msg.payload?.autoSubmit && res.filledCount > 0) {
-          const submitBtn = Array.from(
-            document.querySelectorAll("button[type='submit'], input[type='submit'], button[data-automation-id*='submit' i]")
-          ).find((b) => /submit|apply/i.test(b.innerText || b.value || ""));
-          if (submitBtn) {
-            submitBtn.click();
-            submitted = true;
-          }
+          const navAct = await window.__JOBIFY_ADAPTERS__?.clickWizardNextOrSubmit?.({ allowFinalSubmit: true });
+          submitted = navAct?.action === "submit";
         }
         return {
           ok: true,

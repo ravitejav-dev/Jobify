@@ -1,23 +1,27 @@
 // Jobify Pre-Analyzed Candidate Profile & Vault (Extracted from Raviteja Velanati's Master & 1-Page Resumes)
 
-export const PROFILE_SCHEMA_VERSION = 2;
+export const PROFILE_SCHEMA_VERSION = 4;
+export const SETTINGS_SCHEMA_VERSION = 3;
 
 export const DEFAULT_SETTINGS = {
+  settingsSchemaVersion: SETTINGS_SCHEMA_VERSION,
   geminiApiKey: "", // Loaded from gitignored shared/local_secrets.json or entered once in Jobify Vault UI
-  primaryModel: "gemini-3.8-flash",
-  proModel: "gemini-3.1-pro-preview",
+  primaryModel: "gemini-3.5-flash",
+  proModel: "gemini-3-flash-preview",
   enableSmartFallback: true,
   fallbackChain: [
-    "gemini-3.8-flash",
-    "gemini-3.1-pro-preview",
     "gemini-3.5-flash",
     "gemini-3-flash-preview",
-    "gemini-3.5-flash-lite"
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-pro-preview",
+    "gemini-3.8-flash",
+    "gemini-3.6-flash"
   ],
   companionServerUrl: "http://127.0.0.1:18765",
   autoShowCopilotWidget: true,
   autoSaveSubmittedJobs: true,
   autoAttachResumePdf: true,
+  autoSubmitEnabled: true,
   defaultResumeVariant: "one_page", // "one_page" | "master"
   autopilotMode: "full_auto" // "full_auto" (autonomous tailor -> apply -> fill -> submit) | "safe_review" (pause before final submit)
 };
@@ -237,8 +241,9 @@ export const DEFAULT_PROFILE = {
       currentlyWorking: false,
       employmentType: "Internship",
       highlights: [
-        "Programmed AI-driven NPC behavior in Unity/C# and C++ using finite state machines and behavior trees; built in-editor debugging and logging tools to reproduce AI anomalies faster.",
-        "Optimized memory allocation, asset loading, and object pooling to sustain 60+ FPS under heavy rendering loads; resolved 30+ integration defects in agile sprints."
+        "Engineered autonomous NPC decision systems in C# and C++ using finite state machines and behavior trees for real-time interactive simulation loops.",
+        "Built custom in-editor telemetry, state-inspection, and structured logging tools that isolated deterministic AI runtime anomalies across build regressions.",
+        "Optimized memory allocation, asynchronous asset streaming, and object pooling to sustain 60+ FPS under heavy rendering loads while resolving 30+ integration defects across agile sprints."
       ]
     },
     {
@@ -255,7 +260,8 @@ export const DEFAULT_PROFILE = {
       currentlyWorking: false,
       employmentType: "Internship",
       highlights: [
-        "Developed web applications and backend services on the .NET full-stack ecosystem (C#, SQL); accelerated C# architecture proficiency through structured mentoring and passed technical assessments."
+        "Developed full-stack web modules and RESTful backend services using .NET Core and C# integrated with normalized SQL relational schemas.",
+        "Implemented automated backend validation, SQL query tuning, and modular API endpoints while passing rigorous enterprise engineering assessments."
       ]
     }
   ],
@@ -265,15 +271,16 @@ export const DEFAULT_PROFILE = {
       name: "Agentic AI Evaluation & Trajectory Analysis Platform",
       stack: "Python, LangGraph, LangChain, FastAPI, Docker, Kubernetes, RAG",
       bullets: [
-        "Architected an evaluation platform processing 10K+ test cases daily to benchmark production LLM and multi-agent behaviors across containerized sandboxes; prevented capability drift across 12+ model iterations.",
+        "Architected an evaluation platform processing 10K+ test cases daily to benchmark production LLM and multi-agent behaviors across containerized sandboxes, preventing capability drift across 12+ model iterations.",
         "Implemented automated retry logic and outcome-analysis pipelines parsing tool-call sequences and reasoning traces, eliminating 95%+ of silent failures in edge-case handling."
       ]
     },
     {
       name: "AI-Native Developer Tooling & Automated Test Harness",
-      stack: "Python, React.js, TypeScript, FastAPI, Docker, AWS Lambda, CI/CD",
+      stack: "Python, React, TypeScript, FastAPI, Docker, AWS Lambda, GitHub Actions",
       bullets: [
-        "Built an internal backend service translating natural-language product specs into structured coding sequences and CI/CD test workflows; reduced feature-to-production time by 40% across 8+ teams with 30+ plugins."
+        "Built an internal backend service translating natural-language product specs into structured coding sequences and automated deployment workflows, reducing feature-to-production time by 40% across 8+ teams.",
+        "Designed an extensible validation harness supporting 30+ modular plugins with deterministic schema checks, API contract verification, and real-time execution reporting."
       ]
     }
   ],
@@ -349,7 +356,8 @@ export const DEFAULT_SAVED_ANSWERS = [
   },
   {
     id: "sa_complex_project",
-    questionPattern: "challenging project|proud of|complex.*(system|platform)|architected|technical accomplishment|tell us about something you built",
+    questionPattern:
+      "challenging project|proud of|complex.*(system|platform)|architected|technical (accomplishment|achievement)|exceptional ability|tell us about something you built",
     questionLabel: "Describe a complex technical project or system you built.",
     answer:
       "Supporting Google AI's Novel AI & Responsible AI testing, I architected a synthetic longitudinal data-seeding platform across 48 multi-modal user personas and 9 cloud services alongside 13 full-stack sandboxed web apps (TypeScript, Angular, Python) for evaluating autonomous browser AI agents. I paired this with an automated Data Integrity QA suite enforcing 100% post-injection numerical accuracy and warm-pool Docker/Kubernetes sandboxes that cut initialization latency by 70%.",

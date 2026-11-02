@@ -30,6 +30,7 @@ class CDPClient {
     this.wsUrl = wsUrl;
     this.seq = 1;
     this.pending = new Map();
+    this.exceptions = [];
   }
   async connect() {
     this.ws = new WebSocket(this.wsUrl);
@@ -39,6 +40,9 @@ class CDPClient {
     });
     this.ws.addEventListener("message", (ev) => {
       const msg = JSON.parse(String(ev.data));
+      if (msg.method === "Runtime.exceptionThrown") {
+        this.exceptions.push(msg.params?.exceptionDetails?.text || JSON.stringify(msg.params));
+      }
       if (msg.id && this.pending.has(msg.id)) {
         const { resolve, reject } = this.pending.get(msg.id);
         this.pending.delete(msg.id);
@@ -592,10 +596,107 @@ async function main() {
     if (lv.fullName !== "Raviteja Velanati" || lv.commentsLen < 50 || !lv.resumeFile) {
       throw new Error("Lever assertion mismatch!");
     }
+
+    // 4b. Built-In Bundled Extension Sandbox Autonomous Auto-Submit (verifies ADAPTER_RPC fallback on chrome-extension:// URLs!)
+    const bundledSubRes = await lvCdp.eval(`
+      chrome.runtime.sendMessage({
+        type: "START_FULL_AUTO_APPLY",
+        payload: { tabId: ${lvCdp.tabId}, autoSubmit: true, tailorResume: false, awaitCompletion: true }
+      })
+    `);
+    const bundledLvSubmitted = await lvCdp.eval(`getComputedStyle(document.getElementById("lv-done")).display === "block"`);
+    console.log("6b. ✅ Bundled chrome-extension:// Sandbox Autonomous Auto-Submit Verified:", JSON.stringify({
+      ok: bundledSubRes?.ok,
+      submitted: bundledSubRes?.submitted,
+      status: bundledSubRes?.status,
+      lvDoneBannerVisible: bundledLvSubmitted
+    }, null, 2));
+    if (!bundledSubRes?.submitted || !bundledLvSubmitted) {
+      throw new Error("Bundled chrome-extension:// sandbox auto-submit failed!");
+    }
     lvCdp.close();
 
-    // 5. Verify Dashboard & Auto-Tracked Applications (OpenAI Full Auto-Apply + Anthropic Greenhouse)
+    // 4c. Tricky SPA Auto-Submit & Validation Self-Healing (/sandbox/tricky-submit via Copilot Fast Auto-Submit button)
+    const trickyCdp = await openTabAndConnect("http://127.0.0.1:18765/sandbox/tricky-submit");
+    for (let i = 0; i < 20; i++) {
+      const hasWidget = await trickyCdp
+        .eval(`Boolean(document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-pill"))`)
+        .catch(() => false);
+      if (hasWidget) break;
+      await sleep(250);
+    }
+    await trickyCdp.eval(`
+      (async () => {
+        const sr = document.getElementById("jobify-copilot-host").shadowRoot;
+        sr.getElementById("jb-pill").click();
+        await new Promise(r => setTimeout(r, 250));
+        sr.getElementById("jb-btn-fast-auto").click();
+      })()
+    `);
+    let trickyAudit = null;
+    for (let waitIdx = 0; waitIdx < 45; waitIdx++) {
+      await sleep(700);
+      trickyAudit = await trickyCdp.eval(`window.__TRICKY_AUDIT__`).catch(() => null);
+      if (trickyAudit?.submitted) break;
+    }
+    await sleep(600);
+    console.log("6c. ✅ Tricky SPA Auto-Submit + Validation Self-Healing Verified:", JSON.stringify(trickyAudit, null, 2));
+    if (
+      !trickyAudit?.submitted ||
+      trickyAudit.cookieClicked !== false ||
+      trickyAudit.cookieChecked !== false ||
+      trickyAudit.authYesSelected !== true ||
+      trickyAudit.firstSubmitRejectedUnmarkedField !== true ||
+      trickyAudit.submitClicks < 2 ||
+      trickyAudit.healedAndSubmittedOnRetry !== true ||
+      !trickyAudit.finalValues?.privacyChecked ||
+      !(trickyAudit.finalValues?.exceptionalAbility?.length > 25) ||
+      !(trickyAudit.finalValues?.unmarkedTeamHealedValue?.length > 0) ||
+      trickyAudit.finalValues?.optionalPubs !== "" ||
+      JSON.stringify(trickyAudit.finalValues?.checkedSources) !== JSON.stringify(["LinkedIn"])
+    ) {
+      throw new Error(`Tricky SPA auto-submit assertion failed: ${JSON.stringify(trickyAudit)}`);
+    }
+    trickyCdp.close();
+
     const dashCdp = await openTabAndConnect(`chrome-extension://${extId}/dashboard/dashboard.html`);
+    await dashCdp.send("Runtime.enable", {});
+
+    // 4d. Live Production OpenAI Ashby Non-Submitting Sanity Check (autoSubmit: false)
+    const ashbyBoard = await fetch("https://api.ashbyhq.com/posting-api/job-board/openai")
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+    const liveAshbyJob = (ashbyBoard?.jobs || []).find((j) => j?.id && j?.isListed !== false) || ashbyBoard?.jobs?.[0];
+    if (liveAshbyJob?.id) {
+      const ashbyAppUrl = `https://jobs.ashbyhq.com/openai/${liveAshbyJob.id}/application`;
+      const ashbyCdp = await openTabAndConnect(ashbyAppUrl);
+      await ashbyCdp.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+      for (let i = 0; i < 30; i++) {
+        const mounted = await ashbyCdp
+          .eval(`Boolean(document.querySelector("input, textarea") && document.getElementById("jobify-copilot-host")?.shadowRoot)`)
+          .catch(() => false);
+        if (mounted) break;
+        await sleep(400);
+      }
+      const ashbyRun = await dashCdp.eval(
+        `chrome.runtime.sendMessage({ type: "START_FULL_AUTO_APPLY", payload: { tabId: ${ashbyCdp.tabId}, options: { autoSubmit: false, tailorResume: false }, awaitCompletion: true } })`,
+        55000
+      );
+      console.log("6d. ✅ Live Production OpenAI Ashby Non-Submitting Auto-Fill Sanity Verified:", JSON.stringify({
+        jobTitle: liveAshbyJob.title,
+        url: ashbyAppUrl,
+        ok: ashbyRun?.ok,
+        status: ashbyRun?.status,
+        submitted: ashbyRun?.submitted,
+        totalFilledFields: ashbyRun?.totalFilledFields
+      }, null, 2));
+      if (!ashbyRun?.ok || ashbyRun.submitted !== false || !(ashbyRun.totalFilledFields >= 4)) {
+        throw new Error(`Live OpenAI Ashby non-submitting check failed: ${JSON.stringify(ashbyRun)}`);
+      }
+      ashbyCdp.close();
+    }
+
+    // 5. Full UI & Runtime Sanity Check Across Dashboard (all 8 views), Popup, SidePanel & Auto-Tracker
     const trackedApps = await dashCdp.eval(`chrome.runtime.sendMessage({ type: "GET_ALL_STATE" }).then(r => r.state.applications)`);
     console.log(
       `7. ✅ Dashboard & Auto-Tracker Verified: ${trackedApps.length} applications automatically logged (${trackedApps
@@ -603,12 +704,114 @@ async function main() {
         .join(", ")})`
     );
     if (
-      trackedApps.length < 3 ||
+      trackedApps.length < 4 ||
       !trackedApps.some((a) => a.company === "OpenAI" && a.status === "Applied") ||
-      !trackedApps.some((a) => a.company === "NVIDIA" && a.status === "Applied")
+      !trackedApps.some((a) => a.company === "NVIDIA" && a.status === "Applied") ||
+      !trackedApps.some((a) => a.company === "Perplexity AI" && a.status === "Applied") ||
+      !trackedApps.some((a) => a.company === "Scale AI" && a.status === "Applied")
     ) {
-      throw new Error("Auto-tracker failed to log submitted applications!");
+      throw new Error(`Auto-tracker failed to log all submitted applications: ${JSON.stringify(trackedApps)}`);
     }
+
+    const dashAudit = await dashCdp.eval(`
+      (async () => {
+        const views = ["overview", "tracker", "resume", "cover", "jobs", "autopilot", "network", "vault"];
+        const rendered = {};
+        for (const v of views) {
+          const btn = document.querySelector(\`#main-nav [data-view="\${v}"]\`);
+          btn.click();
+          await new Promise(r => setTimeout(r, 140));
+          rendered[v] = document.getElementById("view-container").innerText.trim().length;
+        }
+        // Check Tracker filter controls
+        document.querySelector('#main-nav [data-view="tracker"]').click();
+        await new Promise(r => setTimeout(r, 100));
+        const hasTrackerFilters = Boolean(document.getElementById("trk-filter-q") && document.getElementById("trk-filter-stage"));
+
+        // Check Autopilot default mode = full_auto
+        document.querySelector('#main-nav [data-view="autopilot"]').click();
+        await new Promise(r => setTimeout(r, 100));
+        const autopilotMode = document.getElementById("ap-mode")?.value || null;
+
+        // Check Vault autoSubmitEnabled checkbox
+        document.querySelector('#main-nav [data-view="vault"]').click();
+        await new Promise(r => setTimeout(r, 100));
+        const vaultAutoSubmitChecked = Boolean(document.getElementById("vc-auto-sub")?.checked);
+
+        // Check COMPILE_COVER_LETTER_PDF RPC
+        const clPdf = await chrome.runtime.sendMessage({
+          type: "COMPILE_COVER_LETTER_PDF",
+          payload: {
+            coverLetterText: "Dear Hiring Team,\\n\\nExcited to contribute to autonomous evaluation infrastructure.\\n\\nSincerely,\\nRaviteja Velanati",
+            jobMeta: { company: "Perplexity AI", title: "Senior Autonomous Agents Engineer" }
+          }
+        });
+
+        return {
+          rendered,
+          hasTrackerFilters,
+          autopilotMode,
+          vaultAutoSubmitChecked,
+          clPdfOk: Boolean(clPdf?.ok && clPdf?.pdfBase64?.length > 200)
+        };
+      })()
+    `);
+    if (
+      dashCdp.exceptions.length > 0 ||
+      !dashAudit.hasTrackerFilters ||
+      dashAudit.autopilotMode !== "full_auto" ||
+      !dashAudit.vaultAutoSubmitChecked ||
+      !dashAudit.clPdfOk ||
+      Object.values(dashAudit.rendered).some((len) => len < 40)
+    ) {
+      throw new Error(`Dashboard UI sanity check failed: exceptions=${JSON.stringify(dashCdp.exceptions)} audit=${JSON.stringify(dashAudit)}`);
+    }
+
+    const popupCdp = await openTabAndConnect(`chrome-extension://${extId}/popup/popup.html`);
+    await popupCdp.send("Runtime.enable", {});
+    await sleep(300);
+    const popupAudit = await popupCdp.eval(`({
+      autoSubmitChecked: Boolean(document.getElementById("chk-auto-submit")?.checked),
+      hasFastAutoBtn: Boolean(document.getElementById("btn-fast-auto")),
+      hasFullAutoBtn: Boolean(document.getElementById("btn-full-auto")),
+      appliedCountText: document.getElementById("st-applied")?.innerText
+    })`);
+    if (
+      popupCdp.exceptions.length > 0 ||
+      !popupAudit.autoSubmitChecked ||
+      !popupAudit.hasFastAutoBtn ||
+      !popupAudit.hasFullAutoBtn ||
+      Number(popupAudit.appliedCountText) < 4
+    ) {
+      throw new Error(`Popup UI sanity check failed: exceptions=${JSON.stringify(popupCdp.exceptions)} audit=${JSON.stringify(popupAudit)}`);
+    }
+    popupCdp.close();
+
+    const spCdp = await openTabAndConnect(`chrome-extension://${extId}/sidepanel/sidepanel.html`);
+    await spCdp.send("Runtime.enable", {});
+    await sleep(300);
+    const spAudit = await spCdp.eval(`({
+      hasFullAuto: Boolean(document.getElementById("sp-full-auto")),
+      hasFastAuto: Boolean(document.getElementById("sp-fast-auto")),
+      hasFillOnly: Boolean(document.getElementById("sp-fill-only")),
+      identityCards: document.querySelectorAll("#sp-identity-grid .copy-card").length
+    })`);
+    if (
+      spCdp.exceptions.length > 0 ||
+      !spAudit.hasFullAuto ||
+      !spAudit.hasFastAuto ||
+      !spAudit.hasFillOnly ||
+      spAudit.identityCards < 6
+    ) {
+      throw new Error(`SidePanel UI sanity check failed: exceptions=${JSON.stringify(spCdp.exceptions)} audit=${JSON.stringify(spAudit)}`);
+    }
+    spCdp.close();
+    console.log("7b. ✅ All Extension UI Surfaces Verified (Dashboard 8 Views, Popup, SidePanel, Cover Letter PDF Re-Compiler — 0 JS Exceptions):", JSON.stringify({
+      dashboard: dashAudit,
+      popup: popupAudit,
+      sidepanel: spAudit
+    }, null, 2));
+
     dashCdp.close();
     swCdp.close();
     browserCdp.close();
@@ -672,7 +875,7 @@ async function main() {
     );
     if (liveJobs.length === 0) throw new Error("Live job feed returned 0 matches!");
 
-    console.log("\n🎉 ALL 14 END-TO-END VERIFICATION GATES PASSED 100%!");
+    console.log("\n🎉 ALL 18 END-TO-END & LIVE SANITY VERIFICATION GATES PASSED 100%!");
   } finally {
     if (ChromeProc) ChromeProc.kill("SIGKILL");
     if (srv) srv.kill("SIGKILL");

@@ -23,6 +23,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("JOBIFY_PORT", "18765"))
+GEMINI_MODEL_COOLDOWN = {}
 SANDBOX_OTP_STORE = {
     "otp": None,
     "verificationUrl": None,
@@ -1257,6 +1258,204 @@ WORKDAY_FULL_E2E_HTML = """<!DOCTYPE html>
 """
 
 
+TRICKY_SUBMIT_SANDBOX_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Senior Autonomous Agents Engineer - Perplexity AI | Ashby Portal</title>
+  <style>
+    body { font-family: Inter, system-ui, sans-serif; max-width: 820px; margin: 28px auto; padding: 0 20px 80px; background: #f8fafc; color: #0f172a; }
+    .card { background: #fff; border: 1px solid #cbd5e1; border-radius: 12px; padding: 26px; margin-bottom: 20px; }
+    .field { margin-bottom: 16px; position: relative; }
+    label.q-lbl { display: block; font-weight: 600; font-size: 13.5px; margin-bottom: 6px; color: #1e293b; }
+    label._required_star::after { content: " *"; color: #dc2626; }
+    input[type="text"], input[type="email"], input[type="tel"], input[type="url"], textarea {
+      width: 100%; box-sizing: border-box; padding: 9px 11px; border: 1px solid #94a3b8; border-radius: 7px; font-size: 14px;
+    }
+    .yesno-wrap { display: flex; gap: 10px; align-items: center; position: relative; }
+    . _option_btn { padding: 8px 18px; border: 1px solid #94a3b8; background: #fff; border-radius: 7px; cursor: pointer; font-weight: 600; }
+    ._option_yesno { padding: 8px 18px; border: 1px solid #94a3b8; background: #fff; border-radius: 7px; cursor: pointer; font-weight: 600; }
+    ._option_yesno.active { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+    .ashby-application-form-field-error { display: none; color: #dc2626; font-size: 12.5px; font-weight: 600; margin-top: 5px; }
+    .ashby-application-form-submit-button {
+      background: #0f172a; color: #fff; border: none; border-radius: 8px; padding: 12px 24px; font-size: 14.5px; font-weight: 700; cursor: pointer;
+    }
+    .ashby-application-form-submit-button:disabled { opacity: 0.45; cursor: not-allowed; }
+    #onetrust-consent-sdk { position: fixed; bottom: 0; left: 0; right: 0; background: #1e293b; color: #fff; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; z-index: 900; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <!-- Trap 1: Cookie Consent Banner -->
+  <div id="onetrust-consent-sdk">
+    <span>We use cookies for analytics. <label><input type="checkbox" id="ot-cookie-chk" /> Marketing Cookies</label></span>
+    <button type="button" id="onetrust-accept-btn-handler">Accept Cookies</button>
+  </div>
+
+  <div class="card">
+    <div data-company-name="Perplexity AI" style="font-weight:700;color:#0284c7;">Perplexity AI</div>
+    <h1 data-jobify-title>Senior Autonomous Agents &amp; Search Evaluation Engineer</h1>
+    <div data-jobify-location style="color:#475569;font-size:14px;">San Francisco, CA • Hybrid ($200,000 - $265,000)</div>
+    <div data-jobify-jd style="margin-top:10px;line-height:1.55;color:#334155;">
+      Architect real-time web retrieval agents, browser execution sandboxes, LLM evaluation harnesses, and distributed Python/TypeScript/React inference services on Kubernetes and AWS/GCP.
+    </div>
+  </div>
+
+  <!-- Non-<form> Ashby SPA Container -->
+  <div class="card ashby-application-form-container" id="ashby-app-root">
+    <h2>Submit Your Application</h2>
+    <div class="field"><label class="q-lbl _required_star" for="ab_name">Full Legal Name</label><input id="ab_name" type="text" /></div>
+    <div class="field"><label class="q-lbl _required_star" for="ab_email">Email</label><input id="ab_email" type="email" /></div>
+    <div class="field"><label class="q-lbl _required_star" for="ab_phone">Phone</label><input id="ab_phone" type="tel" /></div>
+    <div class="field"><label class="q-lbl _required_star" for="ab_resume">Resume</label><input id="ab_resume" type="file" accept=".pdf" /></div>
+    <div class="field"><label class="q-lbl _required_star" for="ab_code">Please share samples of your code or engineering portfolio</label><input id="ab_code" type="url" /></div>
+
+    <!-- Trap 2: CSS ::after required text input WITHOUT '?' in label or DOM required attribute -->
+    <div class="field">
+      <label class="q-lbl _required_star" for="ab_exceptional">Please provide an example or evidence of your exceptional ability.</label>
+      <input id="ab_exceptional" type="text" />
+    </div>
+
+    <!-- Trap 3: Ashby []-labeled-checkbox- multi-checkbox group -->
+    <fieldset class="field" style="border:1px solid #e2e8f0;border-radius:8px;padding:12px;">
+      <legend style="font-weight:600;font-size:13.5px;">How did you hear about us? *</legend>
+      <div><input type="checkbox" id="hear[]-labeled-checkbox-0" value="Job Board" /> <label for="hear[]-labeled-checkbox-0">Job Board</label></div>
+      <div><input type="checkbox" id="hear[]-labeled-checkbox-1" value="LinkedIn" /> <label for="hear[]-labeled-checkbox-1">LinkedIn</label></div>
+      <div><input type="checkbox" id="hear[]-labeled-checkbox-2" value="Recruiter" /> <label for="hear[]-labeled-checkbox-2">Recruiter</label></div>
+      <div><input type="checkbox" id="hear[]-labeled-checkbox-3" value="Word of mouth" /> <label for="hear[]-labeled-checkbox-3">Word of mouth</label></div>
+    </fieldset>
+
+    <!-- Trap 4: Ashby Yes/No pill buttons + backing opacity:0 checkbox -->
+    <div class="field">
+      <label class="q-lbl _required_star">Are you legally authorized to work in the United States?</label>
+      <div class="yesno-wrap">
+        <input type="checkbox" id="ab_auth_backing" style="opacity:0;position:absolute;width:1px;height:1px;" />
+        <button type="button" class="_option_yesno" id="ab_auth_yes">Yes</button>
+        <button type="button" class="_option_yesno" id="ab_auth_no">No</button>
+      </div>
+    </div>
+
+    <!-- Trap 5: Unmarked backend-required field (no *, no required, no _required_) -> fails 1st submit -> healed on retry! -->
+    <div class="field">
+      <label class="q-lbl" for="tricky_unmarked_team">Preferred engineering pod or systems focus area</label>
+      <input id="tricky_unmarked_team" type="text" />
+      <div class="ashby-application-form-field-error" id="tricky_team_err">Please provide a response for preferred engineering pod before submitting.</div>
+    </div>
+
+    <!-- Clean-mode check: Optional publications should stay blank -->
+    <div class="field">
+      <label class="q-lbl" for="ab_opt_pubs">Optional: Please share any publications, papers or research</label>
+      <textarea id="ab_opt_pubs" rows="2"></textarea>
+    </div>
+
+    <!-- Trap 6: opacity:0 consent checkbox without * or required attribute -->
+    <div class="field" style="position:relative;padding-left:24px;">
+      <input type="checkbox" id="ab_privacy_confirm" style="opacity:0;position:absolute;left:0;top:2px;width:18px;height:18px;" />
+      <label for="ab_privacy_confirm" style="cursor:pointer;font-size:13px;">I confirm I have read the above Candidate Privacy Notice.</label>
+      <div class="ashby-application-form-field-error" id="ab_privacy_err">You must confirm you have read the privacy notice.</div>
+    </div>
+
+    <!-- Trap 7: Non-form button with trailing arrow + async 320ms blur re-validation disable -->
+    <button type="button" class="ashby-application-form-submit-button" id="ab_submit_btn">Submit Application →</button>
+  </div>
+
+  <div class="card ashby-application-form-success" id="ab-success-card" style="display:none;background:#dcfce7;border-color:#22c55e;color:#14532d;">
+    <h2>Thank you for applying to Perplexity AI!</h2>
+    <p>We have received your application and will review it shortly.</p>
+  </div>
+
+  <script>
+    window.__TRICKY_AUDIT__ = {
+      cookieClicked: false,
+      cookieChecked: false,
+      authYesSelected: false,
+      submitClicks: 0,
+      firstSubmitRejectedUnmarkedField: false,
+      healedAndSubmittedOnRetry: false,
+      submitted: false,
+      finalValues: null
+    };
+
+    document.getElementById("onetrust-accept-btn-handler").addEventListener("click", () => {
+      window.__TRICKY_AUDIT__.cookieClicked = true;
+    });
+
+    document.getElementById("ab_auth_yes").addEventListener("click", () => {
+      window.__TRICKY_AUDIT__.authYesSelected = true;
+      document.getElementById("ab_auth_yes").classList.add("active");
+      document.getElementById("ab_auth_no").classList.remove("active");
+    });
+    document.getElementById("ab_auth_no").addEventListener("click", () => {
+      window.__TRICKY_AUDIT__.authYesSelected = false;
+      document.getElementById("ab_auth_no").classList.add("active");
+      document.getElementById("ab_auth_yes").classList.remove("active");
+    });
+
+    // Simulate async blur validation temporarily disabling Submit for 320ms
+    const subBtn = document.getElementById("ab_submit_btn");
+    document.querySelectorAll("#ashby-app-root input").forEach((inp) => {
+      inp.addEventListener("blur", () => {
+        subBtn.disabled = true;
+        setTimeout(() => { subBtn.disabled = false; }, 320);
+      });
+    });
+
+    subBtn.addEventListener("click", () => {
+      if (subBtn.disabled) return;
+      window.__TRICKY_AUDIT__.submitClicks += 1;
+      const unmarkedInp = document.getElementById("tricky_unmarked_team");
+      const teamErr = document.getElementById("tricky_team_err");
+      const privChk = document.getElementById("ab_privacy_confirm");
+      const privErr = document.getElementById("ab_privacy_err");
+
+      let hasErr = false;
+      if (!privChk.checked) {
+        privErr.style.display = "block";
+        privChk.setAttribute("aria-invalid", "true");
+        hasErr = true;
+      } else {
+        privErr.style.display = "none";
+        privChk.removeAttribute("aria-invalid");
+      }
+
+      if (!unmarkedInp.value.trim()) {
+        window.__TRICKY_AUDIT__.firstSubmitRejectedUnmarkedField = true;
+        teamErr.style.display = "block";
+        unmarkedInp.setAttribute("aria-invalid", "true");
+        hasErr = true;
+      } else {
+        teamErr.style.display = "none";
+        unmarkedInp.removeAttribute("aria-invalid");
+      }
+
+      if (hasErr) return;
+
+      const checkedSources = Array.from(document.querySelectorAll("input[id^='hear[]-labeled-checkbox-']"))
+        .filter((c) => c.checked)
+        .map((c) => c.value);
+
+      window.__TRICKY_AUDIT__.cookieChecked = document.getElementById("ot-cookie-chk").checked;
+      window.__TRICKY_AUDIT__.healedAndSubmittedOnRetry = window.__TRICKY_AUDIT__.submitClicks >= 2;
+      window.__TRICKY_AUDIT__.submitted = true;
+      window.__TRICKY_AUDIT__.finalValues = {
+        fullName: document.getElementById("ab_name").value,
+        email: document.getElementById("ab_email").value,
+        resumeName: document.getElementById("ab_resume").files[0]?.name || null,
+        codeSampleUrl: document.getElementById("ab_code").value,
+        exceptionalAbility: document.getElementById("ab_exceptional").value,
+        checkedSources,
+        unmarkedTeamHealedValue: unmarkedInp.value,
+        optionalPubs: document.getElementById("ab_opt_pubs").value,
+        privacyChecked: privChk.checked
+      };
+      document.getElementById("ashby-app-root").style.display = "none";
+      document.getElementById("ab-success-card").style.display = "block";
+    });
+  </script>
+</body>
+</html>
+"""
+
+
 class JobifyHandler(BaseHTTPRequestHandler):
     def _send_cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -1288,7 +1487,7 @@ class JobifyHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
-        if path == "/health":
+        if path in ("/health", "/api/health"):
             return self._send_json(200, {"status": "ok", "pdflatex": bool(shutil.which("pdflatex"))})
         if path == "/sandbox/greenhouse":
             return self._send_html(GREENHOUSE_HTML)
@@ -1311,6 +1510,8 @@ class JobifyHandler(BaseHTTPRequestHandler):
             SANDBOX_OTP_STORE["verificationUrl"] = None
             SANDBOX_OTP_STORE["accountVerified"] = False
             return self._send_html(AUTO_APPLY_SANDBOX_HTML)
+        if path == "/sandbox/tricky-submit":
+            return self._send_html(TRICKY_SUBMIT_SANDBOX_HTML)
         if path == "/api/sandbox-otp":
             return self._send_json(200, {"ok": True, **SANDBOX_OTP_STORE})
         return self._send_json(
@@ -1323,6 +1524,7 @@ class JobifyHandler(BaseHTTPRequestHandler):
                     f"http://127.0.0.1:{PORT}/sandbox/workday-full-e2e",
                     f"http://127.0.0.1:{PORT}/sandbox/lever",
                     f"http://127.0.0.1:{PORT}/sandbox/auto-apply",
+                    f"http://127.0.0.1:{PORT}/sandbox/tricky-submit",
                 ],
             },
         )
@@ -1373,38 +1575,54 @@ class JobifyHandler(BaseHTTPRequestHandler):
 
         if self.path == "/api/gemini-generate":
             api_key = (body.get("apiKey") or "").strip()
-            models = body.get("models") or [
+            raw_models = body.get("models") or [
                 "gemini-3.8-flash",
-                "gemini-3.6-flash",
                 "gemini-3.5-flash",
                 "gemini-3.5-flash-lite",
+                "gemini-3.6-flash",
                 "gemini-flash-lite-latest",
                 "gemini-3-flash-preview",
             ]
-            req_body = body.get("requestBody") or {}
+            now_s = time.time()
+            healthy_models = [m for m in raw_models if GEMINI_MODEL_COOLDOWN.get(m, 0) <= now_s]
+            models = healthy_models or raw_models
+            base_req_body = body.get("requestBody") or {}
             trace = []
             for mdl in models:
+                mdl_body = json.loads(json.dumps(base_req_body))
+                gen_cfg = mdl_body.setdefault("generationConfig", {})
+                if re.match(r"^gemini-3(\.\d+)?-flash(-preview)?$", mdl, re.I) and not re.search(
+                    r"lite|pro|image|tts", mdl, re.I
+                ):
+                    gen_cfg["thinkingConfig"] = {"thinkingBudget": 0}
+                else:
+                    gen_cfg.pop("thinkingConfig", None)
+
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(mdl)}:generateContent?key={urllib.parse.quote(api_key)}"
                 req = urllib.request.Request(
                     url,
-                    data=json.dumps(req_body).encode("utf-8"),
+                    data=json.dumps(mdl_body).encode("utf-8"),
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 )
                 try:
-                    with urllib.request.urlopen(req, timeout=22) as resp:
+                    with urllib.request.urlopen(req, timeout=12) as resp:
                         data = json.loads(resp.read().decode("utf-8"))
                         parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
                         txt = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
                         if txt:
                             return self._send_json(200, {"ok": True, "text": txt, "modelUsed": mdl})
+                        GEMINI_MODEL_COOLDOWN[mdl] = time.time() + 45
                         trace.append(f"{mdl}: empty")
                 except urllib.error.HTTPError as he:
                     err_raw = he.read().decode("utf-8", errors="ignore")[:140]
                     trace.append(f"{mdl}: HTTP {he.code} {err_raw}")
-                    if he.code not in (404, 429, 503):
-                        break
+                    if he.code in (404, 429, 503):
+                        GEMINI_MODEL_COOLDOWN[mdl] = time.time() + (300 if he.code == 404 else 60)
+                        continue
+                    break
                 except Exception as exc:
+                    GEMINI_MODEL_COOLDOWN[mdl] = time.time() + 60
                     trace.append(f"{mdl}: {exc}")
             return self._send_json(502, {"ok": False, "error": " | ".join(trace)})
 

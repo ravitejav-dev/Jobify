@@ -4,10 +4,15 @@ import { evaluateJobMatch } from "./ats_analyzer.js";
 export const CURATED_BOARDS = [
   { company: "Anthropic", ats: "greenhouse", slug: "anthropic", category: "Frontier AI Labs" },
   { company: "OpenAI", ats: "ashby", slug: "openai", category: "Frontier AI Labs" },
+  { company: "xAI", ats: "greenhouse", slug: "xai", category: "Frontier AI Labs" },
   { company: "Perplexity", ats: "ashby", slug: "perplexity", category: "Frontier AI Labs" },
+  { company: "Cohere", ats: "ashby", slug: "cohere", category: "Frontier AI Labs" },
   { company: "Scale AI", ats: "greenhouse", slug: "scaleai", category: "AI & Eval Infrastructure" },
+  { company: "Together AI", ats: "greenhouse", slug: "togetherai", category: "AI & Eval Infrastructure" },
+  { company: "Harvey", ats: "ashby", slug: "harvey", category: "AI & Data Unicorns" },
   { company: "Databricks", ats: "greenhouse", slug: "databricks", category: "AI & Data Unicorns" },
-  { company: "Stripe", ats: "greenhouse", slug: "stripe", category: "Cloud & FinTech" }
+  { company: "Stripe", ats: "greenhouse", slug: "stripe", category: "Cloud & FinTech" },
+  { company: "Figma", ats: "greenhouse", slug: "figma", category: "Cloud & FinTech" }
 ];
 
 const ENG_TITLE_RE =

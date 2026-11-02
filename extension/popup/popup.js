@@ -12,21 +12,61 @@ async function getActiveTab() {
   return tab;
 }
 
-async function initPopup() {
-  const stateResp = await chrome.runtime.sendMessage({ type: "GET_ALL_STATE" });
-  const state = stateResp?.state || {};
-  const apps = state.applications || [];
-
-  document.getElementById("candidate-line").textContent = `${
-    state.profile?.personal?.fullName || "Raviteja Velanati"
-  } • Simplify+ AI`;
-
+function renderStats(state) {
+  const apps = state?.applications || [];
   document.getElementById("st-saved").textContent = apps.filter((a) => a.status === "Bookmarked").length;
   document.getElementById("st-applied").textContent = apps.filter((a) => a.status === "Applied").length;
   document.getElementById("st-interview").textContent = apps.filter((a) =>
     ["OA / Assessment", "Recruiter Screen", "Technical Interview", "Final Round", "Offer"].includes(a.status)
   ).length;
-  document.getElementById("st-tailored").textContent = (state.tailoredResumes || []).length;
+  document.getElementById("st-tailored").textContent = (state?.tailoredResumes || []).length;
+}
+
+function renderLiveBanner(status) {
+  const banner = document.getElementById("popup-live-banner");
+  const stopBtn = document.getElementById("btn-stop-auto");
+  if (!banner) return;
+  if (status && (status.running || ["needs_review", "paused_captcha", "paused_otp"].includes(status.stage))) {
+    banner.classList.add("active");
+    document.getElementById("popup-live-step").textContent = status.stepLabel || "Auto-Apply Running...";
+    document.getElementById("popup-live-detail").textContent = status.detail || "";
+    if (stopBtn) stopBtn.style.display = status.running ? "inline-block" : "none";
+  } else {
+    banner.classList.remove("active");
+  }
+}
+
+async function initPopup() {
+  const stateResp = await chrome.runtime.sendMessage({ type: "GET_ALL_STATE" });
+  const state = stateResp?.state || {};
+  renderLiveBanner(stateResp?.autoApplyStatus || null);
+
+  document.getElementById("candidate-line").textContent = `${
+    state.profile?.personal?.fullName || "Raviteja Velanati"
+  } • Simplify+ AI`;
+
+  renderStats(state);
+
+  const autoSubChk = document.getElementById("chk-auto-submit");
+  if (autoSubChk) {
+    autoSubChk.checked = state.settings?.autoSubmitEnabled !== false;
+    autoSubChk.addEventListener("change", async () => {
+      await chrome.runtime.sendMessage({
+        type: "UPDATE_SETTINGS",
+        payload: {
+          settings: {
+            autoSubmitEnabled: autoSubChk.checked,
+            autopilotMode: autoSubChk.checked ? "full_auto" : "safe_review"
+          }
+        }
+      });
+      setStatus(
+        autoSubChk.checked
+          ? "🎯 Auto-Submit ENABLED — applications submit automatically"
+          : "⏸️ Auto-Submit OFF — will pause on final screen for review"
+      );
+    });
+  }
 
   const modelSel = document.getElementById("sel-model");
   if (state.settings?.primaryModel) modelSel.value = state.settings.primaryModel;
@@ -36,6 +76,12 @@ async function initPopup() {
       payload: { settings: { primaryModel: modelSel.value } }
     });
     setStatus(`Switched AI model to ${modelSel.value}`);
+  });
+
+  document.getElementById("btn-stop-auto")?.addEventListener("click", async () => {
+    await chrome.runtime.sendMessage({ type: "STOP_FULL_AUTO_APPLY" }).catch(() => null);
+    renderLiveBanner(null);
+    setStatus("⏹ Stopped Auto-Apply.");
   });
 
   const tab = await getActiveTab();
@@ -62,39 +108,53 @@ async function initPopup() {
     document.getElementById("page-score").textContent = "Standby";
   }
 
-  document.getElementById("btn-full-auto")?.addEventListener("click", async (e) => {
+  const launchAutoApplyFromPopup = async ({ tailorResume }) => {
     if (!tab?.id) return;
-    const btn = e.currentTarget;
-    btn.disabled = true;
-    setStatus("🚀 Launching Full Auto-Apply (Tailor → Login → Fill → Submit)...");
+    const shouldSubmit = autoSubChk ? autoSubChk.checked : true;
+    setStatus(
+      tailorResume
+        ? `🚀 Launching Full Auto-Apply (${shouldSubmit ? "Tailor → Fill → Submit" : "Tailor → Fill → Review"})...`
+        : `⚡ Fast Fill & ${shouldSubmit ? "Auto-Submit" : "Review"} starting...`
+    );
     const resp = await chrome.runtime
       .sendMessage({
         type: "START_FULL_AUTO_APPLY",
         payload: {
           tabId: tab.id,
           options: {
-            autoSubmit: true,
-            tailorResume: true,
+            autoSubmit: shouldSubmit,
+            tailorResume,
             preferredModel: modelSel.value,
             jobMeta: pageCtx?.pageMeta || null
           }
         }
       })
       .catch(() => null);
-    btn.disabled = false;
     if (resp?.ok) {
       setStatus("🚀 Auto-Apply running! Watch live progress on the job tab.");
-      setTimeout(() => window.close(), 900);
+      setTimeout(() => window.close(), 750);
     } else {
-      setStatus(`⚠️ ${resp?.error || "Open an http/https job tab first."}`);
+      setStatus(`⚠️ ${resp?.error || "Open a job posting tab first."}`);
     }
+  };
+
+  document.getElementById("btn-full-auto")?.addEventListener("click", async (e) => {
+    e.currentTarget.disabled = true;
+    await launchAutoApplyFromPopup({ tailorResume: true });
+    e.currentTarget.disabled = false;
+  });
+
+  document.getElementById("btn-fast-auto")?.addEventListener("click", async (e) => {
+    e.currentTarget.disabled = true;
+    await launchAutoApplyFromPopup({ tailorResume: false });
+    e.currentTarget.disabled = false;
   });
 
   document.getElementById("btn-autofill").addEventListener("click", async (e) => {
     if (!tab?.id) return;
     const btn = e.currentTarget;
     btn.disabled = true;
-    setStatus("⏳ Autofilling form & attaching PDF...");
+    setStatus("⏳ Filling current screen only (no submit)...");
     const resp = await chrome.runtime
       .sendMessage({
         type: "RUN_TAB_AUTOFILL",
@@ -106,11 +166,11 @@ async function initPopup() {
       .catch(() => null);
     btn.disabled = false;
     if (resp?.ok && resp.filledCount > 0) {
-      setStatus(`⚡ Autofilled ${resp.filledCount} field(s)!`);
+      setStatus(`✍️ Filled ${resp.filledCount} field(s) (review & submit when ready).`);
     } else if (resp?.ok) {
       setStatus("⚠️ Open/expand the job application form first.");
     } else {
-      setStatus("Open an http/https job form tab first.");
+      setStatus("Open a job form tab first.");
     }
   });
 
@@ -141,9 +201,7 @@ async function initPopup() {
     });
     setStatus("📌 Saved to Jobify Tracker!");
     const refreshed = await chrome.runtime.sendMessage({ type: "GET_ALL_STATE" });
-    document.getElementById("st-saved").textContent = (refreshed.state.applications || []).filter(
-      (a) => a.status === "Bookmarked"
-    ).length;
+    renderStats(refreshed?.state || {});
   });
 
   document.getElementById("btn-reload-ext")?.addEventListener("click", () => {
@@ -173,6 +231,13 @@ async function initPopup() {
       chrome.runtime.sendMessage({ type: "OPEN_DASHBOARD", payload: { tab: "vault" } });
       window.close();
     }
+  });
+
+  chrome.storage?.onChanged?.addListener(async (_changes, area) => {
+    if (area !== "local") return;
+    const latest = await chrome.runtime.sendMessage({ type: "GET_ALL_STATE" }).catch(() => null);
+    if (latest?.state) renderStats(latest.state);
+    renderLiveBanner(latest?.autoApplyStatus || null);
   });
 }
 

@@ -3,37 +3,82 @@
 // to live 200-OK Gemini 3.x models (gemini-3.5-flash, gemini-3-flash-preview) when Free Tier returns 429.
 
 const GLA_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const modelCooldownUntil = new Map();
+let preferCompanionRelayUntil = 0;
 
 function normalizeModelName(m) {
-  return String(m || "gemini-3.8-flash").replace(/^models\//, "");
+  return String(m || "gemini-3.5-flash").replace(/^models\//, "");
+}
+
+function supportsZeroThinkingBudget(model) {
+  return /^gemini-3(\.\d+)?-flash(-preview)?$/i.test(model) && !/lite|pro|image|tts/i.test(model);
 }
 
 function buildCandidateChain(requestedModel, settings) {
-  const primary = normalizeModelName(requestedModel || settings?.primaryModel || "gemini-3.8-flash");
+  const rawReq = normalizeModelName(requestedModel || settings?.primaryModel || "gemini-3.5-flash");
   if (settings?.enableSmartFallback === false) {
-    return [primary];
+    return [rawReq];
   }
-  const isProFirst = /pro/i.test(primary);
-  const defaults = isProFirst
-    ? [
-        primary,
-        "gemini-3.8-flash",
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-flash-lite-latest",
-        "gemini-3-flash-preview"
-      ]
-    : [
-        primary,
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-flash-lite-latest",
-        "gemini-3-flash-preview",
-        normalizeModelName(settings?.proModel || "gemini-3.1-pro-preview")
-      ];
-  return [...new Set(defaults)];
+  const fastVerifiedOrder = [
+    "gemini-3.5-flash",
+    "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-pro-preview",
+    "gemini-3.8-flash",
+    "gemini-3.6-flash"
+  ];
+  const ordered = /^gemini-(3\.8|3\.6|1\.5|2\.)/i.test(rawReq)
+    ? [...fastVerifiedOrder, rawReq]
+    : [rawReq, ...fastVerifiedOrder];
+  const unique = [...new Set(ordered)];
+  const now = Date.now();
+  const healthy = unique.filter((m) => (modelCooldownUntil.get(m) || 0) <= now);
+  return healthy.length > 0 ? healthy : unique;
+}
+
+function buildModelRequestBody({ prompt, systemInstruction, jsonMode, temperature, maxOutputTokens, model }) {
+  const generationConfig = {
+    temperature,
+    maxOutputTokens
+  };
+  if (jsonMode) {
+    generationConfig.responseMimeType = "application/json";
+  }
+  if (supportsZeroThinkingBudget(model)) {
+    generationConfig.thinkingConfig = { thinkingBudget: 0 };
+  }
+  const body = {
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig
+  };
+  if (systemInstruction) {
+    body.systemInstruction = { parts: [{ text: systemInstruction }] };
+  }
+  return body;
+}
+
+async function tryCompanionRelay({ companionUrl, apiKey, chain, baseReqBody, errors, rawRequested }) {
+  try {
+    const relayResp = await fetch(`${companionUrl}/api/gemini-generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey, models: chain, requestBody: baseReqBody })
+    });
+    if (relayResp.ok) {
+      const relayData = await relayResp.json();
+      if (relayData?.ok && relayData.text) {
+        const reqName = rawRequested || chain[0];
+        return {
+          text: relayData.text,
+          modelUsed: relayData.modelUsed,
+          requestedModel: reqName,
+          fellBack: relayData.modelUsed !== reqName,
+          fallbackTrace: errors
+        };
+      }
+    }
+  } catch (_) {}
+  return null;
 }
 
 export async function callGemini({
@@ -43,7 +88,7 @@ export async function callGemini({
   jsonMode = false,
   temperature = 0.35,
   maxOutputTokens = 4096,
-  timeoutMs = 18000,
+  timeoutMs = 12000,
   settings = {}
 }) {
   const apiKey = (settings?.geminiApiKey || "").trim();
@@ -51,24 +96,42 @@ export async function callGemini({
     throw new Error("Missing Gemini API Key in Jobify Settings.");
   }
 
+  const rawRequested = normalizeModelName(requestedModel || settings?.primaryModel || "gemini-3.5-flash");
   const chain = buildCandidateChain(requestedModel, settings);
   const errors = [];
+  const companionUrl = settings?.companionServerUrl || "http://127.0.0.1:18765";
+  const baseRelayBody = buildModelRequestBody({
+    prompt,
+    systemInstruction,
+    jsonMode,
+    temperature,
+    maxOutputTokens,
+    model: "gemini-3.5-flash"
+  });
+
+  if (Date.now() < preferCompanionRelayUntil) {
+    const fastRelay = await tryCompanionRelay({
+      companionUrl,
+      apiKey,
+      chain,
+      baseReqBody: baseRelayBody,
+      errors,
+      rawRequested
+    });
+    if (fastRelay) return fastRelay;
+    preferCompanionRelayUntil = 0;
+  }
 
   for (const model of chain) {
     const url = `${GLA_BASE}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-    const body = {
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature,
-        maxOutputTokens
-      }
-    };
-    if (systemInstruction) {
-      body.systemInstruction = { parts: [{ text: systemInstruction }] };
-    }
-    if (jsonMode) {
-      body.generationConfig.responseMimeType = "application/json";
-    }
+    const body = buildModelRequestBody({
+      prompt,
+      systemInstruction,
+      jsonMode,
+      temperature,
+      maxOutputTokens,
+      model
+    });
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -86,6 +149,7 @@ export async function callGemini({
         const msg = errPayload?.error?.message || `HTTP ${resp.status}`;
         errors.push(`${model}: [${resp.status}] ${msg.slice(0, 120)}`);
         if (resp.status === 429 || resp.status === 404 || resp.status === 503) {
+          modelCooldownUntil.set(model, Date.now() + (resp.status === 404 ? 300000 : 120000));
           continue;
         }
         throw new Error(`${model} error (${resp.status}): ${msg}`);
@@ -100,41 +164,39 @@ export async function callGemini({
 
       if (!text) {
         errors.push(`${model}: Empty response`);
+        modelCooldownUntil.set(model, Date.now() + 45000);
         continue;
       }
 
       return {
         text,
         modelUsed: model,
-        requestedModel: chain[0],
-        fellBack: model !== chain[0],
+        requestedModel: rawRequested,
+        fellBack: model !== rawRequested,
         fallbackTrace: errors
       };
     } catch (err) {
       clearTimeout(timer);
-      errors.push(`${model}: ${err?.name === "AbortError" ? "Timeout" : err.message}`);
-      // If browser outbound HTTPS is restricted (e.g. corporate Chrome policy), try local Companion relay immediately
-      const companionUrl = settings?.companionServerUrl || "http://127.0.0.1:18765";
-      try {
-        const relayResp = await fetch(`${companionUrl}/api/gemini-generate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ apiKey, models: chain, requestBody: body })
+      const isTimeout = err?.name === "AbortError";
+      errors.push(`${model}: ${isTimeout ? "Timeout" : err.message}`);
+      modelCooldownUntil.set(model, Date.now() + 180000);
+      // If browser fetch failed immediately due to network/proxy (not model timeout), use Companion relay and cache for 5 min
+      if (!isTimeout) {
+        const relayOut = await tryCompanionRelay({
+          companionUrl,
+          apiKey,
+          chain,
+          baseReqBody: baseRelayBody,
+          errors,
+          rawRequested
         });
-        if (relayResp.ok) {
-          const relayData = await relayResp.json();
-          if (relayData?.ok && relayData.text) {
-            return {
-              text: relayData.text,
-              modelUsed: relayData.modelUsed,
-              requestedModel: chain[0],
-              fellBack: relayData.modelUsed !== chain[0],
-              fallbackTrace: errors
-            };
-          }
+        if (relayOut) {
+          preferCompanionRelayUntil = Date.now() + 5 * 60 * 1000;
+          return relayOut;
         }
-      } catch (_) {}
-      break;
+        break;
+      }
+      continue;
     }
   }
 
@@ -150,29 +212,197 @@ function parseJsonResponse(rawText) {
   return JSON.parse(cleaned);
 }
 
+export function cleanPostingJobTitle(rawTitle) {
+  const base = String(rawTitle || "AI & Platform Software Engineer")
+    .replace(/\s*\((req|job|id|jr|#).*?\)/gi, "")
+    .replace(/\s*[-–|•]\s*(remote|hybrid|onsite|on-site|san francisco.*|new york.*|santa clara.*|mountain view.*|seattle.*|united states.*|us\b.*)$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return base || "AI & Platform Software Engineer";
+}
+
+function sanitizeBulletSentence(bullet) {
+  let s = String(bullet || "")
+    .replace(/^[\s•\-*–\d.)]+/, "")
+    .replace(/\s+/g, " ")
+    // Replace slashes between words/acronyms with clean ATS prose ("Docker/Kubernetes" -> "Docker and Kubernetes")
+    .replace(/\b([A-Za-z0-9+#.]+)\s*\/\s*([A-Za-z0-9+#.]+)\b/g, "$1 and $2")
+    .replace(/\s*;\s*/g, ", ")
+    .trim();
+  if (!s) return "";
+  s = s.charAt(0).toUpperCase() + s.slice(1);
+  if (!/[.!?]$/.test(s)) s += ".";
+  return s;
+}
+
+function enforceFromScratchResumeQuality(parsed, jobMeta, profile) {
+  const cleanTitle = cleanPostingJobTitle(parsed?.targetJobTitle || jobMeta?.title || profile?.personal?.currentTitle);
+
+  // 1. Clean 4-sentence neutral third-person summary (<= 75-80 words, zero first-person pronouns)
+  let summary = String(parsed?.summary || profile?.summaryShort || "")
+    .replace(/\bI am a\b/gi, `${cleanTitle} and`)
+    .replace(/\bI am\b/gi, "")
+    .replace(/\bMy\b/g, "Proven")
+    .replace(/\bmy\b/g, "the")
+    .replace(/\s+/g, " ")
+    .trim();
+  const words = summary.split(/\s+/).filter(Boolean);
+  if (words.length > 78) {
+    const sliced = words.slice(0, 78).join(" ");
+    const lastPeriod = sliced.lastIndexOf(".");
+    summary = lastPeriod > 45 ? sliced.slice(0, lastPeriod + 1) : `${sliced.replace(/[.,;:]+$/, "")}.`;
+  } else if (summary && !/[.!?]$/.test(summary)) {
+    summary += ".";
+  }
+
+  // 2. Enforce exactly 4 categories and 25-40 unique skills total
+  const rawCats = parsed?.skillsCategories && typeof parsed.skillsCategories === "object" ? parsed.skillsCategories : {};
+  const entries = Object.entries(rawCats)
+    .map(([k, v]) => [
+      String(k).trim(),
+      (Array.isArray(v) ? v : String(v || "").split(","))
+        .map((x) => String(x || "").replace(/\s*\/\s*/g, " & ").trim())
+        .filter(Boolean)
+    ])
+    .filter(([k, arr]) => k && arr.length > 0)
+    .slice(0, 4);
+
+  const defaultCatOrder = [
+    ["Languages & Core", profile?.skillsCategories?.Languages || ["Python", "TypeScript", "JavaScript", "C++", "SQL", "Go", "Bash"]],
+    ["AI, LLMs & Evaluation", profile?.skillsCategories?.["AI & LLM"] || ["LLM Evaluation", "Agentic AI", "RAG", "LangGraph", "Prompt Engineering", "Synthetic Data", "PyTorch"]],
+    ["Frameworks & Backend", profile?.skillsCategories?.["Frameworks & Libraries"] || ["React", "Node.js", "FastAPI", "Angular", "Playwright", "Microservices", "REST APIs"]],
+    ["Cloud, Data & Infrastructure", profile?.skillsCategories?.["Cloud & DevOps"] || ["GCP", "BigQuery", "AWS", "Docker", "Kubernetes", "Terraform", "GitHub Actions"]]
+  ];
+  while (entries.length < 4) {
+    const fallbackPair = defaultCatOrder[entries.length];
+    entries.push([fallbackPair[0], [...fallbackPair[1]]]);
+  }
+
+  const seenSkills = new Set();
+  const normalizedCats = {};
+  let totalSkills = 0;
+
+  for (const [catName, list] of entries) {
+    const cleanItems = [];
+    for (const item of list) {
+      const key = item.toLowerCase();
+      if (seenSkills.has(key) || totalSkills >= 40) continue;
+      seenSkills.add(key);
+      cleanItems.push(item);
+      totalSkills++;
+      if (cleanItems.length >= 10) break;
+    }
+    normalizedCats[catName] = cleanItems;
+  }
+
+  if (totalSkills < 25) {
+    const pool = [...(profile?.allSkillsFlat || []), ...Object.values(profile?.skillsCategories || {}).flat()];
+    const catKeys = Object.keys(normalizedCats);
+    let idx = 0;
+    for (const candidateSkill of pool) {
+      if (totalSkills >= 28) break;
+      const cleanSk = String(candidateSkill || "").replace(/\s*\/\s*/g, " & ").trim();
+      if (!cleanSk || seenSkills.has(cleanSk.toLowerCase())) continue;
+      seenSkills.add(cleanSk.toLowerCase());
+      normalizedCats[catKeys[idx % catKeys.length]].push(cleanSk);
+      totalSkills++;
+      idx++;
+    }
+  }
+
+  // 3. Sanitize experience (5 / 3 / 2) & project (2 / 2) bullets
+  const expTargetCounts = [5, 3, 2];
+  const experience = (Array.isArray(parsed?.experience) && parsed.experience.length > 0
+    ? parsed.experience
+    : (profile?.workExperience || []).map((w) => ({
+        company: w.company,
+        title: w.title,
+        location: w.location,
+        period: `${w.startDateDisplay} - ${w.endDateDisplay}`,
+        bullets: w.highlights || []
+      }))
+  ).slice(0, 3).map((exp, i) => ({
+    company: exp.company,
+    title: exp.title,
+    location: exp.location,
+    period: exp.period,
+    bullets: (exp.bullets || [])
+      .map(sanitizeBulletSentence)
+      .filter(Boolean)
+      .slice(0, expTargetCounts[i] || 2)
+  }));
+
+  const projects = (Array.isArray(parsed?.projects) && parsed.projects.length > 0
+    ? parsed.projects
+    : profile?.projects || []
+  ).slice(0, 2).map((pr) => ({
+    name: pr.name,
+    stack: String(pr.stack || "").replace(/\s*\/\s*/g, ", "),
+    bullets: (pr.bullets || [])
+      .map(sanitizeBulletSentence)
+      .filter(Boolean)
+      .slice(0, 2)
+  }));
+
+  return {
+    targetJobTitle: cleanTitle,
+    summary,
+    skillsCategories: normalizedCats,
+    experience,
+    projects,
+    addedKeywords: Array.isArray(parsed?.addedKeywords) ? parsed.addedKeywords : [],
+    keyChangesSummary: Array.isArray(parsed?.keyChangesSummary) ? parsed.keyChangesSummary : []
+  };
+}
+
 export async function tailorResumeWithGemini(jobMeta, profile, missingKeywords = [], settings = {}, preferredModel = null) {
-  const modelToUse = preferredModel || settings?.proModel || settings?.primaryModel || "gemini-3.8-flash";
-  const systemInstruction = `You are an elite Principal Technical Recruiter and ATS Resume Architect.
-Your job is to tailor the candidate's resume to the target job description with surgical precision.
-STRICT RULES:
-1. NEVER invent fake employers, fake job titles, fake degrees, or fake employment dates. Preserve exact employers (GlobalLogic (Client: Google AI), MassDigi at WPI, Wipro) and exact education (Clark University M.S. CS, Malla Reddy B.Tech CS).
-2. Reframe, prioritize, and sharpen the candidate's real accomplishments, metrics (e.g., 13 sandboxed web apps, 48 personas across 9 cloud services, #1 of 11 throughput across 460+ workflows, 10x video pipeline speedup, 70% faster Docker/K8s sandboxes, 10K+ daily agentic evals), and transferable skills so they directly mirror the target JD's terminology and priorities.
-3. Naturally weave in relevant target JD keywords ONLY where supported by the candidate's real technical stack and engineering experience.
-4. Keep bullets crisp, single-sentence or tight two-clause, starting with strong action verbs and concrete numbers so the entire resume fits cleanly on 1 ATS-friendly page.
-5. Output ONLY valid JSON matching the requested schema.`;
+  const exactPostingTitle = cleanPostingJobTitle(jobMeta.title || "AI & Platform Software Engineer");
+  const modelToUse = preferredModel || settings?.primaryModel || "gemini-3.5-flash";
 
-  const prompt = `TARGET JOB:
+  const systemInstruction = `You are an elite ATS & Technical Recruiter Resume Architect who builds every resume FROM SCRATCH from the candidate's full Master Profile + the target Job Description — NEVER generic AI rewording.
+
+EXECUTE THIS EXACT 5-STAGE FROM-SCRATCH FRAMEWORK:
+1. STAGE 1 — EXACT JD KEYWORD EXTRACTION:
+   - Use the exact words and spelling from the Job Description (e.g., if the posting says "ETL pipelines", write "ETL pipelines", not "data workflows").
+2. STAGE 2 — TOP JOB TITLE & 4-SENTENCE SUMMARY QUALITY FRAMEWORK:
+   - "targetJobTitle": Must be the exact clean job title from the posting ("${exactPostingTitle}").
+   - "summary": Strictly 4 sentences, maximum 75 words total, neutral third-person tone (NEVER use "I", "I am", or "my"; zero buzzwords or fluff):
+     * Sentence 1: Explicitly introduce the candidate as a "${exactPostingTitle}" with 3.5+ years of production engineering experience. Do NOT mention or imply any other job titles.
+     * Sentence 2: Highlight 3-6 core technical strengths pulled directly from the JD's hard skills, written naturally in prose (not a raw list).
+     * Sentence 3: Describe how these strengths create engineering value (improving reliability, automation, throughput, latency, evaluation rigor, or observability) using high-frequency JD hard skills.
+     * Sentence 4: Integrate 1-2 soft skills behaviorally and end with a forward-looking statement connecting the candidate's strengths to ${jobMeta.company || "the engineering team"}'s impact.
+3. STAGE 3 — SKILLS SECTION (4 CATEGORIES, 25 TO 40 TOTAL SKILLS):
+   - Arrange 25 to 40 hard skills across EXACTLY 4 clean categories tailored to this posting, combining exact JD keywords (supported by the candidate's real background or functionally equivalent skill translation) with natural supporting skills from the Master Profile.
+4. STAGE 4 — SKILL & UNIQUE ACTION-VERB ALLOCATION (5 / 3 / 2 / 2 / 2):
+   - Allocate JD hard skills, behavioral soft skills, and 14 COMPLETELY UNIQUE strong past-tense action verbs (zero repeated opening verbs across the entire resume!) across:
+     * Experience 1 (GlobalLogic (Client: Google AI)): 5 bullets
+     * Experience 2 (MassDigi at WPI): 3 bullets
+     * Experience 3 (Wipro): 2 bullets
+     * Project 1: 2 bullets
+     * Project 2: 2 bullets
+5. STAGE 5 — STRICT BULLET WRITING & REALISM RULES:
+   - NEVER invent fake employers, fake degrees, fake employment dates, or fake numbers! Every numeric metric (e.g., 13 sandboxed web apps, 48 personas across 9 cloud services, 100% QA accuracy, #1 of 11 throughput across 2,000+ batches and 460+ workflows, 19 custom SxS plugins, 10x video pipeline speedup across 40,000+ clips, ~60% faster diagnosis, 70% faster sandbox startup, 40+ edge cases caught, 60+ FPS and 30+ defects at MassDigi, 10K+ daily eval cases, 95%+ silent failures eliminated, 40% faster feature-to-prod across 8+ teams and 30+ plugins) MUST come strictly from the Master Profile so the candidate can defend every line in an interview.
+   - Skill Translation Rule: You may translate between functionally similar tools or workflows when aligning to the JD, provided every bullet stays 100% realistic and defensible for that specific role and work history.
+   - Each bullet MUST be ONE single sentence, 15 to 30 words, starting with its unique past-tense action verb and ending with a period (".").
+   - Structure every bullet as: Action verb + what you built + how you built it (1-2 exact JD hard skills, no long tool lists) + what changed (real profile metric or concrete engineering artifact/outcome). At least 60%-75% of bullets must contain real profile numbers.
+   - Do NOT use slashes ("/") anywhere inside bullet sentences (write "Python and TypeScript" or "Docker and Kubernetes", never "Python/TypeScript").
+   - Do NOT mention company names or job titles inside bullet text; refer neutrally to platforms, pipelines, sandboxes, teams, or stakeholders.
+   - Avoid repeating the exact same hard skill more than twice across bullets unless central to the JD.
+   - Output ONLY valid JSON matching the requested schema.`;
+
+  const prompt = `TARGET JOB POSTING:
 Company: ${jobMeta.company || "Target Company"}
-Role Title: ${jobMeta.title || "AI / Software Engineer"}
+Exact Posting Job Title: ${exactPostingTitle}
 Location: ${jobMeta.location || ""}
-Missing / Priority JD Keywords to address if truthful: ${missingKeywords.slice(0, 12).join(", ") || "Extract from JD"}
+Priority JD Keywords to incorporate where truthful: ${missingKeywords.slice(0, 14).join(", ") || "Extract directly from JD"}
 
-JOB DESCRIPTION:
+FULL JOB DESCRIPTION:
 ${String(jobMeta.description || "").slice(0, 9000)}
 
-CANDIDATE MASTER PROFILE:
+CANDIDATE FULL MASTER PROFILE (SINGLE SOURCE OF TRUTH — PICK THE BEST EVIDENCE FOR THIS JOB):
 ${JSON.stringify(
   {
+    yearsOfExperience: profile.personal?.yearsOfExperience,
     summary: profile.summary,
     skillsCategories: profile.skillsCategories,
     workExperience: profile.workExperience,
@@ -185,12 +415,13 @@ ${JSON.stringify(
 
 Return strictly valid JSON with this exact structure:
 {
-  "summary": "3-line tailored professional summary aligned to target role & company",
+  "targetJobTitle": "${exactPostingTitle}",
+  "summary": "4-sentence neutral third-person summary (<=75 words) starting by introducing the candidate as a ${exactPostingTitle}",
   "skillsCategories": {
-    "Languages": ["..."],
-    "Frameworks & Libraries": ["..."],
-    "AI & LLM": ["..."],
-    "Cloud & DevOps": ["..."]
+    "Category 1 Name": ["6 to 10 exact JD + profile skills"],
+    "Category 2 Name": ["6 to 10 exact JD + profile skills"],
+    "Category 3 Name": ["6 to 10 exact JD + profile skills"],
+    "Category 4 Name": ["6 to 10 exact JD + profile skills"]
   },
   "experience": [
     {
@@ -198,35 +429,40 @@ Return strictly valid JSON with this exact structure:
       "title": "Senior AI Solutions Engineer - Responsible AI & Novel AI Testing",
       "location": "Santa Clara, CA",
       "period": "Oct 2024 - Present",
-      "bullets": ["4 to 5 high-impact tailored bullets with exact metrics"]
+      "bullets": ["5 single-sentence bullets, 15-30 words each, unique action verbs, no slashes, real metrics"]
     },
     {
       "company": "MassDigi at WPI",
       "title": "Software Engineer & Game Developer",
       "location": "Worcester, MA",
       "period": "May 2023 - Aug 2023",
-      "bullets": ["1 to 2 tailored bullets"]
+      "bullets": ["3 single-sentence bullets, 15-30 words each, unique action verbs, no slashes"]
     },
     {
       "company": "Wipro",
       "title": "Software Engineering Intern (.NET Full-Stack)",
       "location": "Hyderabad, India",
       "period": "Mar 2022 - Aug 2022",
-      "bullets": ["1 concise tailored bullet"]
+      "bullets": ["2 single-sentence bullets, 15-30 words each, unique action verbs, no slashes"]
     }
   ],
   "projects": [
     {
-      "name": "Project Title",
-      "stack": "Tech stack",
-      "bullets": ["1 to 2 crisp bullets"]
+      "name": "Agentic AI Evaluation & Trajectory Analysis Platform",
+      "stack": "JD-aligned stack from project",
+      "bullets": ["2 single-sentence bullets, 15-30 words each, unique action verbs, no slashes"]
+    },
+    {
+      "name": "AI-Native Developer Tooling & Automated Test Harness",
+      "stack": "JD-aligned stack from project",
+      "bullets": ["2 single-sentence bullets, 15-30 words each, unique action verbs, no slashes"]
     }
   ],
-  "addedKeywords": ["keyword1", "keyword2"],
+  "addedKeywords": ["exact JD keyword 1", "exact JD keyword 2"],
   "keyChangesSummary": [
-    "Brief bullet explaining specific tailoring adjustment #1",
-    "Brief bullet explaining specific tailoring adjustment #2",
-    "Brief bullet explaining specific tailoring adjustment #3"
+    "Built from scratch for ${exactPostingTitle} with 4-sentence <=75-word summary and 25-40 categorized JD skills",
+    "Allocated unique action verbs and JD hard skills across 14 single-sentence (15-30 word) bullets",
+    "Grounded 100% of metrics strictly in verified Master Profile achievements"
   ]
 }`;
 
@@ -235,14 +471,16 @@ Return strictly valid JSON with this exact structure:
     systemInstruction,
     requestedModel: modelToUse,
     jsonMode: true,
-    temperature: 0.3,
+    temperature: 0.25,
     maxOutputTokens: 4096,
+    timeoutMs: 16000,
     settings
   });
 
-  const parsed = parseJsonResponse(res.text);
+  const rawParsed = parseJsonResponse(res.text);
+  const tailored = enforceFromScratchResumeQuality(rawParsed, jobMeta, profile);
   return {
-    tailored: parsed,
+    tailored,
     modelUsed: res.modelUsed,
     requestedModel: res.requestedModel,
     fellBack: res.fellBack

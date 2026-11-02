@@ -6,13 +6,16 @@ let STATE = null;
 let currentView = (location.hash || "#overview").replace("#", "") || "overview";
 let cachedLiveJobs = [];
 
+let trackerFilterQ = "";
+let trackerFilterStage = "All";
+
 const VIEW_HEADERS = {
   overview: ["Overview & ATS Sandbox", "Your complete Simplify+ AI Copilot pre-loaded with Raviteja Velanati's profile"],
   tracker: ["All-in-One Application Tracker", "Track bookmarks, submitted applications, interview notes, timelines & referrals"],
   resume: ["AI Resume Tailor, Builder & ATS Scorer", "Tailor bullets with Gemini 3.8 Flash / 3.1 Pro, audit missing keywords & compile ATS PDF"],
   cover: ["AI Cover Letter Studio", "Generate custom recruiter-ready cover letters & export ATS PDFs"],
-  jobs: ["Personalized Job Matches & Curated Daily Lists", "Live open roles fetched directly from Anthropic, OpenAI, Perplexity, Scale AI, Databricks & Stripe"],
-  autopilot: ["Autopilot Control Center", "Queue job applications, configure Safe Review vs. True Auto-Submit, and schedule recurring runs"],
+  jobs: ["Personalized Job Matches & Curated Daily Lists", "Live open roles fetched directly from OpenAI, Anthropic, Perplexity, xAI, Cohere, Scale AI, Together AI, Databricks, Harvey, Stripe & Figma"],
+  autopilot: ["Autopilot Control Center", "Queue job applications, configure True Full Auto-Submit vs. Safe Review, and schedule recurring runs"],
   network: ["Network Copilot — Warm Referral Pathfinder", "Map alumni, ex-colleagues, hiring managers & AI-drafted outreach notes"],
   vault: ["Profile, Resume Vault, Saved Answers & Credentials", "Edit candidate details, EEO preferences, saved answers, portal logins & Gemini API settings"]
 };
@@ -185,6 +188,14 @@ function renderTracker(c) {
     "Rejected"
   ];
 
+  const qNorm = trackerFilterQ.trim().toLowerCase();
+  const filteredApps = apps.filter((a) => {
+    if (trackerFilterStage !== "All" && a.status !== trackerFilterStage) return false;
+    if (!qNorm) return true;
+    const hay = `${a.company || ""} ${a.role || ""} ${a.location || ""} ${a.ats || ""} ${a.notes || ""}`.toLowerCase();
+    return hay.includes(qNorm);
+  });
+
   c.innerHTML = `
     <div class="card">
       <div class="card-title">
@@ -206,10 +217,30 @@ function renderTracker(c) {
     </div>
 
     <div class="card">
-      <div class="card-title">Tracked Applications (${apps.length})</div>
+      <div class="card-title" style="flex-wrap:wrap;gap:10px;">
+        <span>Tracked Applications (${filteredApps.length}${filteredApps.length !== apps.length ? ` of ${apps.length}` : ""})</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input class="input" id="trk-filter-q" value="${esc(trackerFilterQ)}" placeholder="Search company, role, notes..." style="width:230px;padding:6px 10px;font-size:12px;" />
+          <select class="select" id="trk-filter-stage" style="width:170px;padding:6px 10px;font-size:12px;">
+            <option value="All" ${trackerFilterStage === "All" ? "selected" : ""}>All Stages (${apps.length})</option>
+            ${statuses
+              .map(
+                (s) =>
+                  `<option value="${esc(s)}" ${trackerFilterStage === s ? "selected" : ""}>${esc(s)} (${
+                    apps.filter((a) => a.status === s).length
+                  })</option>`
+              )
+              .join("")}
+          </select>
+        </div>
+      </div>
       ${
-        apps.length === 0
-          ? `<p style="font-size:13px;color:#94a3b8;">No applications logged yet. Bookmark or submit any job application with Jobify Copilot, or explore Live Jobs!</p>`
+        filteredApps.length === 0
+          ? `<p style="font-size:13px;color:#94a3b8;">${
+              apps.length === 0
+                ? "No applications logged yet. Bookmark or auto-submit any job application with Jobify Copilot, or explore Live Jobs!"
+                : "No applications match the current filter."
+            }</p>`
           : `<table class="table">
               <thead>
                 <tr>
@@ -222,7 +253,7 @@ function renderTracker(c) {
                 </tr>
               </thead>
               <tbody>
-                ${apps
+                ${filteredApps
                   .map(
                     (a) => `
                   <tr data-id="${esc(a.id)}">
@@ -258,6 +289,24 @@ function renderTracker(c) {
       }
     </div>
   `;
+
+  c.querySelector("#trk-filter-q")?.addEventListener("input", (e) => {
+    trackerFilterQ = e.target.value;
+    const pos = e.target.selectionStart;
+    renderTracker(c);
+    const inp = c.querySelector("#trk-filter-q");
+    if (inp) {
+      inp.focus();
+      try {
+        inp.setSelectionRange(pos, pos);
+      } catch (_) {}
+    }
+  });
+
+  c.querySelector("#trk-filter-stage")?.addEventListener("change", (e) => {
+    trackerFilterStage = e.target.value;
+    renderTracker(c);
+  });
 
   c.querySelector("#trk-add-btn").addEventListener("click", async () => {
     const company = c.querySelector("#trk-comp").value.trim();
@@ -543,12 +592,40 @@ function renderCoverStudio(c) {
     }
   });
 
+  c.querySelector("#cl-editor")?.addEventListener("input", (e) => {
+    const dlBtn = c.querySelector("#cl-dl-btn");
+    if (dlBtn) dlBtn.disabled = !e.target.value.trim();
+  });
+
   c.querySelector("#cl-copy-btn").addEventListener("click", () => {
     navigator.clipboard.writeText(c.querySelector("#cl-editor").value);
     toast("📋 Copied cover letter!");
   });
 
-  c.querySelector("#cl-dl-btn").addEventListener("click", () => {
+  c.querySelector("#cl-dl-btn").addEventListener("click", async () => {
+    const edited = c.querySelector("#cl-editor")?.value || "";
+    if (!edited.trim()) return toast("Generate or enter cover letter text first.");
+    if (!activeRecord?.pdfBase64 || edited.trim() !== (activeRecord.coverLetter || "").trim()) {
+      const recomp = await chrome.runtime
+        .sendMessage({
+          type: "COMPILE_COVER_LETTER_PDF",
+          payload: {
+            coverLetter: edited,
+            company: c.querySelector("#cl-comp")?.value.trim() || activeRecord?.company || "Company",
+            role: c.querySelector("#cl-role")?.value.trim() || activeRecord?.role || "Software Engineer",
+            recordId: activeRecord?.id || null
+          }
+        })
+        .catch(() => null);
+      if (recomp?.ok && recomp.pdfBase64) {
+        activeRecord = {
+          ...(activeRecord || {}),
+          coverLetter: edited,
+          pdfBase64: recomp.pdfBase64,
+          fileName: recomp.fileName
+        };
+      }
+    }
     if (activeRecord?.pdfBase64) downloadBase64(activeRecord.pdfBase64, activeRecord.fileName);
   });
 }
@@ -558,18 +635,18 @@ async function renderLiveJobs(c) {
     <div class="card">
       <div class="grid-3">
         <select class="select" id="jf-cat">
-          <option value="All">All Curated Daily Lists (Frontier AI + Unicorns)</option>
-          <option value="Frontier AI Labs">Frontier AI Labs (Anthropic, OpenAI, Perplexity)</option>
-          <option value="AI & Eval Infrastructure">AI & Eval Infrastructure (Scale AI)</option>
-          <option value="AI & Data Unicorns">AI & Data Unicorns (Databricks)</option>
-          <option value="Cloud & FinTech">Cloud & FinTech (Stripe)</option>
+          <option value="All">All Curated Daily Lists (11 Live AI &amp; Tech Boards)</option>
+          <option value="Frontier AI Labs">Frontier AI Labs (Anthropic, OpenAI, Perplexity, xAI, Cohere)</option>
+          <option value="AI & Eval Infrastructure">AI &amp; Eval Infrastructure (Scale AI, Together AI)</option>
+          <option value="AI & Data Unicorns">AI &amp; Data Unicorns (Databricks, Harvey)</option>
+          <option value="Cloud & FinTech">Cloud, Design &amp; FinTech (Stripe, Figma)</option>
         </select>
         <input class="input" id="jf-q" placeholder="Filter by keyword (e.g., Agent, Evaluation, Platform, San Francisco)..." />
         <button class="btn primary" id="jf-refresh">🔄 Refresh Live ATS Feeds</button>
       </div>
     </div>
     <div id="jf-grid-wrap">
-      <div class="card">⏳ Fetching live open AI & Software Engineering roles from Greenhouse & Ashby APIs...</div>
+      <div class="card">⏳ Fetching live open AI &amp; Software Engineering roles from Greenhouse &amp; Ashby APIs...</div>
     </div>
   `;
 
@@ -589,7 +666,7 @@ async function renderLiveJobs(c) {
     }
     wrap.innerHTML = `
       <div style="margin-bottom:12px;font-size:13px;color:#94a3b8;">
-        Showing <strong>${cachedLiveJobs.length}</strong> live US/Remote AI & SWE roles ranked by personalized profile match:
+        Showing <strong>${cachedLiveJobs.length}</strong> live US/Remote AI &amp; SWE roles ranked by personalized profile match:
       </div>
       <div class="job-feed-grid">
         ${cachedLiveJobs
@@ -604,16 +681,35 @@ async function renderLiveJobs(c) {
               <div style="font-weight:700;font-size:14.5px;color:#fff;margin-bottom:4px;">${esc(j.title)}</div>
               <div style="font-size:12px;color:#94a3b8;">📍 ${esc(j.location)}</div>
             </div>
-            <div style="display:flex;gap:7px;margin-top:6px;">
-              <a class="btn sm primary" href="${esc(j.url)}" target="_blank" style="flex:1;">Apply & Autofill ↗</a>
-              <button class="btn sm secondary jf-save" data-idx="${idx}">📌 Save</button>
-              <button class="btn sm secondary jf-ap" data-idx="${idx}">🤖 Queue</button>
+            <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+              <button class="btn sm emerald jf-launch-auto" data-idx="${idx}" style="flex:1.2;">🚀 Auto-Apply</button>
+              <a class="btn sm primary" href="${esc(j.url)}" target="_blank" style="flex:0.8;">Open ↗</a>
+              <button class="btn sm secondary jf-save" data-idx="${idx}">📌</button>
+              <button class="btn sm secondary jf-ap" data-idx="${idx}" title="Add to Autopilot Queue">🤖</button>
             </div>
           </div>`
           )
           .join("")}
       </div>
     `;
+
+    wrap.querySelectorAll(".jf-launch-auto").forEach((b) => {
+      b.addEventListener("click", async () => {
+        const j = cachedLiveJobs[Number(b.dataset.idx)];
+        toast(`🚀 Opening ${j.company} & starting Autonomous Auto-Apply...`);
+        await chrome.runtime.sendMessage({
+          type: "LAUNCH_TAB_AND_AUTO_APPLY",
+          payload: {
+            url: j.url,
+            options: {
+              autoSubmit: STATE.settings?.autoSubmitEnabled !== false,
+              tailorResume: true,
+              jobMeta: { company: j.company, title: j.title, location: j.location, ats: j.ats, url: j.url }
+            }
+          }
+        });
+      });
+    });
 
     wrap.querySelectorAll(".jf-save").forEach((b) => {
       b.addEventListener("click", async () => {
@@ -664,12 +760,12 @@ function renderAutopilot(c) {
   c.innerHTML = `
     <div class="grid-2">
       <div class="card">
-        <div class="card-title">🤖 Autopilot Configuration & Runner</div>
+        <div class="card-title">🤖 Autopilot Configuration &amp; Runner</div>
         <div class="form-row">
           <label class="field-lbl">Execution Mode</label>
           <select class="select" id="ap-mode">
-            <option value="safe_review" ${STATE.settings.autopilotMode === "safe_review" ? "selected" : ""}>Safe Review Mode — Tailor PDF, Autofill 100% & Pause Before Final Submit (Recommended)</option>
-            <option value="full_auto" ${STATE.settings.autopilotMode === "full_auto" ? "selected" : ""}>True Full Autopilot — Tailor PDF, Autofill & Click Submit Automatically</option>
+            <option value="full_auto" ${STATE.settings.autopilotMode !== "safe_review" ? "selected" : ""}>True Full Autopilot — Tailor PDF, Autofill &amp; Click Submit Automatically (Default)</option>
+            <option value="safe_review" ${STATE.settings.autopilotMode === "safe_review" ? "selected" : ""}>Safe Review Mode — Tailor PDF, Autofill 100% &amp; Pause Before Final Submit</option>
           </select>
         </div>
         <div class="grid-2 form-row">
@@ -712,7 +808,7 @@ function renderAutopilot(c) {
       </div>
       ${
         queue.length === 0
-          ? `<p style="font-size:13px;color:#94a3b8;">Queue is empty. Add roles from "Live Jobs & Daily Lists" or click "+ Queue Local Sandbox Test".</p>`
+          ? `<p style="font-size:13px;color:#94a3b8;">Queue is empty. Add roles from "Live Jobs &amp; Daily Lists" or click "+ Queue Local Sandbox Test".</p>`
           : `<table class="table">
               <thead><tr><th>Company</th><th>Role</th><th>Status</th><th>URL</th></tr></thead>
               <tbody>
@@ -745,12 +841,17 @@ function renderAutopilot(c) {
   `;
 
   c.querySelector("#ap-mode").addEventListener("change", async (e) => {
+    const mode = e.target.value;
     await chrome.runtime.sendMessage({
       type: "UPDATE_SETTINGS",
-      payload: { settings: { autopilotMode: e.target.value } }
+      payload: { settings: { autopilotMode: mode, autoSubmitEnabled: mode === "full_auto" } }
     });
     await reloadState();
-    toast(`Autopilot mode set to ${e.target.value}`);
+    toast(
+      mode === "full_auto"
+        ? "🎯 True Full Autopilot enabled — applications will auto-submit!"
+        : "⏸️ Safe Review Mode enabled — will pause before final submit."
+    );
   });
 
   c.querySelector("#ap-sched-btn").addEventListener("click", async () => {
@@ -780,6 +881,12 @@ function renderAutopilot(c) {
   });
 
   c.querySelector("#ap-seed-sandbox").addEventListener("click", async () => {
+    let targetSandboxUrl = chrome.runtime.getURL("sandbox/greenhouse.html");
+    try {
+      const health = await fetch(`${companionUrl}/api/health`, { method: "GET" });
+      if (health.ok) targetSandboxUrl = `${companionUrl}/sandbox/greenhouse`;
+    } catch (_) {}
+
     await chrome.runtime.sendMessage({
       type: "ENQUEUE_AUTOPILOT",
       payload: {
@@ -787,14 +894,14 @@ function renderAutopilot(c) {
           company: "Jobify AI Sandbox",
           title: "Senior AI Platform Engineer",
           ats: "Greenhouse",
-          url: `${companionUrl}/sandbox/greenhouse`,
+          url: targetSandboxUrl,
           tailorFirst: false
         }
       }
     });
     await reloadState();
     renderAutopilot(c);
-    toast("Added local Greenhouse Sandbox to queue!");
+    toast("Added Greenhouse Sandbox to Autopilot queue!");
   });
 
   c.querySelector("#ap-run-now").addEventListener("click", async () => {
@@ -994,8 +1101,14 @@ function renderVaultAndProfile(c) {
             <input class="input" type="file" id="vc-upload-pdf" accept="application/pdf" />
           </div>
         </div>
+        <div class="form-row">
+          <label style="display:flex;align-items:center;justify-content:space-between;background:#0b1120;border:1px solid #334155;border-radius:8px;padding:9px 12px;cursor:pointer;">
+            <span style="font-size:12.5px;color:#e2e8f0;">🎯 <strong>Auto-Submit Applications When Ready</strong> (click final Submit automatically)</span>
+            <input type="checkbox" id="vc-auto-sub" ${set.autoSubmitEnabled !== false ? "checked" : ""} style="accent-color:#10b981;width:16px;height:16px;cursor:pointer;" />
+          </label>
+        </div>
         <div style="display:flex;gap:10px;">
-          <button class="btn primary" id="vc-save-btn">💾 Save Vault & API Settings</button>
+          <button class="btn primary" id="vc-save-btn">💾 Save Vault &amp; API Settings</button>
           <button class="btn secondary" id="vc-test-imap">📨 Test Gmail OTP Reader</button>
         </div>
       </div>
@@ -1053,6 +1166,7 @@ function renderVaultAndProfile(c) {
   });
 
   c.querySelector("#vc-save-btn").addEventListener("click", async () => {
+    const autoSubEnabled = Boolean(c.querySelector("#vc-auto-sub")?.checked);
     await chrome.runtime.sendMessage({
       type: "UPDATE_CREDENTIALS",
       payload: {
@@ -1068,7 +1182,9 @@ function renderVaultAndProfile(c) {
       payload: {
         settings: {
           geminiApiKey: c.querySelector("#vc-api-key").value.trim(),
-          defaultResumeVariant: c.querySelector("#vc-def-res").value
+          defaultResumeVariant: c.querySelector("#vc-def-res").value,
+          autoSubmitEnabled: autoSubEnabled,
+          autopilotMode: autoSubEnabled ? "full_auto" : "safe_review"
         }
       }
     });
@@ -1131,6 +1247,22 @@ function renderVaultAndProfile(c) {
 
 document.querySelectorAll(".nav-item").forEach((btn) => {
   btn.addEventListener("click", () => switchView(btn.dataset.view));
+});
+
+let liveRefreshTimer = null;
+chrome.storage?.onChanged?.addListener((_changes, area) => {
+  if (area !== "local") return;
+  clearTimeout(liveRefreshTimer);
+  liveRefreshTimer = setTimeout(async () => {
+    await reloadState();
+    const activeEl = document.activeElement;
+    const isTypingInForm =
+      activeEl &&
+      (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA" || activeEl.tagName === "SELECT");
+    if (!isTypingInForm && ["overview", "tracker", "autopilot"].includes(currentView)) {
+      renderCurrentView();
+    }
+  }, 280);
 });
 
 (async () => {
