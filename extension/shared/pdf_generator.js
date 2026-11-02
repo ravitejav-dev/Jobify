@@ -40,48 +40,72 @@ function wrapTextLines(text, maxWidthPts, fontSize, isBold = false) {
   return lines;
 }
 
+export function formatCompanyResumeFileName(companyName, fallbackSuffix = "Resume") {
+  const raw = String(companyName || "").trim();
+  const isGeneric =
+    !raw ||
+    /^(target(\s+company)?|company|unknown|job\s*portal|career\s*portal|careers?|active\s+browser\s+tab|application)$/i.test(
+      raw
+    );
+  const cleanComp = isGeneric
+    ? ""
+    : raw
+        .replace(/&/g, "and")
+        .replace(/[^a-zA-Z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 32);
+  return `Raviteja_velanati_${cleanComp || fallbackSuffix}.pdf`;
+}
+
 export function buildPureJsResumePdfBase64(tailored, profile) {
   const p = profile.personal || {};
   const PAGE_W = 612; // 8.5 in
   const PAGE_H = 792; // 11 in
-  const MARGIN_X = 40;
+  const MARGIN_X = 34;
   const CONTENT_W = PAGE_W - MARGIN_X * 2;
 
   const pages = [[]];
-  let y = PAGE_H - 38;
+  let y = PAGE_H - 30;
 
   const currentOps = () => pages[pages.length - 1];
   const ensureSpace = (needed) => {
-    if (y - needed < 36) {
+    if (y - needed < 26) {
       pages.push([]);
-      y = PAGE_H - 40;
+      y = PAGE_H - 32;
     }
   };
 
-  const drawText = (txt, x, yPos, size = 9.5, bold = false) => {
+  const drawText = (txt, x, yPos, size = 8.4, bold = false) => {
     const fontRef = bold ? "/F2" : "/F1";
     currentOps().push(`BT ${fontRef} ${size.toFixed(1)} Tf 1 0 0 1 ${x.toFixed(1)} ${yPos.toFixed(1)} Tm (${sanitizePdfText(txt)}) Tj ET`);
   };
 
-  const drawRightText = (txt, yPos, size = 9, bold = false) => {
+  const drawRightText = (txt, yPos, size = 8.2, bold = false) => {
     const w = estimateTextWidth(txt, size, bold);
     drawText(txt, Math.max(MARGIN_X + 200, PAGE_W - MARGIN_X - w), yPos, size, bold);
   };
 
   const drawSectionHeader = (title) => {
-    ensureSpace(24);
-    y -= 6;
-    drawText(title.toUpperCase(), MARGIN_X, y, 10, true);
-    y -= 3.5;
-    currentOps().push(`0.2 0.25 0.35 RG 0.7 w ${MARGIN_X} ${y.toFixed(1)} m ${PAGE_W - MARGIN_X} ${y.toFixed(1)} l S`);
-    y -= 11;
+    ensureSpace(20);
+    y -= 4.5;
+    drawText(title.toUpperCase(), MARGIN_X, y, 9.2, true);
+    y -= 2.8;
+    currentOps().push(`0.2 0.25 0.35 RG 0.6 w ${MARGIN_X} ${y.toFixed(1)} m ${PAGE_W - MARGIN_X} ${y.toFixed(1)} l S`);
+    y -= 9.5;
   };
 
-  // Header Name + Contact
+  // Header Name + Exact Target Job Title + Contact
   const fullName = p.fullName || "Raviteja Velanati";
-  const nameW = estimateTextWidth(fullName, 17, true);
-  drawText(fullName, (PAGE_W - nameW) / 2, y, 17, true);
-  y -= 13;
+  const nameW = estimateTextWidth(fullName, 15.5, true);
+  drawText(fullName, (PAGE_W - nameW) / 2, y, 15.5, true);
+  y -= 11.5;
+
+  const targetJobTitle = String(tailored?.targetJobTitle || "").trim();
+  if (targetJobTitle) {
+    const roleW = estimateTextWidth(targetJobTitle, 9.8, true);
+    drawText(targetJobTitle, Math.max(MARGIN_X, (PAGE_W - roleW) / 2), y, 9.8, true);
+    y -= 10.5;
+  }
 
   const contactLine = [
     `${p.city || "Newark"}, ${p.stateCode || "CA"}`,
@@ -90,34 +114,34 @@ export function buildPureJsResumePdfBase64(tailored, profile) {
     (p.linkedin || "linkedin.com/in/raviteja-velanati").replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, ""),
     (p.github || "github.com/ravitejav-dev").replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")
   ].join("  |  ");
-  const contactW = estimateTextWidth(contactLine, 8.8, false);
-  drawText(contactLine, Math.max(MARGIN_X, (PAGE_W - contactW) / 2), y, 8.8, false);
-  y -= 10;
+  const contactW = estimateTextWidth(contactLine, 8.2, false);
+  drawText(contactLine, Math.max(MARGIN_X, (PAGE_W - contactW) / 2), y, 8.2, false);
+  y -= 7;
 
   // Summary
-  drawSectionHeader("Professional Summary");
+  drawSectionHeader("Summary");
   const summaryText = tailored?.summary || profile.summaryShort || profile.summary || "";
-  for (const line of wrapTextLines(summaryText, CONTENT_W, 8.8, false)) {
-    ensureSpace(12);
-    drawText(line, MARGIN_X, y, 8.8, false);
-    y -= 11;
+  for (const line of wrapTextLines(summaryText, CONTENT_W, 8.3, false)) {
+    ensureSpace(10);
+    drawText(line, MARGIN_X, y, 8.3, false);
+    y -= 9.5;
   }
 
   // Skills
-  drawSectionHeader("Technical Skills");
+  drawSectionHeader("Skills");
   const skillCats = tailored?.skillsCategories || profile.skillsCategories || {};
   for (const [cat, items] of Object.entries(skillCats)) {
     const lineStr = `${cat}: ${Array.isArray(items) ? items.join(", ") : items}`;
-    const wrapped = wrapTextLines(lineStr, CONTENT_W, 8.6, false);
+    const wrapped = wrapTextLines(lineStr, CONTENT_W, 8.2, false);
     for (let i = 0; i < wrapped.length; i++) {
-      ensureSpace(11);
-      drawText(wrapped[i], MARGIN_X, y, 8.6, i === 0 && wrapped.length === 1 ? false : false);
-      y -= 10.5;
+      ensureSpace(10);
+      drawText(wrapped[i], MARGIN_X, y, 8.2, false);
+      y -= 9.3;
     }
   }
 
   // Experience
-  drawSectionHeader("Professional Experience");
+  drawSectionHeader("Experience");
   const expList = tailored?.experience || (profile.workExperience || []).map((w) => ({
     company: w.company,
     title: w.title,
@@ -127,57 +151,57 @@ export function buildPureJsResumePdfBase64(tailored, profile) {
   }));
 
   for (const exp of expList) {
-    ensureSpace(26);
-    drawText(`${exp.company} - ${exp.title}`, MARGIN_X, y, 9.3, true);
-    drawRightText(`${exp.location ? exp.location + " | " : ""}${exp.period || ""}`, y, 8.6, false);
-    y -= 11.5;
+    ensureSpace(22);
+    drawText(`${exp.company} - ${exp.title}`, MARGIN_X, y, 8.7, true);
+    drawRightText(`${exp.location ? exp.location + " | " : ""}${exp.period || ""}`, y, 8.1, false);
+    y -= 10.0;
 
     for (const bullet of exp.bullets || []) {
-      const wrapped = wrapTextLines(bullet, CONTENT_W - 14, 8.6, false);
+      const wrapped = wrapTextLines(bullet, CONTENT_W - 12, 8.2, false);
       for (let i = 0; i < wrapped.length; i++) {
-        ensureSpace(11);
-        if (i === 0) drawText("-", MARGIN_X + 3, y, 8.6, true);
-        drawText(wrapped[i], MARGIN_X + 12, y, 8.6, false);
-        y -= 10.4;
+        ensureSpace(9.5);
+        if (i === 0) drawText("-", MARGIN_X + 2, y, 8.2, true);
+        drawText(wrapped[i], MARGIN_X + 10, y, 8.2, false);
+        y -= 9.2;
       }
     }
-    y -= 3;
+    y -= 2;
   }
 
-  // Selected Projects
-  const projList = tailored?.projects || profile.projects || [];
+  // Projects
+  const projList = (tailored?.projects || profile.projects || []).slice(0, 2);
   if (projList.length > 0) {
-    drawSectionHeader("Selected Projects");
+    drawSectionHeader("Projects");
     for (const proj of projList) {
-      ensureSpace(20);
-      drawText(`${proj.name} (${proj.stack || ""})`, MARGIN_X, y, 8.9, true);
-      y -= 10.8;
+      ensureSpace(18);
+      drawText(`${proj.name}${proj.stack ? ` (${proj.stack})` : ""}`, MARGIN_X, y, 8.5, true);
+      y -= 9.6;
       for (const b of proj.bullets || []) {
-        const wrapped = wrapTextLines(b, CONTENT_W - 14, 8.5, false);
+        const wrapped = wrapTextLines(b, CONTENT_W - 12, 8.1, false);
         for (let i = 0; i < wrapped.length; i++) {
-          ensureSpace(10.5);
-          if (i === 0) drawText("-", MARGIN_X + 3, y, 8.5, true);
-          drawText(wrapped[i], MARGIN_X + 12, y, 8.5, false);
-          y -= 10.2;
+          ensureSpace(9.5);
+          if (i === 0) drawText("-", MARGIN_X + 2, y, 8.1, true);
+          drawText(wrapped[i], MARGIN_X + 10, y, 8.1, false);
+          y -= 9.1;
         }
       }
-      y -= 2;
+      y -= 1.8;
     }
   }
 
   // Education
   drawSectionHeader("Education");
   for (const edu of profile.education || []) {
-    ensureSpace(14);
+    ensureSpace(12);
     drawText(
       `${edu.school} - ${edu.degreeShort || edu.degree}, ${edu.fieldOfStudy} (GPA ${edu.gpa}/${edu.gpaScale})`,
       MARGIN_X,
       y,
-      8.8,
+      8.3,
       true
     );
-    drawRightText(`${edu.startYear} - ${edu.endYear}`, y, 8.6, false);
-    y -= 11;
+    drawRightText(`${edu.startYear} - ${edu.endYear}`, y, 8.1, false);
+    y -= 9.8;
   }
 
   return assemblePdfFromPages(pages, PAGE_W, PAGE_H);

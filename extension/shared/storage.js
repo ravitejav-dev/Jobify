@@ -7,6 +7,7 @@ import {
   DEFAULT_CREDENTIALS_VAULT,
   DEFAULT_SAVED_ANSWERS
 } from "./default_profile.js";
+import { formatCompanyResumeFileName } from "./pdf_generator.js";
 
 export const STORAGE_KEYS = {
   PROFILE: "jobify_profile",
@@ -207,7 +208,7 @@ export async function upsertApplication(appEntry) {
       url: appEntry.url || "",
       status: appEntry.status || "Bookmarked",
       matchScore: appEntry.matchScore ?? null,
-      resumeUsed: appEntry.resumeUsed || "Raviteja_Velanati_Resume_1Page.pdf",
+      resumeUsed: appEntry.resumeUsed || formatCompanyResumeFileName(appEntry.company),
       notes: appEntry.notes || "",
       referrals: appEntry.referrals || [],
       createdAt: now,

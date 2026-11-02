@@ -391,10 +391,10 @@ function renderResumeStudio(c) {
           </div>
         </div>
         <div class="form-row">
-          <label class="field-lbl">Gemini Tailoring Model</label>
+          <label class="field-lbl">Gemini Tailoring Model (From-Scratch Builder)</label>
           <select class="select" id="rs-model">
-            <option value="gemini-3.8-flash" ${STATE.settings.primaryModel === "gemini-3.8-flash" ? "selected" : ""}>Gemini 3.8 Flash (Fast ATS Tailoring)</option>
-            <option value="gemini-3.1-pro-preview" ${STATE.settings.primaryModel === "gemini-3.1-pro-preview" ? "selected" : ""}>Gemini 3.1 Pro (Deep Bullet Restructuring)</option>
+            <option value="gemini-3.5-flash" ${STATE.settings.primaryModel === "gemini-3.5-flash" ? "selected" : ""}>Gemini 3.5 Flash (Fast From-Scratch ATS Builder)</option>
+            <option value="gemini-3-flash-preview" ${STATE.settings.primaryModel === "gemini-3-flash-preview" ? "selected" : ""}>Gemini 3 Flash Preview (Deep Bullet Restructuring)</option>
           </select>
         </div>
         <div class="form-row">
@@ -403,14 +403,14 @@ function renderResumeStudio(c) {
         </div>
         <div style="display:flex;gap:10px;">
           <button class="btn secondary" id="rs-scan-btn">🔍 Scan Missing Keywords & ATS Score</button>
-          <button class="btn primary" id="rs-tailor-btn">✨ Tailor Resume & Compile PDF</button>
+          <button class="btn primary" id="rs-tailor-btn">✨ Build From-Scratch Resume &amp; PDF</button>
         </div>
       </div>
 
       <div class="card" id="rs-output-panel">
-        <div class="card-title">ATS Score, Missing Keywords & Tailored Preview</div>
+        <div class="card-title">ATS Score, Missing Keywords &amp; From-Scratch Preview</div>
         <div id="rs-results-inner" style="font-size:13px;color:#94a3b8;">
-          Click <strong>Scan Missing Keywords</strong> or <strong>Tailor Resume & Compile PDF</strong> to analyze against Raviteja's profile.
+          Click <strong>Scan Missing Keywords</strong> or <strong>Build From-Scratch Resume &amp; PDF</strong> to generate a 1-page ATS resume tailored to the posting.
         </div>
       </div>
     </div>
@@ -452,7 +452,7 @@ function renderResumeStudio(c) {
   c.querySelector("#rs-tailor-btn").addEventListener("click", async (e) => {
     const btn = e.currentTarget;
     btn.disabled = true;
-    btn.textContent = "⏳ Tailoring with Gemini & building PDF...";
+    btn.textContent = "⏳ Building From-Scratch Resume & 1-Page PDF...";
     const resp = await chrome.runtime.sendMessage({
       type: "TAILOR_RESUME",
       payload: {
@@ -465,7 +465,7 @@ function renderResumeStudio(c) {
       }
     });
     btn.disabled = false;
-    btn.textContent = "✨ Tailor Resume & Compile PDF";
+    btn.textContent = "✨ Build From-Scratch Resume & PDF";
 
     if (!resp?.ok) {
       toast(`Error: ${resp?.error || "Tailoring failed"}`);
@@ -480,25 +480,27 @@ function renderResumeStudio(c) {
       <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:#0b1120;border:1px solid #10b981;border-radius:10px;margin-bottom:14px;">
         <div>
           <div style="font-weight:800;color:#6ee7b7;font-size:15px;">✅ Tailored ATS Score: ${rec.atsScore}/100</div>
-          <div style="font-size:11.5px;color:#94a3b8;">Model: ${esc(rec.modelUsed)} • PDF Engine: ${esc(rec.pdfEngine)}</div>
+          <div style="font-size:11.5px;color:#94a3b8;">Header Title: <strong style="color:#e2e8f0;">${esc(t.targetJobTitle || rec.role)}</strong> • Model: ${esc(rec.modelUsed)} • PDF: ${esc(rec.pdfEngine)}</div>
         </div>
         <button class="btn emerald" id="rs-dl-pdf">⬇ Download ${esc(rec.fileName)}</button>
       </div>
 
       <div style="margin-bottom:12px;">
-        <div class="field-lbl">Key Tailoring Changes</div>
-        <ul style="padding-left:18px;color:#cbd5e1;line-height:1.55;">
-          ${(t.keyChangesSummary || []).map((ch) => `<li>${esc(ch)}</li>`).join("")}
-        </ul>
-      </div>
-
-      <div style="margin-bottom:12px;">
-        <div class="field-lbl">Tailored Summary</div>
+        <div class="field-lbl">Tailored Summary (4-Sentence From-Scratch Framework)</div>
         <div style="background:#0b1120;padding:10px;border-radius:8px;color:#e2e8f0;line-height:1.5;">${esc(t.summary)}</div>
       </div>
 
-      <div>
-        <div class="field-lbl">Tailored Experience Bullets</div>
+      <div style="margin-bottom:12px;">
+        <div class="field-lbl">Tailored Skills (4 Categories)</div>
+        <div style="background:#0b1120;padding:10px;border-radius:8px;color:#cbd5e1;line-height:1.55;">
+          ${Object.entries(t.skillsCategories || {})
+            .map(([cat, items]) => `<div><strong style="color:#a5b4fc;">${esc(cat)}:</strong> ${esc(Array.isArray(items) ? items.join(", ") : items)}</div>`)
+            .join("")}
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px;">
+        <div class="field-lbl">Tailored Experience Bullets (5 / 3 / 2 Allocation)</div>
         ${(t.experience || [])
           .map(
             (exp) => `
@@ -506,6 +508,21 @@ function renderResumeStudio(c) {
             <div style="font-weight:700;color:#a5b4fc;">${esc(exp.company)} — ${esc(exp.title)} (${esc(exp.period)})</div>
             <ul style="padding-left:18px;margin-top:5px;color:#cbd5e1;line-height:1.5;">
               ${(exp.bullets || []).map((b) => `<li>${esc(b)}</li>`).join("")}
+            </ul>
+          </div>`
+          )
+          .join("")}
+      </div>
+
+      <div>
+        <div class="field-lbl">Tailored Projects (2 / 2 Allocation)</div>
+        ${(t.projects || [])
+          .map(
+            (pr) => `
+          <div style="background:#0b1120;padding:10px;border-radius:8px;margin-bottom:8px;">
+            <div style="font-weight:700;color:#a5b4fc;">${esc(pr.name)} (${esc(pr.stack || "")})</div>
+            <ul style="padding-left:18px;margin-top:5px;color:#cbd5e1;line-height:1.5;">
+              ${(pr.bullets || []).map((b) => `<li>${esc(b)}</li>`).join("")}
             </ul>
           </div>`
           )

@@ -22,7 +22,11 @@ import {
   answerApplicationQuestionWithGemini,
   generateNetworkOutreachWithGemini
 } from "../shared/gemini_client.js";
-import { generateTailoredResumePdf, generateCoverLetterPdf } from "../shared/pdf_generator.js";
+import {
+  generateTailoredResumePdf,
+  generateCoverLetterPdf,
+  formatCompanyResumeFileName
+} from "../shared/pdf_generator.js";
 import { fetchPersonalizedRecommendations, buildNetworkCopilotPathways } from "../shared/job_feeds.js";
 
 let autopilotRunning = false;
@@ -105,12 +109,12 @@ async function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
-async function getResumePdfPayload(variantOrId, state) {
+async function getResumePdfPayload(variantOrId, state, companyName = "") {
   if (variantOrId && variantOrId.startsWith("tr_")) {
     const tr = (state.tailoredResumes || []).find((r) => r.id === variantOrId);
     if (tr?.pdfBase64) {
       return {
-        fileName: tr.fileName || "Raviteja_Velanati_Tailored_Resume.pdf",
+        fileName: formatCompanyResumeFileName(companyName || tr.company),
         mimeType: "application/pdf",
         base64: tr.pdfBase64
       };
@@ -123,7 +127,7 @@ async function getResumePdfPayload(variantOrId, state) {
 
   if (resumeEntry?.customBase64) {
     return {
-      fileName: resumeEntry.name || "Raviteja_Velanati_Resume.pdf",
+      fileName: companyName ? formatCompanyResumeFileName(companyName) : resumeEntry.name || "Raviteja_velanati_Resume.pdf",
       mimeType: "application/pdf",
       base64: resumeEntry.customBase64
     };
@@ -133,10 +137,10 @@ async function getResumePdfPayload(variantOrId, state) {
     selectedVariant === "master"
       ? "assets/Raviteja_Velanati_Master_Resume.pdf"
       : "assets/Raviteja_Velanati_Resume_1Page.pdf";
-  const fileName =
-    selectedVariant === "master"
-      ? "Raviteja_Velanati_Master_Resume.pdf"
-      : "Raviteja_Velanati_Resume_1Page.pdf";
+  const fileName = formatCompanyResumeFileName(
+    companyName,
+    selectedVariant === "master" ? "Master_Resume" : "Resume"
+  );
 
   const resp = await fetch(chrome.runtime.getURL(assetPath));
   const buf = await resp.arrayBuffer();
@@ -227,30 +231,27 @@ async function buildAndSaveTailoredResume(jobMeta, state, preferredModel = null)
     const prof = state.profile || {};
     aiRes = {
       tailored: {
+        targetJobTitle: String(jobMeta.title || "Software Engineer").trim(),
         summary: prof.summaryShort || prof.summary || "",
         skillsCategories: prof.skillsCategories || {},
-        experience: (prof.workExperience || []).map((w) => ({
+        experience: (prof.workExperience || []).map((w, idx) => ({
           company: w.company,
           title: w.title,
           location: w.location,
-          period: w.period,
-          bullets: (w.bullets || w.highlights || []).slice(0, 4)
+          period: `${w.startDateDisplay || ""} - ${w.endDateDisplay || ""}`.trim(),
+          bullets: (w.bullets || w.highlights || []).slice(0, idx === 0 ? 5 : idx === 1 ? 3 : 2)
         })),
-        projects: prof.projects || []
+        projects: (prof.projects || []).slice(0, 2)
       },
       modelUsed: "profile-fallback",
-      requestedModel: preferredModel || state.settings?.primaryModel || "gemini-3-flash-preview",
+      requestedModel: preferredModel || state.settings?.primaryModel || "gemini-3.5-flash",
       fellBack: true
     };
   }
 
   const pdfOut = await generateTailoredResumePdf(aiRes.tailored, state.profile, state.settings);
   const postScore = scoreResumeATS(state.profile, jobMeta.description || "", aiRes.tailored);
-  const safeComp = String(jobMeta.company || "Target")
-    .replace(/[^a-zA-Z0-9]+/g, "_")
-    .replace(/^_|_$/g, "")
-    .slice(0, 24);
-  const fileName = `Raviteja_Velanati_${safeComp || "Tailored"}_Resume.pdf`;
+  const fileName = formatCompanyResumeFileName(jobMeta.company);
 
   const saved = await saveTailoredResume({
     company: jobMeta.company || "Target Company",
@@ -1098,7 +1099,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
           url: screen.url || jobMeta.url || "",
           status: "Applied",
           matchScore: 94,
-          resumeUsed: tailoredResume?.fileName || "Raviteja_Velanati_Resume_1Page.pdf",
+          resumeUsed: tailoredResume?.fileName || formatCompanyResumeFileName(jobMeta.company),
           notes: `Full Auto-Apply submitted (${totalFilledFields} fields filled cleanly).`
         });
         await broadcastAutoApplyProgress(tabId, {
@@ -1351,7 +1352,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
             url: postSubmit.url || jobMeta.url || "",
             status: "Applied",
             matchScore: 94,
-            resumeUsed: tailoredResume?.fileName || "Raviteja_Velanati_Resume_1Page.pdf",
+            resumeUsed: tailoredResume?.fileName || formatCompanyResumeFileName(jobMeta.company),
             notes: `Full Auto-Apply submitted (${totalFilledFields} fields filled cleanly).`
           });
 
@@ -1383,7 +1384,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
             url: postSubmit.url || jobMeta.url || "",
             status: "Saved",
             matchScore: 92,
-            resumeUsed: tailoredResume?.fileName || "Raviteja_Velanati_Resume_1Page.pdf",
+            resumeUsed: tailoredResume?.fileName || formatCompanyResumeFileName(jobMeta.company),
             notes: `Autofilled ${totalFilledFields} fields — paused on CAPTCHA challenge.`
           });
           await broadcastAutoApplyProgress(tabId, {
@@ -1626,7 +1627,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
 
       case "GET_RESUME_PDF_BYTES": {
-        const pdfPayload = await getResumePdfPayload(payload.variantOrId, state);
+        const pdfPayload = await getResumePdfPayload(payload.variantOrId, state, payload.company || "");
         return { ok: true, ...pdfPayload };
       }
 
@@ -1902,7 +1903,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             await adapters.attachBase64PdfToInput(target, base64, fileName);
             return 1;
           },
-          args: [payload.pdfBase64, payload.fileName || "Raviteja_Velanati_Tailored_Resume.pdf"]
+          args: [payload.pdfBase64, payload.fileName || formatCompanyResumeFileName(payload.company)]
         });
         const attached = (results || []).reduce((acc, r) => acc + Number(r?.result || 0), 0);
         return { ok: attached > 0, attached };

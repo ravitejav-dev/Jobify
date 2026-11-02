@@ -22,12 +22,10 @@ function buildCandidateChain(requestedModel, settings) {
   const fastVerifiedOrder = [
     "gemini-3.5-flash",
     "gemini-3-flash-preview",
-    "gemini-3.1-flash-lite-preview",
-    "gemini-3.1-pro-preview",
-    "gemini-3.8-flash",
-    "gemini-3.6-flash"
+    "gemini-3.5-flash-lite",
+    "gemini-flash-lite-latest"
   ];
-  const ordered = /^gemini-(3\.8|3\.6|1\.5|2\.)/i.test(rawReq)
+  const ordered = /^gemini-(3\.8|3\.6|3\.1-flash-lite|1\.5|2\.)/i.test(rawReq)
     ? [...fastVerifiedOrder, rawReq]
     : [rawReq, ...fastVerifiedOrder];
   const unique = [...new Set(ordered)];
@@ -221,13 +219,38 @@ export function cleanPostingJobTitle(rawTitle) {
   return base || "AI & Platform Software Engineer";
 }
 
+const UNIQUE_ACTION_VERB_POOL = [
+  "Architected",
+  "Engineered",
+  "Built",
+  "Designed",
+  "Spearheaded",
+  "Orchestrated",
+  "Optimized",
+  "Automated",
+  "Developed",
+  "Implemented",
+  "Streamlined",
+  "Delivered",
+  "Scaled",
+  "Accelerated",
+  "Constructed",
+  "Integrated",
+  "Modernized",
+  "Established",
+  "Hardened",
+  "Configured"
+];
+
 function sanitizeBulletSentence(bullet) {
   let s = String(bullet || "")
     .replace(/^[\s•\-*–\d.)]+/, "")
     .replace(/\s+/g, " ")
-    // Replace slashes between words/acronyms with clean ATS prose ("Docker/Kubernetes" -> "Docker and Kubernetes")
-    .replace(/\b([A-Za-z0-9+#.]+)\s*\/\s*([A-Za-z0-9+#.]+)\b/g, "$1 and $2")
+    .replace(/#(\d+)\s*\/\s*(\d+)/g, "#$1 of $2")
+    .replace(/\bCI\s*\/\s*CD\b/gi, "continuous integration and delivery")
+    .replace(/\s*\/\s*/g, " and ")
     .replace(/\s*;\s*/g, ", ")
+    .replace(/\s+/g, " ")
     .trim();
   if (!s) return "";
   s = s.charAt(0).toUpperCase() + s.slice(1);
@@ -235,17 +258,60 @@ function sanitizeBulletSentence(bullet) {
   return s;
 }
 
-function enforceFromScratchResumeQuality(parsed, jobMeta, profile) {
-  const cleanTitle = cleanPostingJobTitle(parsed?.targetJobTitle || jobMeta?.title || profile?.personal?.currentTitle);
+function enforceUniqueStartingVerb(bullet, usedVerbs) {
+  if (!bullet) return "";
+  const m = bullet.match(/^([A-Za-z-]+)([\s,][\s\S]*)$/);
+  if (!m) return bullet;
+  const firstWordLow = m[1].toLowerCase();
+  if (!usedVerbs.has(firstWordLow)) {
+    usedVerbs.add(firstWordLow);
+    return bullet;
+  }
+  const restNextWord = (m[2].replace(/^[\s,]+/, "").split(/\s+/)[0] || "").toLowerCase();
+  const replacement =
+    UNIQUE_ACTION_VERB_POOL.find(
+      (v) => !usedVerbs.has(v.toLowerCase()) && !restNextWord.startsWith(v.toLowerCase().slice(0, 6))
+    ) || "Delivered";
+  usedVerbs.add(replacement.toLowerCase());
+  return `${replacement}${m[2]}`;
+}
 
-  // 1. Clean 4-sentence neutral third-person summary (<= 75-80 words, zero first-person pronouns)
-  let summary = String(parsed?.summary || profile?.summaryShort || "")
-    .replace(/\bI am a\b/gi, `${cleanTitle} and`)
+function enforceFromScratchResumeQuality(parsed, jobMeta, profile, missingKeywords = []) {
+  const cleanTitle = cleanPostingJobTitle(parsed?.targetJobTitle || jobMeta?.title || profile?.personal?.currentTitle);
+  const compName = String(jobMeta?.company || "the engineering team").trim();
+  const topMissing = (missingKeywords || [])
+    .map((k) => String(k || "").replace(/\s*\/\s*/g, " and ").trim())
+    .filter(Boolean);
+
+  // 1. Clean 4-sentence neutral third-person summary (<= 75-78 words, zero first-person pronouns)
+  const fallbackSummary = `${cleanTitle} with 3.5+ years of production engineering experience building LLM evaluation infrastructure, agentic sandboxes, and scalable backend systems. Skilled in ${topMissing.slice(0, 3).concat(["Python", "TypeScript", "Kubernetes"]).slice(0, 4).join(", ")}, and distributed cloud pipelines. Proven track record increasing evaluation throughput across 2,000+ batches, cutting sandbox startup latency by 70%, and ensuring 100% synthetic data accuracy. Collaborative systems builder focused on strengthening engineering reliability and platform velocity for ${compName}.`;
+  let summary = String(parsed?.summary || fallbackSummary)
+    .replace(/^(operating|serving|working|acting)\s+as\s+an?\s+[^,]+,\s*(this|the)\s+(professional|candidate|engineer|applicant|individual|specialist)\s+(brings|offers|possesses|has|delivers)\s+/i, `${cleanTitle} with `)
+    .replace(/\b(this|the)\s+(professional|candidate|engineer|applicant|individual)\s+(brings|offers|possesses|has)\s+/gi, `${cleanTitle} with `)
+    .replace(/\bI am an?\b/gi, cleanTitle)
     .replace(/\bI am\b/gi, "")
     .replace(/\bMy\b/g, "Proven")
     .replace(/\bmy\b/g, "the")
+    .replace(/\bme\b/gi, "teams")
+    .replace(/\bI\b/g, "Engineer")
+    .replace(/\bCI\s*\/\s*CD\b/gi, "CI and CD")
+    .replace(/\s*\/\s*/g, " and ")
     .replace(/\s+/g, " ")
     .trim();
+
+  const titleNorm = cleanTitle.toLowerCase();
+  const titleAndNorm = titleNorm.replace(/&/g, "and").replace(/\s+/g, " ");
+  const sumLow = summary.toLowerCase();
+  if (summary && !sumLow.includes(titleNorm) && !sumLow.includes(titleAndNorm)) {
+    if (/^[^.]{3,55}?\bwith\s+/i.test(summary)) {
+      summary = summary.replace(/^[^.]{3,55}?\bwith\s+/i, `${cleanTitle} with `);
+    } else {
+      summary = `${cleanTitle} with ${summary.charAt(0).toLowerCase()}${summary.slice(1)}`;
+    }
+  } else if (sumLow.includes(titleAndNorm) && !sumLow.includes(titleNorm)) {
+    summary = summary.replace(new RegExp(titleAndNorm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), cleanTitle);
+  }
+
   const words = summary.split(/\s+/).filter(Boolean);
   if (words.length > 78) {
     const sliced = words.slice(0, 78).join(" ");
@@ -269,7 +335,7 @@ function enforceFromScratchResumeQuality(parsed, jobMeta, profile) {
 
   const defaultCatOrder = [
     ["Languages & Core", profile?.skillsCategories?.Languages || ["Python", "TypeScript", "JavaScript", "C++", "SQL", "Go", "Bash"]],
-    ["AI, LLMs & Evaluation", profile?.skillsCategories?.["AI & LLM"] || ["LLM Evaluation", "Agentic AI", "RAG", "LangGraph", "Prompt Engineering", "Synthetic Data", "PyTorch"]],
+    ["AI, LLMs & Evaluation", [...topMissing.slice(0, 5), ...(profile?.skillsCategories?.["AI & LLM"] || ["LLM Evaluation", "Agentic AI", "RAG", "LangGraph", "Prompt Engineering", "Synthetic Data", "PyTorch"])]],
     ["Frameworks & Backend", profile?.skillsCategories?.["Frameworks & Libraries"] || ["React", "Node.js", "FastAPI", "Angular", "Playwright", "Microservices", "REST APIs"]],
     ["Cloud, Data & Infrastructure", profile?.skillsCategories?.["Cloud & DevOps"] || ["GCP", "BigQuery", "AWS", "Docker", "Kubernetes", "Terraform", "GitHub Actions"]]
   ];
@@ -296,7 +362,7 @@ function enforceFromScratchResumeQuality(parsed, jobMeta, profile) {
   }
 
   if (totalSkills < 25) {
-    const pool = [...(profile?.allSkillsFlat || []), ...Object.values(profile?.skillsCategories || {}).flat()];
+    const pool = [...topMissing, ...(profile?.allSkillsFlat || []), ...Object.values(profile?.skillsCategories || {}).flat()];
     const catKeys = Object.keys(normalizedCats);
     let idx = 0;
     for (const candidateSkill of pool) {
@@ -310,39 +376,66 @@ function enforceFromScratchResumeQuality(parsed, jobMeta, profile) {
     }
   }
 
-  // 3. Sanitize experience (5 / 3 / 2) & project (2 / 2) bullets
+  // 3. Sanitize experience (5 / 3 / 2) & project (2 / 2) bullets with 14 unique past-tense action verbs
+  const usedVerbs = new Set();
   const expTargetCounts = [5, 3, 2];
-  const experience = (Array.isArray(parsed?.experience) && parsed.experience.length > 0
-    ? parsed.experience
-    : (profile?.workExperience || []).map((w) => ({
-        company: w.company,
-        title: w.title,
-        location: w.location,
-        period: `${w.startDateDisplay} - ${w.endDateDisplay}`,
-        bullets: w.highlights || []
-      }))
-  ).slice(0, 3).map((exp, i) => ({
-    company: exp.company,
-    title: exp.title,
-    location: exp.location,
-    period: exp.period,
-    bullets: (exp.bullets || [])
-      .map(sanitizeBulletSentence)
-      .filter(Boolean)
-      .slice(0, expTargetCounts[i] || 2)
-  }));
+  const profWork = profile?.workExperience || [];
+  const rawExp = Array.isArray(parsed?.experience) && parsed.experience.length > 0 ? parsed.experience : [];
 
-  const projects = (Array.isArray(parsed?.projects) && parsed.projects.length > 0
-    ? parsed.projects
-    : profile?.projects || []
-  ).slice(0, 2).map((pr) => ({
-    name: pr.name,
-    stack: String(pr.stack || "").replace(/\s*\/\s*/g, ", "),
-    bullets: (pr.bullets || [])
+  const experience = [0, 1, 2].map((i) => {
+    const baseRole = profWork[i] || {};
+    const exp = rawExp[i] || {};
+    const targetLen = expTargetCounts[i];
+    const combinedBullets = [
+      ...(exp.bullets || []),
+      ...(baseRole.highlights || [])
+    ]
       .map(sanitizeBulletSentence)
-      .filter(Boolean)
-      .slice(0, 2)
-  }));
+      .filter(Boolean);
+    const deduped = [];
+    const seenBul = new Set();
+    for (const b of combinedBullets) {
+      if (deduped.length >= targetLen) break;
+      const sig = b.slice(0, 45).toLowerCase();
+      if (seenBul.has(sig)) continue;
+      seenBul.add(sig);
+      deduped.push(enforceUniqueStartingVerb(b, usedVerbs));
+    }
+    const rawRoleTitle = String(exp.title || baseRole.title || "").trim();
+    const compactRoleTitle =
+      rawRoleTitle.length > 46 ? rawRoleTitle.split(/\s+[-–—]\s+/)[0].trim() : rawRoleTitle;
+    return {
+      company: exp.company || baseRole.company || "",
+      title: compactRoleTitle,
+      location: exp.location || baseRole.location || "",
+      period: exp.period || `${baseRole.startDateDisplay || ""} - ${baseRole.endDateDisplay || ""}`.trim(),
+      bullets: deduped
+    };
+  });
+
+  const profProjects = profile?.projects || [];
+  const rawProj = Array.isArray(parsed?.projects) && parsed.projects.length > 0 ? parsed.projects : [];
+  const projects = [0, 1].map((i) => {
+    const basePr = profProjects[i] || {};
+    const pr = rawProj[i] || {};
+    const combinedBullets = [...(pr.bullets || []), ...(basePr.bullets || [])]
+      .map(sanitizeBulletSentence)
+      .filter(Boolean);
+    const deduped = [];
+    const seenBul = new Set();
+    for (const b of combinedBullets) {
+      if (deduped.length >= 2) break;
+      const sig = b.slice(0, 45).toLowerCase();
+      if (seenBul.has(sig)) continue;
+      seenBul.add(sig);
+      deduped.push(enforceUniqueStartingVerb(b, usedVerbs));
+    }
+    return {
+      name: pr.name || basePr.name || "",
+      stack: String(pr.stack || basePr.stack || "").replace(/\s*\/\s*/g, ", "),
+      bullets: deduped
+    };
+  });
 
   return {
     targetJobTitle: cleanTitle,
@@ -366,11 +459,11 @@ EXECUTE THIS EXACT 5-STAGE FROM-SCRATCH FRAMEWORK:
    - Use the exact words and spelling from the Job Description (e.g., if the posting says "ETL pipelines", write "ETL pipelines", not "data workflows").
 2. STAGE 2 — TOP JOB TITLE & 4-SENTENCE SUMMARY QUALITY FRAMEWORK:
    - "targetJobTitle": Must be the exact clean job title from the posting ("${exactPostingTitle}").
-   - "summary": Strictly 4 sentences, maximum 75 words total, neutral third-person tone (NEVER use "I", "I am", or "my"; zero buzzwords or fluff):
-     * Sentence 1: Explicitly introduce the candidate as a "${exactPostingTitle}" with 3.5+ years of production engineering experience. Do NOT mention or imply any other job titles.
-     * Sentence 2: Highlight 3-6 core technical strengths pulled directly from the JD's hard skills, written naturally in prose (not a raw list).
+   - "summary": Strictly 4 sentences, maximum 75 words total, standard implied-subject resume style (NEVER use "I", "I am", "my", "this professional", "the candidate", "this engineer", or "he/she"; zero buzzwords, zero slashes):
+     * Sentence 1: Start directly with "${exactPostingTitle} with 3.5+ years of production engineering experience building..." Do NOT mention or imply any other job titles.
+     * Sentence 2: Highlight 3-5 core technical strengths pulled directly from the JD's hard skills, written naturally in prose (never a long 10-item tool list).
      * Sentence 3: Describe how these strengths create engineering value (improving reliability, automation, throughput, latency, evaluation rigor, or observability) using high-frequency JD hard skills.
-     * Sentence 4: Integrate 1-2 soft skills behaviorally and end with a forward-looking statement connecting the candidate's strengths to ${jobMeta.company || "the engineering team"}'s impact.
+     * Sentence 4: Integrate 1-2 soft skills behaviorally and end with a forward-looking statement connecting strengths to ${jobMeta.company || "the engineering team"}'s impact.
 3. STAGE 3 — SKILLS SECTION (4 CATEGORIES, 25 TO 40 TOTAL SKILLS):
    - Arrange 25 to 40 hard skills across EXACTLY 4 clean categories tailored to this posting, combining exact JD keywords (supported by the candidate's real background or functionally equivalent skill translation) with natural supporting skills from the Master Profile.
 4. STAGE 4 — SKILL & UNIQUE ACTION-VERB ALLOCATION (5 / 3 / 2 / 2 / 2):
@@ -416,7 +509,7 @@ ${JSON.stringify(
 Return strictly valid JSON with this exact structure:
 {
   "targetJobTitle": "${exactPostingTitle}",
-  "summary": "4-sentence neutral third-person summary (<=75 words) starting by introducing the candidate as a ${exactPostingTitle}",
+  "summary": "4-sentence implied-subject summary (<=75 words) starting directly with '${exactPostingTitle} with 3.5+ years of...'",
   "skillsCategories": {
     "Category 1 Name": ["6 to 10 exact JD + profile skills"],
     "Category 2 Name": ["6 to 10 exact JD + profile skills"],
@@ -426,7 +519,7 @@ Return strictly valid JSON with this exact structure:
   "experience": [
     {
       "company": "GlobalLogic (Client: Google AI)",
-      "title": "Senior AI Solutions Engineer - Responsible AI & Novel AI Testing",
+      "title": "Senior AI Solutions Engineer",
       "location": "Santa Clara, CA",
       "period": "Oct 2024 - Present",
       "bullets": ["5 single-sentence bullets, 15-30 words each, unique action verbs, no slashes, real metrics"]
@@ -466,25 +559,36 @@ Return strictly valid JSON with this exact structure:
   ]
 }`;
 
-  const res = await callGemini({
-    prompt,
-    systemInstruction,
-    requestedModel: modelToUse,
-    jsonMode: true,
-    temperature: 0.25,
-    maxOutputTokens: 4096,
-    timeoutMs: 16000,
-    settings
-  });
+  try {
+    const res = await callGemini({
+      prompt,
+      systemInstruction,
+      requestedModel: modelToUse,
+      jsonMode: true,
+      temperature: 0.25,
+      maxOutputTokens: 8192,
+      timeoutMs: 28000,
+      settings
+    });
 
-  const rawParsed = parseJsonResponse(res.text);
-  const tailored = enforceFromScratchResumeQuality(rawParsed, jobMeta, profile);
-  return {
-    tailored,
-    modelUsed: res.modelUsed,
-    requestedModel: res.requestedModel,
-    fellBack: res.fellBack
-  };
+    const rawParsed = parseJsonResponse(res.text);
+    const tailored = enforceFromScratchResumeQuality(rawParsed, jobMeta, profile, missingKeywords);
+    return {
+      tailored,
+      modelUsed: res.modelUsed,
+      requestedModel: res.requestedModel,
+      fellBack: res.fellBack
+    };
+  } catch (err) {
+    if (!settings?.geminiApiKey) throw err;
+    const tailored = enforceFromScratchResumeQuality({}, jobMeta, profile, missingKeywords);
+    return {
+      tailored,
+      modelUsed: "deterministic-from-scratch",
+      requestedModel: modelToUse,
+      fellBack: true
+    };
+  }
 }
 
 export async function generateCoverLetterWithGemini(jobMeta, profile, tone = "Concise & Technical", settings = {}) {
@@ -510,7 +614,7 @@ Output ONLY the body text of the cover letter starting with "Dear ${jobMeta.comp
   const res = await callGemini({
     prompt,
     systemInstruction,
-    requestedModel: settings?.primaryModel || "gemini-3.8-flash",
+    requestedModel: settings?.primaryModel || "gemini-3.5-flash",
     jsonMode: false,
     temperature: 0.45,
     maxOutputTokens: 1500,
@@ -564,7 +668,7 @@ Write ONLY the exact answer to fill into the form field.`;
   const res = await callGemini({
     prompt,
     systemInstruction,
-    requestedModel: settings?.primaryModel || "gemini-3.8-flash",
+    requestedModel: settings?.primaryModel || "gemini-3.5-flash",
     jsonMode: false,
     temperature: 0.35,
     maxOutputTokens: 800,
@@ -600,7 +704,7 @@ Return JSON with:
   const res = await callGemini({
     prompt,
     systemInstruction,
-    requestedModel: settings?.primaryModel || "gemini-3.8-flash",
+    requestedModel: settings?.primaryModel || "gemini-3.5-flash",
     jsonMode: true,
     temperature: 0.4,
     maxOutputTokens: 1000,

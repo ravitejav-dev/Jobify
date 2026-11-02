@@ -14,13 +14,17 @@ import {
   generateCoverLetterWithGemini,
   answerApplicationQuestionWithGemini
 } from "../extension/shared/gemini_client.js";
-import { generateTailoredResumePdf, buildPureJsResumePdfBase64 } from "../extension/shared/pdf_generator.js";
+import {
+  generateTailoredResumePdf,
+  buildPureJsResumePdfBase64,
+  formatCompanyResumeFileName
+} from "../extension/shared/pdf_generator.js";
 import { fetchPersonalizedRecommendations } from "../extension/shared/job_feeds.js";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const EXT_DIR = path.join(ROOT, "extension");
 const USER_DATA_DIR = path.join(ROOT, ".tmp_chrome_e2e");
-const SAMPLE_PDF_OUT = path.join(ROOT, "Raviteja_Velanati_Anthropic_Tailored_Sample.pdf");
+const SAMPLE_PDF_OUT = path.join(ROOT, formatCompanyResumeFileName("Anthropic"));
 const CDP_PORT = 9339;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -202,7 +206,7 @@ async function main() {
       workAddress: document.getElementById("question_19018749008")?.value,
       gender: document.getElementById("gender")?.closest(".select-shell")?.querySelector(".select__single-value")?.innerText,
       resumeFileAttached: document.getElementById("resume")?.files?.[0]?.name || null,
-      resumeShownInUI: document.body.innerText.includes("Raviteja_Velanati_Resume_1Page.pdf")
+      resumeShownInUI: document.body.innerText.includes("Raviteja_velanati_Anthropic.pdf")
     })`);
     console.log(`2. ✅ Live Production Greenhouse Remix Verified (${liveGhFill?.filledCount} fields):`, JSON.stringify({ fill: { ok: liveGhFill?.ok, filledCount: liveGhFill?.filledCount, err: liveGhFill?.err }, check: liveGhCheck }, null, 2));
     if (
@@ -212,7 +216,7 @@ async function main() {
       liveGhCheck.visaSponsor !== "Yes" ||
       !liveGhCheck.workAddress?.includes("Newark") ||
       liveGhCheck.gender !== "Male" ||
-      !(liveGhCheck.resumeShownInUI || liveGhCheck.resumeFileAttached === "Raviteja_Velanati_Resume_1Page.pdf")
+      !(liveGhCheck.resumeShownInUI || liveGhCheck.resumeFileAttached === "Raviteja_velanati_Anthropic.pdf")
     ) {
       throw new Error("Live production Greenhouse Remix assertion failed!");
     }
@@ -281,7 +285,7 @@ async function main() {
       autoAudit.step1?.yoeDecimal !== "3.5" ||
       autoAudit.step1?.yoeInt !== "3" ||
       !/(150,?000|165,?000|180,?000)/.test(autoAudit.step1?.desiredSalary || "") ||
-      autoAudit.step1?.resumeFile !== "Raviteja_Velanati_OpenAI_Resume.pdf" ||
+      autoAudit.step1?.resumeFile !== "Raviteja_velanati_OpenAI.pdf" ||
       autoAudit.step1?.resumeBytes < 1000 ||
       autoAudit.step1?.coverLetterFile !== "Raviteja_Velanati_OpenAI_Cover_Letter.pdf" ||
       autoAudit.step1?.coverLetterBytes < 1000 ||
@@ -357,7 +361,7 @@ async function main() {
       wdAudit.step1?.state !== "California" ||
       wdAudit.step1?.postalCode !== "94560" ||
       wdAudit.step1?.phoneDeviceType !== "Cellular" ||
-      wdAudit.step2?.resumeFile !== "Raviteja_Velanati_NVIDIA_Resume.pdf" ||
+      wdAudit.step2?.resumeFile !== "Raviteja_velanati_NVIDIA.pdf" ||
       wdAudit.step2?.resumeBytes < 1000 ||
       wdAudit.step2?.linkedin !== "https://www.linkedin.com/in/raviteja-velanati/" ||
       wdAudit.step2?.workAuth !== "Yes" ||
@@ -514,7 +518,7 @@ async function main() {
       gh.firstName !== "Raviteja" ||
       gh.lastName !== "Velanati" ||
       gh.email !== "ravitejavelanati11@gmail.com" ||
-      gh.resumeFile !== "Raviteja_Velanati_Resume_1Page.pdf" ||
+      gh.resumeFile !== "Raviteja_velanati_Anthropic.pdf" ||
       gh.resumeBytes !== 5770 ||
       gh.workAuth !== "Yes" ||
       gh.gender !== "Male" ||
@@ -565,7 +569,7 @@ async function main() {
       !wd.consentChecked ||
       !wd.expCompany.includes("GlobalLogic") ||
       !wd.eduSchool.includes("Clark") ||
-      wd.resumeFile !== "Raviteja_Velanati_Resume_1Page.pdf"
+      wd.resumeFile !== "Raviteja_velanati_Databricks.pdf"
     ) {
       throw new Error("Workday assertion mismatch!");
     }
@@ -593,7 +597,7 @@ async function main() {
       resumeFile: document.querySelector("input[name='resume']").files[0]?.name || null
     })`);
     console.log("6. ✅ Lever 1-Click Autofill Verified:", JSON.stringify(lv, null, 2));
-    if (lv.fullName !== "Raviteja Velanati" || lv.commentsLen < 50 || !lv.resumeFile) {
+    if (lv.fullName !== "Raviteja Velanati" || lv.commentsLen < 50 || lv.resumeFile !== "Raviteja_velanati_Scale_AI.pdf") {
       throw new Error("Lever assertion mismatch!");
     }
 
@@ -649,6 +653,8 @@ async function main() {
       trickyAudit.firstSubmitRejectedUnmarkedField !== true ||
       trickyAudit.submitClicks < 2 ||
       trickyAudit.healedAndSubmittedOnRetry !== true ||
+      trickyAudit.finalValues?.fullName !== "Raviteja Velanati" ||
+      trickyAudit.finalValues?.resumeName !== "Raviteja_velanati_Perplexity_AI.pdf" ||
       !trickyAudit.finalValues?.privacyChecked ||
       !(trickyAudit.finalValues?.exceptionalAbility?.length > 25) ||
       !(trickyAudit.finalValues?.unmarkedTeamHealedValue?.length > 0) ||
@@ -700,17 +706,17 @@ async function main() {
     const trackedApps = await dashCdp.eval(`chrome.runtime.sendMessage({ type: "GET_ALL_STATE" }).then(r => r.state.applications)`);
     console.log(
       `7. ✅ Dashboard & Auto-Tracker Verified: ${trackedApps.length} applications automatically logged (${trackedApps
-        .map((a) => `${a.company}:${a.status}`)
+        .map((a) => `${a.company}:${a.status}[${a.resumeUsed}]`)
         .join(", ")})`
     );
     if (
       trackedApps.length < 4 ||
-      !trackedApps.some((a) => a.company === "OpenAI" && a.status === "Applied") ||
-      !trackedApps.some((a) => a.company === "NVIDIA" && a.status === "Applied") ||
-      !trackedApps.some((a) => a.company === "Perplexity AI" && a.status === "Applied") ||
-      !trackedApps.some((a) => a.company === "Scale AI" && a.status === "Applied")
+      !trackedApps.some((a) => a.company === "OpenAI" && a.status === "Applied" && a.resumeUsed === "Raviteja_velanati_OpenAI.pdf") ||
+      !trackedApps.some((a) => a.company === "NVIDIA" && a.status === "Applied" && a.resumeUsed === "Raviteja_velanati_NVIDIA.pdf") ||
+      !trackedApps.some((a) => a.company === "Perplexity AI" && a.status === "Applied" && a.resumeUsed === "Raviteja_velanati_Perplexity_AI.pdf") ||
+      !trackedApps.some((a) => a.company === "Scale AI" && a.status === "Applied" && a.resumeUsed === "Raviteja_velanati_Scale_AI.pdf")
     ) {
-      throw new Error(`Auto-tracker failed to log all submitted applications: ${JSON.stringify(trackedApps)}`);
+      throw new Error(`Auto-tracker failed to log all submitted applications or company resume filenames: ${JSON.stringify(trackedApps)}`);
     }
 
     const dashAudit = await dashCdp.eval(`
@@ -818,7 +824,7 @@ async function main() {
     ChromeProc.kill("SIGKILL");
     ChromeProc = null;
 
-    console.log("\n=== PART B: LIVE GEMINI AI + PDFLATEX PDF + PURE-JS PDF + LIVE ATS FEEDS VERIFICATION ===");
+    console.log("\n=== PART B: FROM-SCRATCH ATS RESUME QUALITY + 1-PAGE PDFLATEX & PURE-JS PDF + LIVE FEEDS VERIFICATION ===");
     let localSecrets = {};
     try {
       localSecrets = JSON.parse(fs.readFileSync(path.join(EXT_DIR, "shared/local_secrets.json"), "utf8"));
@@ -841,21 +847,86 @@ async function main() {
       DEFAULT_PROFILE,
       ["Vector Databases", "Observability / Telemetry"],
       runtimeSettings,
-      "gemini-3.8-flash"
+      "gemini-3.5-flash"
     );
-    const pdfRes = await generateTailoredResumePdf(aiTailor.tailored, DEFAULT_PROFILE, runtimeSettings);
+    const tRes = aiTailor.tailored;
+    const summaryWords = String(tRes.summary || "").trim().split(/\s+/).filter(Boolean).length;
+    const hasFirstPerson = /\b(i|i'm|my|me)\b/i.test(tRes.summary || "");
+    const skillCatEntries = Object.entries(tRes.skillsCategories || {});
+    const totalSkillsCount = skillCatEntries.reduce((acc, [, arr]) => acc + (Array.isArray(arr) ? arr.length : 0), 0);
+    const expCounts = (tRes.experience || []).map((e) => (e.bullets || []).length);
+    const projCounts = (tRes.projects || []).map((p) => (p.bullets || []).length);
+    const all14Bullets = [
+      ...(tRes.experience || []).flatMap((e) => e.bullets || []),
+      ...(tRes.projects || []).flatMap((p) => p.bullets || [])
+    ];
+    const hasSlashesInBullets = all14Bullets.some((b) => b.includes("/"));
+    const startingVerbs = all14Bullets.map((b) => (String(b).trim().match(/^([A-Za-z-]+)/)?.[1] || "").toLowerCase());
+    const uniqueVerbCount = new Set(startingVerbs.filter(Boolean)).size;
+
+    const countPdfPages = (b64) => {
+      const raw = Buffer.from(b64, "base64").toString("latin1");
+      const pageMatches = raw.match(/\/Type\s*\/Page\b/g);
+      if (pageMatches?.length) return pageMatches.length;
+      const countMatch = raw.match(/\/Type\s*\/Pages[\s\S]{0,200}?\/Count\s+(\d+)/);
+      return countMatch ? Number(countMatch[1]) : 0;
+    };
+
+    const pdfRes = await generateTailoredResumePdf(tRes, DEFAULT_PROFILE, runtimeSettings);
     fs.writeFileSync(SAMPLE_PDF_OUT, Buffer.from(pdfRes.pdfBase64, "base64"));
-    const postScore = scoreResumeATS(DEFAULT_PROFILE, jobMeta.description, aiTailor.tailored);
+    const latexPageCount = countPdfPages(pdfRes.pdfBase64);
+    const postScore = scoreResumeATS(DEFAULT_PROFILE, jobMeta.description, tRes);
+
+    const pureJsB64 = buildPureJsResumePdfBase64(tRes, DEFAULT_PROFILE);
+    const pureRaw = Buffer.from(pureJsB64, "base64").toString("latin1");
+    const purePageCount = countPdfPages(pureJsB64);
+
+    const fromScratchAudit = {
+      fileName: path.basename(SAMPLE_PDF_OUT),
+      targetJobTitle: tRes.targetJobTitle,
+      summaryWords,
+      hasFirstPerson,
+      summaryIntroducesTargetRole: String(tRes.summary || "").toLowerCase().includes("ai platform & evaluation engineer"),
+      skillCategoriesCount: skillCatEntries.length,
+      totalSkillsCount,
+      expBulletCounts: expCounts,
+      projBulletCounts: projCounts,
+      totalBullets: all14Bullets.length,
+      uniqueStartingVerbs: uniqueVerbCount,
+      hasSlashesInBullets,
+      latexPageCount,
+      pureJsPageCount: purePageCount,
+      atsScore: postScore.totalScore
+    };
     console.log(
-      `8. ✅ Gemini AI Resume Tailoring + pdflatex PDF Compiled! Requested: ${aiTailor.requestedModel} -> Active Model: ${aiTailor.modelUsed} | PDF Engine: ${pdfRes.engine} | New ATS Score: ${postScore.totalScore}/100 | Saved: ${SAMPLE_PDF_OUT}`
+      `8. ✅ From-Scratch ATS Resume + 1-Page pdflatex & Pure-JS PDFs Verified! Model: ${aiTailor.modelUsed} | Engine: ${pdfRes.engine}`,
+      JSON.stringify(fromScratchAudit, null, 2)
     );
 
-    const pureJsB64 = buildPureJsResumePdfBase64(aiTailor.tailored, DEFAULT_PROFILE);
-    const pureRaw = Buffer.from(pureJsB64, "base64").toString("latin1");
-    if (!pureRaw.startsWith("%PDF-1.4") || !pureRaw.endsWith("%%EOF")) {
-      throw new Error("Pure-JS fallback PDF invalid header/trailer!");
+    if (
+      aiTailor.modelUsed === "deterministic-from-scratch" ||
+      fromScratchAudit.fileName !== "Raviteja_velanati_Anthropic.pdf" ||
+      tRes.targetJobTitle !== "AI Platform & Evaluation Engineer" ||
+      summaryWords > 80 ||
+      hasFirstPerson ||
+      !fromScratchAudit.summaryIntroducesTargetRole ||
+      skillCatEntries.length !== 4 ||
+      totalSkillsCount < 25 ||
+      totalSkillsCount > 40 ||
+      JSON.stringify(expCounts) !== JSON.stringify([5, 3, 2]) ||
+      JSON.stringify(projCounts) !== JSON.stringify([2, 2]) ||
+      all14Bullets.length !== 14 ||
+      uniqueVerbCount !== 14 ||
+      hasSlashesInBullets ||
+      latexPageCount !== 1 ||
+      !pureRaw.startsWith("%PDF-1.4") ||
+      !pureRaw.endsWith("%%EOF") ||
+      purePageCount !== 1 ||
+      !pureRaw.includes("AI Platform & Evaluation Engineer")
+    ) {
+      throw new Error(`From-Scratch Resume quality or 1-page PDF assertion failed: ${JSON.stringify(fromScratchAudit)}`);
     }
-    console.log(`9. ✅ Standalone Pure-JS Fallback PDF Engine Verified (${Buffer.from(pureJsB64, "base64").length} bytes, valid %PDF-1.4..%%EOF)`);
+    console.log(`9. ✅ Standalone Pure-JS Fallback 1-Page PDF Engine Verified (${Buffer.from(pureJsB64, "base64").length} bytes, ${purePageCount} page, includes top role header)`);
 
     const clRes = await generateCoverLetterWithGemini(jobMeta, DEFAULT_PROFILE, "Concise & Technical", runtimeSettings);
     console.log(`10. ✅ Gemini AI Cover Letter Generated (${clRes.coverLetter.length} chars, Model: ${clRes.modelUsed})`);
@@ -875,7 +946,7 @@ async function main() {
     );
     if (liveJobs.length === 0) throw new Error("Live job feed returned 0 matches!");
 
-    console.log("\n🎉 ALL 18 END-TO-END & LIVE SANITY VERIFICATION GATES PASSED 100%!");
+    console.log("\n🎉 ALL 19 END-TO-END, AUTO-SUBMIT & FROM-SCRATCH RESUME VERIFICATION GATES PASSED 100%!");
   } finally {
     if (ChromeProc) ChromeProc.kill("SIGKILL");
     if (srv) srv.kill("SIGKILL");

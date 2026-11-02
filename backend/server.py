@@ -38,7 +38,8 @@ def tex_escape(text: str) -> str:
     if not text:
         return ""
     s = str(text)
-    s = s.replace("\u2013", "--").replace("\u2014", "---").replace("\u2192", "$\\rightarrow$")
+    s = s.replace("\u2013", "--").replace("\u2014", "---")
+    s = s.replace("\u2192", "\x00ARROW\x00").replace("->", "\x00ARROW\x00")
     s = s.replace("\u2018", "'").replace("\u2019", "'").replace("\u201c", "``").replace("\u201d", "''")
     replacements = {
         "\\": r"\textbackslash{}",
@@ -49,23 +50,28 @@ def tex_escape(text: str) -> str:
         "_": r"\_",
         "{": r"\{",
         "}": r"\}",
-        "~": r"\textasciitilde{}",
+        "~": r"$\sim$",
         "^": r"\textasciicircum{}",
+        "<": r"\textless{}",
+        ">": r"\textgreater{}",
     }
     out = []
     for ch in s:
-        if ch in replacements:
+        if ch == "\x00":
+            out.append(ch)
+        elif ch in replacements:
             out.append(replacements[ch])
         elif ord(ch) < 128:
             out.append(ch)
         else:
             out.append(" ")
-    return "".join(out).replace(r"\textbackslash{}rightarrow\$", r"$\rightarrow$")
+    return "".join(out).replace("\x00ARROW\x00", r"$\rightarrow$")
 
 
 def build_resume_latex(tailored: dict, profile: dict) -> str:
     p = profile.get("personal", {})
     name = tex_escape(p.get("fullName", "Raviteja Velanati"))
+    target_title = tex_escape((tailored.get("targetJobTitle") or "").strip())
     city_state = tex_escape(f"{p.get('city', 'Newark')}, {p.get('stateCode', 'CA')}")
     mail = tex_escape(p.get("email", "ravitejavelanati11@gmail.com"))
     phone = tex_escape(p.get("phone", "(774) 810-8481"))
@@ -89,77 +95,76 @@ def build_resume_latex(tailored: dict, profile: dict) -> str:
         period = tex_escape(exp.get("period", ""))
         bullets = "\n".join([rf"  \item {tex_escape(b)}" for b in (exp.get("bullets") or [])])
         exp_blocks.append(
-            rf"\noindent\textbf{{{comp}}} \hfill {loc}\\"
-            "\n"
-            rf"\textit{{{title}}} \hfill {period}\par"
+            rf"\noindent\textbf{{{comp}}} --- \textit{{{title}}} \hfill {{\footnotesize {loc} $|$ {period}}}\par"
             "\n"
             r"\begin{itemize}"
             "\n"
             f"{bullets}\n"
             r"\end{itemize}"
         )
-    exp_tex = "\n\\vspace{3pt}\n".join(exp_blocks)
+    exp_tex = "\n\\vspace{2pt}\n".join(exp_blocks)
 
-    proj_list = tailored.get("projects") or profile.get("projects") or []
-    proj_items = []
-    for pr in proj_list[:2]:
+    proj_list = (tailored.get("projects") or profile.get("projects") or [])[:2]
+    proj_blocks = []
+    for pr in proj_list:
         pname = tex_escape(pr.get("name", ""))
         pstack = tex_escape(pr.get("stack", ""))
-        pbul = " ".join([tex_escape(b) for b in (pr.get("bullets") or [])])
-        proj_items.append(rf"  \item \textbf{{{pname}}} ({pstack}): {pbul}")
-    proj_tex = "\n".join(proj_items)
+        stack_suffix = f" ({pstack})" if pstack else ""
+        pbullets = "\n".join([rf"  \item {tex_escape(b)}" for b in (pr.get("bullets") or [])])
+        proj_blocks.append(
+            rf"\noindent\textbf{{{pname}}}{stack_suffix}\par"
+            "\n"
+            r"\begin{itemize}"
+            "\n"
+            f"{pbullets}\n"
+            r"\end{itemize}"
+        )
+    proj_tex = "\n\\vspace{1.5pt}\n".join(proj_blocks)
 
     edu_lines = []
     for ed in profile.get("education", []):
         sch = tex_escape(ed.get("school", ""))
         deg = tex_escape(ed.get("degreeShort") or ed.get("degree", ""))
-        fos = tex_escape(ed.get("fieldOfStudy", "CS"))
+        fos = tex_escape(ed.get("fieldOfStudy", "Computer Science"))
         gpa = tex_escape(f"{ed.get('gpa', '')}/{ed.get('gpaScale', '4.0')}")
         yrs = tex_escape(f"{ed.get('startYear', '')} -- {ed.get('endYear', '')}")
-        edu_lines.append(rf"\noindent\textbf{{{sch}}} -- {deg}, {fos} (GPA {gpa}) \hfill {yrs}\par")
+        edu_lines.append(rf"\noindent\textbf{{{sch}}} --- {deg}, {fos} (GPA {gpa}) \hfill {{\footnotesize {yrs}}}\par")
     edu_tex = "\n".join(edu_lines)
 
-    certs = " $\\bullet$ ".join([tex_escape(c) for c in (profile.get("certifications") or [])[:5]])
+    title_line_tex = rf"{{\normalsize \textbf{{{target_title}}}}} \\[1.5pt]" + "\n  " if target_title else ""
 
     return rf"""\documentclass[10pt,letterpaper]{{article}}
-\usepackage[left=0.45in,right=0.45in,top=0.4in,bottom=0.4in]{{geometry}}
+\pdfobjcompresslevel=0
+\usepackage[left=0.38in,right=0.38in,top=0.30in,bottom=0.30in]{{geometry}}
 \usepackage{{enumitem}}
 \usepackage[hidelinks]{{hyperref}}
 \pagestyle{{empty}}
 \setlength{{\parindent}}{{0pt}}
-\setlist[itemize]{{leftmargin=1.2em,itemsep=1.5pt,topsep=2pt,parsep=0pt}}
-\newcommand{{\secHdr}}[1]{{\vspace{{5pt}}\textbf{{\normalsize \uppercase{{#1}}}}\vspace{{1.5pt}}\hrule\vspace{{4pt}}}}
+\setlist[itemize]{{leftmargin=1.15em,itemsep=0.7pt,topsep=1.2pt,parsep=0pt,partopsep=0pt}}
+\newcommand{{\secHdr}}[1]{{\vspace{{3.5pt}}\textbf{{\small \uppercase{{#1}}}}\vspace{{1pt}}\hrule\vspace{{2.5pt}}}}
 
 \begin{{document}}
+\fontsize{{8.7pt}}{{10.2pt}}\selectfont
 \begin{{center}}
-  {{\LARGE \textbf{{{name}}}}} \\[2pt]
-  \small {city_state} $|$ {mail} $|$ {phone} $|$ {li} $|$ {gh}
+  {{\Large \textbf{{{name}}}}} \\[1.5pt]
+  {title_line_tex}{{\footnotesize {city_state} $|$ {mail} $|$ {phone} $|$ {li} $|$ {gh}}}
 \end{{center}}
-\vspace{{-4pt}}
+\vspace{{-6pt}}
 
-\secHdr{{Professional Summary}}
-\small {summary}\par
+\secHdr{{Summary}}
+{summary}\par
 
-\secHdr{{Technical Skills}}
-\small
+\secHdr{{Skills}}
 {skills_tex}\par
 
-\secHdr{{Professional Experience}}
-\small
+\secHdr{{Experience}}
 {exp_tex}
 
-\secHdr{{Selected Projects}}
-\small
-\begin{{itemize}}
+\secHdr{{Projects}}
 {proj_tex}
-\end{{itemize}}
 
 \secHdr{{Education}}
-\small
 {edu_tex}
-
-\secHdr{{Certifications}}
-\small {certs}\par
 \end{{document}}
 """
 
@@ -173,6 +178,7 @@ def build_cover_letter_latex(cl_text: str, meta: dict, profile: dict) -> str:
     paras = [tex_escape(pr.strip()) for pr in re.split(r"\n\s*\n", cl_text or "") if pr.strip()]
     body_tex = "\n\n\\vspace{8pt}\n".join(paras)
     return rf"""\documentclass[11pt,letterpaper]{{article}}
+\pdfobjcompresslevel=0
 \usepackage[margin=0.85in]{{geometry}}
 \pagestyle{{empty}}
 \setlength{{\parindent}}{{0pt}}
@@ -1576,12 +1582,10 @@ class JobifyHandler(BaseHTTPRequestHandler):
         if self.path == "/api/gemini-generate":
             api_key = (body.get("apiKey") or "").strip()
             raw_models = body.get("models") or [
-                "gemini-3.8-flash",
                 "gemini-3.5-flash",
-                "gemini-3.5-flash-lite",
-                "gemini-3.6-flash",
-                "gemini-flash-lite-latest",
                 "gemini-3-flash-preview",
+                "gemini-3.5-flash-lite",
+                "gemini-flash-lite-latest",
             ]
             now_s = time.time()
             healthy_models = [m for m in raw_models if GEMINI_MODEL_COOLDOWN.get(m, 0) <= now_s]

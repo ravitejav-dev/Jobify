@@ -141,6 +141,36 @@
     return true;
   }
 
+  const BRAND_CASING_MAP = {
+    openai: "OpenAI",
+    nvidia: "NVIDIA",
+    xai: "xAI",
+    deepmind: "DeepMind",
+    scaleai: "Scale AI",
+    perplexity: "Perplexity AI",
+    perplexityai: "Perplexity AI",
+    huggingface: "Hugging Face",
+    github: "GitHub",
+    linkedin: "LinkedIn"
+  };
+
+  function formatCompanyResumeFileName(companyName, fallbackSuffix = "Resume") {
+    const raw = String(companyName || "").trim();
+    const isGeneric =
+      !raw ||
+      /^(target(\s+company)?|company|unknown|job\s*portal|career\s*portal|careers?|active\s+browser\s+tab|application)$/i.test(
+        raw
+      );
+    const cleanComp = isGeneric
+      ? ""
+      : raw
+          .replace(/&/g, "and")
+          .replace(/[^a-zA-Z0-9]+/g, "_")
+          .replace(/^_+|_+$/g, "")
+          .slice(0, 32);
+    return `Raviteja_velanati_${cleanComp || fallbackSuffix}.pdf`;
+  }
+
   function extractJobMetadata(doc = document) {
     const url = location.href;
     if (/^https?:\/\/mail\.google\.com\b/i.test(url)) {
@@ -184,9 +214,12 @@
         wdMatch?.[1] ||
         "";
       if (rawSlug) {
-        company = decodeURIComponent(rawSlug)
-          .replace(/[-_]+/g, " ")
-          .replace(/\b\w/g, (c) => c.toUpperCase());
+        const cleanKey = decodeURIComponent(rawSlug).toLowerCase().replace(/[^a-z0-9]/g, "");
+        company =
+          BRAND_CASING_MAP[cleanKey] ||
+          decodeURIComponent(rawSlug)
+            .replace(/[-_]+/g, " ")
+            .replace(/\b\w/g, (c) => c.toUpperCase());
       }
     }
     if (!company) {
@@ -845,7 +878,7 @@
     }
     const firstPrimaryPart = pLow.split("|")[0].trim();
     if (
-      (/^(full\s*name|name|your\s*name|applicant\s*name|candidate\s*name|signature)\s*\*?$/i.test(firstPrimaryPart) ||
+      (/^(full\s*(legal\s*)?name|legal\s*name|name|your\s*name|applicant\s*name|candidate\s*name|signature)\s*\*?$/i.test(firstPrimaryPart) ||
         /--name\b/i.test(idNameLow)) &&
       !/company|school|employer|reference|pronounc/i.test(firstPrimaryPart)
     ) {
@@ -918,7 +951,7 @@
       return [p.lastName];
     }
     if (
-      (/full\s*name|^name\s*\*?$|_systemfield_name|\byour\s*name\b|applicant\s*name|candidate\s*name|signature/i.test(
+      (/full\s*(legal\s*)?name|legal\s*name|^name\s*\*?$|_systemfield_name|\byour\s*name\b|applicant\s*name|candidate\s*name|signature/i.test(
         combinedLow
       )) &&
       !/company|school|employer|reference|pronounc/i.test(combinedLow)
@@ -3037,10 +3070,15 @@
         }
       } else if (/resume|cv\b|curriculum|attach/i.test(lbl) || fileInputs.length === 1) {
         if (resumePdfPayload?.base64 && (forceOverwrite || !fi.files?.length)) {
-          await attachBase64PdfToInput(fi, resumePdfPayload.base64, resumePdfPayload.fileName);
+          const attachFileName =
+            resumePdfPayload.fileName?.startsWith("Raviteja_velanati_") &&
+            resumePdfPayload.fileName !== "Raviteja_velanati_Resume.pdf"
+              ? resumePdfPayload.fileName
+              : formatCompanyResumeFileName(meta?.company);
+          await attachBase64PdfToInput(fi, resumePdfPayload.base64, attachFileName);
           attachedResume = true;
           filledCount++;
-          await reportStep(`Resume PDF (${resumePdfPayload.fileName})`);
+          await reportStep(`Resume PDF (${attachFileName})`);
         }
       }
     }
@@ -3528,11 +3566,12 @@
     let resumePdfPayload = null;
     if (hasFileInputs && state.settings?.autoAttachResumePdf !== false) {
       const selectedResumeId = options.resumeChoice || state.settings?.defaultResumeVariant || "one_page";
+      const frameCompany = (options.topJobMeta || extractJobMetadata(document))?.company || "";
       try {
         if (typeof chrome !== "undefined" && chrome.runtime?.id) {
           const pdfResp = await chrome.runtime.sendMessage({
             type: "GET_RESUME_PDF_BYTES",
-            payload: { variantOrId: selectedResumeId }
+            payload: { variantOrId: selectedResumeId, company: frameCompany }
           });
           if (pdfResp?.ok) resumePdfPayload = pdfResp;
         }
@@ -3568,6 +3607,7 @@
 
   window.__JOBIFY_ADAPTERS__ = {
     detectATSPlatform,
+    formatCompanyResumeFileName,
     extractCompensationFromJob,
     extractJobMetadata,
     isFieldRequired,

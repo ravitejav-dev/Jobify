@@ -190,9 +190,8 @@
                 matchScore: analysis?.match?.matchScore || 88,
                 resumeUsed:
                   latestTailoredRecord?.fileName ||
-                  (appState?.settings?.defaultResumeVariant === "master"
-                    ? "Raviteja_Velanati_Master_Resume.pdf"
-                    : "Raviteja_Velanati_Resume_1Page.pdf")
+                  adapters.formatCompanyResumeFileName?.(meta.company) ||
+                  "Raviteja_velanati_Resume.pdf"
               }
             }
           })
@@ -227,7 +226,10 @@
 
     let resumePdfPayload = null;
     if (appState?.settings?.autoAttachResumePdf !== false) {
-      const pdfResp = await safeSendMessage({ type: "GET_RESUME_PDF_BYTES", payload: { variantOrId: selectedResumeId } });
+      const pdfResp = await safeSendMessage({
+        type: "GET_RESUME_PDF_BYTES",
+        payload: { variantOrId: selectedResumeId, company: pageMeta?.company || "" }
+      });
       if (pdfResp?.ok) resumePdfPayload = pdfResp;
     }
 
@@ -678,8 +680,8 @@
           <label class="jb-label">Resume PDF to Auto-Attach</label>
           <select class="jb-select" id="jb-resume-select" style="margin-bottom:8px;">
             ${tailoredOpts}
-            <option value="one_page" ${!latestTailoredRecord && appState.settings.defaultResumeVariant === "one_page" ? "selected" : ""}>Raviteja_Velanati_Resume_1Page.pdf (1-Page Default)</option>
-            <option value="master" ${!latestTailoredRecord && appState.settings.defaultResumeVariant === "master" ? "selected" : ""}>Raviteja_Velanati_Master_Resume.pdf (2-Page Master)</option>
+            <option value="one_page" ${!latestTailoredRecord && appState.settings.defaultResumeVariant === "one_page" ? "selected" : ""}>${escapeHtml(window.__JOBIFY_ADAPTERS__?.formatCompanyResumeFileName?.(pageMeta?.company) || "Raviteja_velanati_Resume.pdf")} (1-Page Default)</option>
+            <option value="master" ${!latestTailoredRecord && appState.settings.defaultResumeVariant === "master" ? "selected" : ""}>${escapeHtml(window.__JOBIFY_ADAPTERS__?.formatCompanyResumeFileName?.(pageMeta?.company, "Master_Resume") || "Raviteja_velanati_Master_Resume.pdf")} (2-Page Master)</option>
           </select>
 
           <button class="jb-btn secondary" id="jb-btn-autofill">
@@ -911,8 +913,8 @@
         <div class="jb-card">
           <label class="jb-label">Gemini AI Model</label>
           <select class="jb-select" id="jb-ai-model" style="margin-bottom:10px;">
-            <option value="gemini-3.8-flash" ${appState.settings.primaryModel === "gemini-3.8-flash" ? "selected" : ""}>Gemini 3.8 Flash (Fast Tailoring)</option>
-            <option value="gemini-3.1-pro-preview" ${appState.settings.primaryModel === "gemini-3.1-pro-preview" ? "selected" : ""}>Gemini 3.1 Pro (Deep Reasoning)</option>
+            <option value="gemini-3.5-flash" ${appState.settings.primaryModel === "gemini-3.5-flash" ? "selected" : ""}>Gemini 3.5 Flash (Fast From-Scratch)</option>
+            <option value="gemini-3-flash-preview" ${appState.settings.primaryModel === "gemini-3-flash-preview" ? "selected" : ""}>Gemini 3 Flash Preview (Deep Tailoring)</option>
           </select>
 
           <button class="jb-btn auto-hero" id="jb-run-tailor">
@@ -926,9 +928,14 @@
             latestTailoredRecord
               ? `
             <div style="margin-top:10px;padding:9px;background:#0f172a;border:1px solid #334155;border-radius:8px;font-size:11.5px;">
-              <div style="color:#6ee7b7;font-weight:700;margin-bottom:4px;">
-                ✅ Tailored (${escapeHtml(latestTailoredRecord.modelUsed)}) • New ATS Score: ${latestTailoredRecord.atsScore}/100
+              <div style="color:#6ee7b7;font-weight:700;margin-bottom:3px;">
+                ✅ ${escapeHtml(latestTailoredRecord.fileName)} • ATS: ${latestTailoredRecord.atsScore}/100
               </div>
+              ${
+                latestTailoredRecord.tailored?.targetJobTitle
+                  ? `<div style="color:#a5b4fc;font-weight:600;margin-bottom:4px;">Header Role: ${escapeHtml(latestTailoredRecord.tailored.targetJobTitle)}</div>`
+                  : ""
+              }
               <div style="color:#cbd5e1;margin-bottom:6px;">${escapeHtml(latestTailoredRecord.tailored?.summary || "")}</div>
               <div class="jb-row">
                 <button class="jb-btn secondary" id="jb-dl-resume">⬇ Download PDF</button>

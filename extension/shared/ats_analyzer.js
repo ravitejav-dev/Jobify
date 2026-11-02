@@ -142,18 +142,25 @@ export function scoreResumeATS(profile, jobDescription = "", tailoredResume = nu
 
   // 2. Quantified Impact & Metrics Density (20 pts)
   const bullets = tailoredResume?.experience
-    ? tailoredResume.experience.flatMap((e) => e.bullets || [])
-    : (profile.workExperience || []).flatMap((w) => w.highlights || []);
+    ? [
+        ...tailoredResume.experience.flatMap((e) => e.bullets || []),
+        ...(tailoredResume.projects || []).flatMap((p) => p.bullets || [])
+      ]
+    : [
+        ...(profile.workExperience || []).flatMap((w) => w.highlights || []),
+        ...(profile.projects || []).flatMap((p) => p.bullets || [])
+      ];
 
   const metricRegex = /(\d+%|\d+x|\d+\+|\$[\d,]+|#\d+|\d{2,})/i;
   const quantifiedCount = bullets.filter((b) => metricRegex.test(b)).length;
-  const metricRatio = bullets.length > 0 ? Math.min(1, quantifiedCount / Math.max(4, bullets.length * 0.75)) : 0.7;
+  const metricRatio = bullets.length > 0 ? Math.min(1, quantifiedCount / Math.max(4, bullets.length * 0.6)) : 0.7;
   const impactScore = Math.round(metricRatio * 20);
 
   // 3. Action Verbs & Bullet Clarity (15 pts)
-  const strongVerbs = /^(designed|built|architected|engineered|owned|re-engineered|ranked|developed|created|implemented|optimized|led|delivered|automated|scaled|reduced|cut)/i;
+  const strongVerbs =
+    /^(architected|engineered|built|designed|spearheaded|orchestrated|optimized|automated|developed|implemented|streamlined|delivered|launched|scaled|accelerated|constructed|integrated|modernized|established|pioneered|owned|re-engineered|ranked|created|led|reduced|cut|authored|deployed|configured|hardened)/i;
   const strongCount = bullets.filter((b) => strongVerbs.test((b || "").trim())).length;
-  const verbScore = bullets.length > 0 ? Math.min(15, Math.round((strongCount / bullets.length) * 15) + 3) : 12;
+  const verbScore = bullets.length > 0 ? Math.min(15, Math.round((strongCount / bullets.length) * 15) + 2) : 12;
 
   // 4. ATS Parseability & Section Completeness (15 pts)
   let formatScore = 0;
@@ -166,8 +173,11 @@ export function scoreResumeATS(profile, jobDescription = "", tailoredResume = nu
   let fitScore = 13;
   const jdLow = (jobDescription || "").toLowerCase();
   if (/10\+\s*years|12\+\s*years|staff|principal/i.test(jdLow)) {
-    fitScore = 9;
-  } else if (/ai|llm|machine learning|platform|python|typescript|full-stack|software engineer/i.test(jdLow)) {
+    fitScore = tailoredResume?.targetJobTitle ? 12 : 9;
+  } else if (
+    tailoredResume?.targetJobTitle ||
+    /ai|llm|machine learning|platform|python|typescript|full-stack|software engineer/i.test(jdLow)
+  ) {
     fitScore = 15;
   }
 
