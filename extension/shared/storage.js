@@ -55,6 +55,16 @@ export async function ensureInitialized() {
     ...(secrets.gmailAppPassword ? { gmailAppPassword: secrets.gmailAppPassword } : {})
   };
 
+  const mergePreservingUser = (defaults = {}, userObj = {}) => {
+    const out = { ...defaults };
+    for (const [k, v] of Object.entries(userObj || {})) {
+      if (v !== undefined && v !== null && v !== "") {
+        out[k] = v;
+      }
+    }
+    return out;
+  };
+
   if (!existing[KEYS.PROFILE]) {
     patch[KEYS.PROFILE] = DEFAULT_PROFILE;
   } else if ((existing[KEYS.PROFILE].profileSchemaVersion || 1) < PROFILE_SCHEMA_VERSION) {
@@ -64,20 +74,11 @@ export async function ensureInitialized() {
       ...DEFAULT_PROFILE,
       ...prev,
       profileSchemaVersion: PROFILE_SCHEMA_VERSION,
-      personal: {
-        ...prev.personal,
-        ...DEFAULT_PROFILE.personal
-      },
-      workAuthAndEEO: {
-        ...prev.workAuthAndEEO,
-        ...DEFAULT_PROFILE.workAuthAndEEO
-      },
-      preferences: {
-        ...prev.preferences,
-        ...DEFAULT_PROFILE.preferences
-      },
-      workExperience: DEFAULT_PROFILE.workExperience,
-      projects: DEFAULT_PROFILE.projects,
+      personal: mergePreservingUser(DEFAULT_PROFILE.personal, prev.personal),
+      workAuthAndEEO: mergePreservingUser(DEFAULT_PROFILE.workAuthAndEEO, prev.workAuthAndEEO),
+      preferences: mergePreservingUser(DEFAULT_PROFILE.preferences, prev.preferences),
+      workExperience: Array.isArray(prev.workExperience) && prev.workExperience.length > 0 ? prev.workExperience : DEFAULT_PROFILE.workExperience,
+      projects: Array.isArray(prev.projects) && prev.projects.length > 0 ? prev.projects : DEFAULT_PROFILE.projects,
       resumes: [...customResumes, ...DEFAULT_PROFILE.resumes]
     };
   }

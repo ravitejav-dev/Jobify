@@ -65,13 +65,16 @@
       const maxH = Math.round(parseFloat(hrRangeMatch[2]));
       if (minH >= 20 && maxH <= 350 && maxH >= minH) {
         const midH = Math.round((minH + maxH) / 2);
+        const rawHr = `$${minH}/hr - $${maxH}/hr`;
         return {
           type: "hourly",
           minHourly: minH,
           maxHourly: maxH,
           targetHourly: midH,
+          midpoint: midH,
+          raw: rawHr,
           displayHourly: `$${midH}/hr`,
-          displayHourlyRange: `$${minH}/hr - $${maxH}/hr`
+          displayHourlyRange: rawHr
         };
       }
     }
@@ -79,13 +82,16 @@
     if (hrSingleMatch) {
       const h = Math.round(parseFloat(hrSingleMatch[1]));
       if (h >= 20 && h <= 350) {
+        const rawHr = `$${h}/hr`;
         return {
           type: "hourly",
           minHourly: h,
           maxHourly: h,
           targetHourly: h,
-          displayHourly: `$${h}/hr`,
-          displayHourlyRange: `$${h}/hr`
+          midpoint: h,
+          raw: rawHr,
+          displayHourly: rawHr,
+          displayHourlyRange: rawHr
         };
       }
     }
@@ -99,13 +105,16 @@
       const maxA = parseInt(annualRangeComma[3] + annualRangeComma[4], 10);
       if (minA >= 50000 && maxA <= 950000 && maxA >= minA) {
         const midA = Math.round((minA + maxA) / 2 / 5000) * 5000;
+        const rawAnnual = `$${minA.toLocaleString()} - $${maxA.toLocaleString()}`;
         return {
           type: "annual",
           minAnnual: minA,
           maxAnnual: maxA,
           targetAnnual: midA,
+          midpoint: midA,
+          raw: rawAnnual,
           displayAnnual: `$${midA.toLocaleString()}`,
-          displayAnnualRange: `$${minA.toLocaleString()} - $${maxA.toLocaleString()}`,
+          displayAnnualRange: rawAnnual,
           numericAnnualRange: `${minA}-${maxA}`
         };
       }
@@ -117,13 +126,16 @@
       const maxA = parseInt(annualRangeK[2], 10) * 1000;
       if (minA >= 50000 && maxA <= 950000 && maxA >= minA) {
         const midA = Math.round((minA + maxA) / 2 / 5000) * 5000;
+        const rawAnnual = `$${minA.toLocaleString()} - $${maxA.toLocaleString()}`;
         return {
           type: "annual",
           minAnnual: minA,
           maxAnnual: maxA,
           targetAnnual: midA,
+          midpoint: midA,
+          raw: rawAnnual,
           displayAnnual: `$${midA.toLocaleString()}`,
-          displayAnnualRange: `$${minA.toLocaleString()} - $${maxA.toLocaleString()}`,
+          displayAnnualRange: rawAnnual,
           numericAnnualRange: `${minA}-${maxA}`
         };
       }
@@ -176,6 +188,8 @@
     if (/^https?:\/\/mail\.google\.com\b/i.test(url)) {
       return {
         isRelevantPage: false,
+        pageType: "other",
+        hasCandidateForm: false,
         isAuthWall: false,
         hasEmbeddedAtsIframe: false,
         ats: "Web",
@@ -228,7 +242,7 @@
     }
 
     const titleEl = doc.querySelector(
-      "[data-jobify-title], h1.app-title, .job__title h1, .posting-headline h2, [data-automation-id='jobPostingHeader'], h1"
+      "[data-jobify-title], h1.app-title, .job__title h1, .posting-headline h2, [data-automation-id='jobPostingHeader'], .job-details-jobs-unified-top-card__job-title, h1"
     );
     let title =
       titleEl?.textContent?.trim() ||
@@ -248,6 +262,7 @@
       "#grnhse_app",
       "[data-automation-id='jobPostingDescription']",
       ".posting-page .section-wrapper",
+      ".jobs-description__content",
       "[class*='job-description']",
       "[id*='job-description']",
       "main",
@@ -275,20 +290,51 @@
     const hasEmbeddedAtsIframe = Boolean(
       doc.querySelector("iframe[src*='greenhouse.io'], iframe[src*='ashbyhq.com'], iframe[src*='lever.co'], iframe[src*='workday'], #grnhse_iframe")
     );
+    const hasCandidateForm = hasFileUpload || hasEmbeddedAtsIframe || hasRealCandidateFormFields(doc);
     const isCareerUrl =
       ats !== "Career Portal" ||
       /\/(jobs?|careers?|apply|application|positions?|openings?|postings?|talent|sandbox)\b/i.test(uLow);
     const hasApplyElements =
-      hasFileUpload ||
-      hasEmbeddedAtsIframe ||
-      Boolean(doc.querySelector("form input[name*='first'], form input[autocomplete*='given-name'], [data-automation-id]"));
+      hasCandidateForm ||
+      Boolean(doc.querySelector("[data-jobify-apply-btn], [data-automation-id='adventureButton'], [data-automation-id='jobPostingHeader']"));
+    const isAuthWall =
+      hasPasswordInput &&
+      (isCareerUrl ||
+        Boolean(doc.querySelector("[data-automation-id*='password'], [data-automation-id*='signIn'], [data-jobify-auth]")));
+
+    // Distinguish directory/search boards from specific job postings & active forms (Simplify Copilot pattern)
+    const isRootBoardUrl =
+      /^https?:\/\/(boards|job-boards)\.greenhouse\.io\/[^/?#]+\/?(\?.*)?$/i.test(url) ||
+      /^https?:\/\/jobs\.lever\.co\/[^/?#]+\/?(\?.*)?$/i.test(url) ||
+      /^https?:\/\/jobs\.ashbyhq\.com\/[^/?#]+\/?(\?.*)?$/i.test(url) ||
+      (/myworkdayjobs\.com/i.test(url) && !/\/job\/|\/apply/i.test(uLow) && !doc.querySelector("[data-automation-id='jobPostingHeader']") && !uLow.includes("sandbox")) ||
+      (/linkedin\.com\/jobs/i.test(url) && !/currentjobid=|\/jobs\/view\//i.test(uLow));
+
+    const isGenericDirectoryTitle =
+      !hasCandidateForm &&
+      !isAuthWall &&
+      !uLow.includes("sandbox") &&
+      /^(search(\s+for)?\s+jobs?|careers?(\s+at\s+.+)?|open\s+(roles|positions)|all\s+openings|job\s+(openings|search)|join\s+(our\s+team|us))$/i.test(
+        title.trim()
+      );
+
+    const isJobBoard = !hasCandidateForm && !isAuthWall && (isRootBoardUrl || isGenericDirectoryTitle);
+    const isRelevantPage = isCareerUrl || hasApplyElements;
+    const pageType = !isRelevantPage
+      ? "other"
+      : isAuthWall
+        ? "auth_wall"
+        : hasCandidateForm
+          ? "application_form"
+          : isJobBoard
+            ? "job_board"
+            : "job_posting";
 
     return {
-      isRelevantPage: isCareerUrl || hasApplyElements,
-      isAuthWall:
-        hasPasswordInput &&
-        (isCareerUrl ||
-          Boolean(doc.querySelector("[data-automation-id*='password'], [data-automation-id*='signIn'], [data-jobify-auth]"))),
+      isRelevantPage,
+      pageType,
+      hasCandidateForm,
+      isAuthWall,
       hasEmbeddedAtsIframe,
       ats,
       company: company || "Company",
@@ -1999,10 +2045,10 @@
 
   function isOptionalUnneededExtraField(el, ctx, required) {
     if (required) return false;
-    const pLow = (ctx?.primaryLabel || "").toLowerCase();
-    // Skip optional "Additional information", "Anything else?", "Optional notes" so we never add unrequested fluff
+    const pLow = `${ctx?.primaryLabel || ""} ${ctx?.helperText || ""}`.toLowerCase();
+    // Skip optional "Additional information", "Anything else?", "(Optional)", "Optional: ..." so we never add unrequested fluff
     if (
-      /additional\s*(information|comments|notes|context)|anything\s*else|other\s*information|is\s*there\s*anything\s*else|optional\s*note/i.test(
+      /\boptional\b|\(optional\)|additional\s*(information|comments|notes|context)|anything\s*else|other\s*information|is\s*there\s*anything\s*else/i.test(
         pLow
       )
     ) {
@@ -2916,7 +2962,7 @@
         document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
         document.activeElement.blur?.();
       }
-      const wdClickFilter = document.querySelector("[data-automation-id='click_filter']");
+      const wdClickFilter = document.querySelector("[data-automation-id='click_filter']:not([role='button'])");
       if (wdClickFilter && isElementVisible(wdClickFilter)) {
         dispatchRealClick(wdClickFilter);
       }
@@ -4116,12 +4162,12 @@
     const p = profile.personal || {};
     const meta = options.topJobMeta || extractJobMetadata(document);
 
-    // 1. Run non-restrictive autofill pass first (catches unmarked open questions, custom controls & dropdowns)
+    // 1. Run clean autofill pass first (catches newly-errored open questions, required custom controls & dropdowns without touching optional fields)
     const baseFill = await runFrameAutofill({
       ...options,
-      onlyNeededCleanMode: false,
+      onlyNeededCleanMode: true,
       fillOpenEndedWithAI: true,
-      includeAllUnresolvedOpenEnded: true
+      includeAllUnresolvedOpenEnded: false
     });
     let healedCount = baseFill?.filledCount || 0;
     let aiRepairsApplied = 0;
@@ -4222,6 +4268,12 @@
       if (flagged && curVal) {
         const ctx = getFieldContext(el);
         const errLow = getControlValidationErrorText(el, null, true).toLowerCase();
+        const fallbackComp = Number(
+          meta?.compensation?.midpoint ||
+            meta?.compensation?.targetAnnual ||
+            profile?.workAuthAndEEO?.desiredSalaryTarget ||
+            165000
+        );
         if (el.type === "tel" || /phone/i.test(ctx.fullLabel)) {
           const digits = p.phoneDigits || "7748108481";
           const altPhone =
@@ -4230,11 +4282,10 @@
               : `+1${digits}`;
           if (altPhone !== curVal && setNativeValue(el, altPhone)) healedCount++;
         } else if (/leading\s*\$|with\s*\$|format\s+currency/i.test(errLow)) {
-          const midNum = Number(meta?.compensation?.midpoint || 165000);
-          const fmtUsd = `$${midNum.toLocaleString("en-US")}`;
+          const fmtUsd = `$${fallbackComp.toLocaleString("en-US")}`;
           if (fmtUsd !== curVal && setNativeValue(el, fmtUsd)) healedCount++;
         } else if (/digits?\s*only|numbers?\s*only|numeric|no\s*\$|valid\s*number/i.test(errLow)) {
-          const cleanDigits = String(meta?.compensation?.midpoint || "165000");
+          const cleanDigits = String(fallbackComp);
           if (cleanDigits !== curVal && setNativeValue(el, cleanDigits)) healedCount++;
         } else if ((el.type === "url" || /url|http/i.test(errLow)) && !/^https?:\/\//i.test(curVal)) {
           if (setNativeValue(el, `https://${curVal}`)) healedCount++;

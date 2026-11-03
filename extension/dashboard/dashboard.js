@@ -12,7 +12,7 @@ let trackerFilterStage = "All";
 const VIEW_HEADERS = {
   overview: ["Overview & ATS Sandbox", "Your complete Simplify+ AI Copilot pre-loaded with Raviteja Velanati's profile"],
   tracker: ["All-in-One Application Tracker", "Track bookmarks, submitted applications, interview notes, timelines & referrals"],
-  resume: ["AI Resume Tailor, Builder & ATS Scorer", "Tailor bullets with Gemini 3.8 Flash / 3.1 Pro, audit missing keywords & compile ATS PDF"],
+  resume: ["AI Resume Tailor, Builder & ATS Scorer", "Tailor bullets with Gemini 3.5 Flash / 3 Flash Preview, audit missing keywords & compile ATS PDF"],
   cover: ["AI Cover Letter Studio", "Generate custom recruiter-ready cover letters & export ATS PDFs"],
   jobs: ["Personalized Job Matches & Curated Daily Lists", "Live open roles fetched directly from OpenAI, Anthropic, Perplexity, xAI, Cohere, Scale AI, Together AI, Databricks, Harvey, Stripe & Figma"],
   autopilot: ["Autopilot Control Center", "Queue job applications, configure True Full Auto-Submit vs. Safe Review, and schedule recurring runs"],
@@ -53,7 +53,7 @@ async function reloadState() {
   STATE = resp?.state || {};
   document.getElementById("sb-user-name").textContent = STATE.profile?.personal?.fullName || "Raviteja Velanati";
   document.getElementById("sb-user-email").textContent = STATE.profile?.personal?.email || "";
-  document.getElementById("topbar-model-pill").textContent = `AI: ${STATE.settings?.primaryModel || "gemini-3.8-flash"}${
+  document.getElementById("topbar-model-pill").textContent = `AI: ${STATE.settings?.primaryModel || "gemini-3.5-flash"}${
     STATE.settings?.enableSmartFallback ? " • Smart Quota Ready" : ""
   }`;
 }
@@ -1086,7 +1086,10 @@ function renderVaultAndProfile(c) {
       </div>
 
       <div class="card">
-        <div class="card-title">🔐 Portal Login Vault & Gemini AI Engine</div>
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+          <span>🔐 Portal Login Vault &amp; Gemini AI Engine</span>
+          <button class="btn sm secondary" id="vc-toggle-secrets" type="button">👁 Show Secrets</button>
+        </div>
         <div class="form-row">
           <label class="field-lbl">Portal Signup / Login Email (Workday, iCIMS, SmartRecruiters)</label>
           <input class="input" id="vc-email" value="${esc(creds.portalEmail)}" />
@@ -1094,16 +1097,16 @@ function renderVaultAndProfile(c) {
         <div class="grid-2 form-row">
           <div>
             <label class="field-lbl">Portal Account Password</label>
-            <input class="input" type="text" id="vc-pass" value="${esc(creds.portalPassword)}" />
+            <input class="input" type="password" id="vc-pass" value="${esc(creds.portalPassword)}" autocomplete="off" />
           </div>
           <div>
             <label class="field-lbl">Gmail App Password (Optional — Chrome Gmail OTP Also Active)</label>
-            <input class="input" type="text" id="vc-app-pass" value="${esc(creds.gmailAppPassword)}" />
+            <input class="input" type="password" id="vc-app-pass" value="${esc(creds.gmailAppPassword)}" autocomplete="off" />
           </div>
         </div>
         <div class="form-row">
           <label class="field-lbl">Gemini API Key</label>
-          <input class="input" type="text" id="vc-api-key" value="${esc(set.geminiApiKey)}" />
+          <input class="input" type="password" id="vc-api-key" value="${esc(set.geminiApiKey)}" autocomplete="off" />
         </div>
         <div class="grid-2 form-row">
           <div>
@@ -1180,6 +1183,16 @@ function renderVaultAndProfile(c) {
     await chrome.runtime.sendMessage({ type: "UPDATE_PROFILE", payload: { profile: next } });
     await reloadState();
     toast("✅ Profile saved!");
+  });
+
+  c.querySelector("#vc-toggle-secrets")?.addEventListener("click", (e) => {
+    const btn = e.currentTarget;
+    const inputs = ["#vc-pass", "#vc-app-pass", "#vc-api-key"].map((sel) => c.querySelector(sel)).filter(Boolean);
+    const show = inputs[0]?.type === "password";
+    inputs.forEach((inp) => {
+      inp.type = show ? "text" : "password";
+    });
+    btn.textContent = show ? "🙈 Hide Secrets" : "👁 Show Secrets";
   });
 
   c.querySelector("#vc-save-btn").addEventListener("click", async () => {

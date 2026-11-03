@@ -1094,7 +1094,22 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
       await sleep(1200);
       const childTab = findSpawnedChildTab(tabId, clickTs);
       if (childTab?.id) {
+        const prevTabId = tabId;
         tabId = childTab.id;
+        chrome.tabs
+          .sendMessage(prevTabId, {
+            type: "AUTO_APPLY_PROGRESS",
+            payload: {
+              running: false,
+              completed: true,
+              stage: "completed",
+              stepLabel: "↗ Continued in Application Tab",
+              detail: "Auto-Apply switched to the newly opened application tab.",
+              tabId: prevTabId,
+              updatedAt: Date.now()
+            }
+          })
+          .catch(() => {});
         await waitForTabComplete(tabId, 12000);
       } else {
         await waitForTabSettle(tabId, 700, 8500);
@@ -1146,7 +1161,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
           completed: true,
           stage: "completed",
           stepLabel: "✅ Application Submitted!",
-          detail: `Logged ${jobMeta.company || "Role"} as Applied — returning to Extensions.`
+          detail: `Logged ${jobMeta.company || "Role"} as Applied.`
         });
         return {
           ok: true,
@@ -1175,7 +1190,22 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         await sleep(1100);
         const childTab = findSpawnedChildTab(tabId, gateTs);
         if (childTab?.id) {
+          const prevTabId = tabId;
           tabId = childTab.id;
+          chrome.tabs
+            .sendMessage(prevTabId, {
+              type: "AUTO_APPLY_PROGRESS",
+              payload: {
+                running: false,
+                completed: true,
+                stage: "completed",
+                stepLabel: "↗ Continued in Application Tab",
+                detail: "Auto-Apply switched to the newly opened application tab.",
+                tabId: prevTabId,
+                updatedAt: Date.now()
+              }
+            })
+            .catch(() => {});
           await waitForTabComplete(tabId, 12000);
         } else {
           await waitForTabSettle(tabId, 700, 8000);
@@ -1240,6 +1270,30 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
 
       // Check C: Standalone Portal Auth ("Sign in with email" -> Create Account <-> Sign In -> Post-Signup Sign In!)
       if (screen.isStandaloneAuthWall && authAttempts < 6) {
+        const hasPortalPassword = Boolean(String(state.credentials?.portalPassword || "").trim());
+        if (!hasPortalPassword) {
+          if (screen.hasEmailAuthGate && authAttempts === 0) {
+            authAttempts++;
+            await executeAdapterAcrossTab(tabId, "performAutonomousAuth", [state.credentials, authHistory]);
+            await waitForTabSettle(tabId, 900, 4000);
+          }
+          await broadcastAutoApplyProgress(tabId, {
+            running: false,
+            completed: false,
+            stage: "needs_review",
+            stepLabel: "🔐 Set Portal Password in Vault",
+            detail: "Open Hub → Vault once to save your portal password for automatic login & signup."
+          });
+          return {
+            ok: true,
+            submitted: false,
+            pausedForCredentials: true,
+            tabId,
+            totalFilledFields,
+            tailoredResumeFile: tailoredResume?.fileName || null
+          };
+        }
+
         authAttempts++;
         authOrSubmitTriggerMs = Date.now();
         await broadcastAutoApplyProgress(tabId, {
@@ -1268,7 +1322,22 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
 
         const childTabAfterAuth = findSpawnedChildTab(tabId, authOrSubmitTriggerMs);
         if (childTabAfterAuth?.id) {
+          const prevTabId = tabId;
           tabId = childTabAfterAuth.id;
+          chrome.tabs
+            .sendMessage(prevTabId, {
+              type: "AUTO_APPLY_PROGRESS",
+              payload: {
+                running: false,
+                completed: true,
+                stage: "completed",
+                stepLabel: "↗ Continued in Application Tab",
+                detail: "Auto-Apply switched to the newly opened application tab.",
+                tabId: prevTabId,
+                updatedAt: Date.now()
+              }
+            })
+            .catch(() => {});
           await waitForTabComplete(tabId, 12000);
         } else {
           await waitForTabSettle(tabId, 1500, 7500);
@@ -1410,7 +1479,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
             completed: true,
             stage: "completed",
             stepLabel: "✅ Application Submitted!",
-            detail: `Logged ${jobMeta.company || "Role"} as Applied — returning to Extensions.`
+            detail: `Logged ${jobMeta.company || "Role"} as Applied.`
           });
 
           return {
@@ -1675,13 +1744,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const atsScore = scoreResumeATS(state.profile, jobMeta.description || "");
         const referrals = buildNetworkCopilotPathways(jobMeta.company, jobMeta.title);
         if (sender?.tab?.id) {
-          chrome.action.setBadgeText({ text: `${match.matchScore}%`, tabId: sender.tab.id }).catch(() => {});
-          chrome.action
-            .setBadgeBackgroundColor({
-              color: match.matchScore >= 80 ? "#10b981" : match.matchScore >= 60 ? "#f59e0b" : "#ef4444",
-              tabId: sender.tab.id
-            })
-            .catch(() => {});
+          if (jobMeta.pageType === "job_board" || jobMeta.pageType === "other") {
+            chrome.action.setBadgeText({ text: "", tabId: sender.tab.id }).catch(() => {});
+          } else {
+            chrome.action.setBadgeText({ text: `${match.matchScore}%`, tabId: sender.tab.id }).catch(() => {});
+            chrome.action
+              .setBadgeBackgroundColor({
+                color: match.matchScore >= 80 ? "#10b981" : match.matchScore >= 60 ? "#f59e0b" : "#ef4444",
+                tabId: sender.tab.id
+              })
+              .catch(() => {});
+          }
         }
         return { ok: true, match, atsScore, referrals };
       }

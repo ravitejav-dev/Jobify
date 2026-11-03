@@ -300,22 +300,35 @@ async function main() {
     }
     autoCdp.close();
 
-    // 2b. WORKDAY FULL-FLOW END-TO-END VIA AI STUDIO "TAILOR RESUME" BUTTON
-    // (Tests: Header SignIn Trap Ignored -> Adventure "Apply" -> Async "Start Your Application" Modal -> "Apply Manually" -> "Sign in with email" -> Sign In Fail -> Switch to Create Account -> Read More + opacity:0 Checkbox + opacity:0 click_filter -> Background Email Verification Link Activation -> Step 2 Sign In via click_filter -> Workday searchBox Combobox + State countryRegion + Spinbutton Date + Tailored PDF -> Submit -> Auto-Track!)
+    // 2b. WORKDAY FULL-FLOW END-TO-END VIA SIMPLIFY-STYLE DOCKED PILL -> KEYWORDS "TAILOR & AUTO-APPLY" BUTTON
+    // (Tests: Job Posting stays as non-intrusive right-edge pill -> Click Pill -> Keywords Tab -> Tailor & Auto-Apply -> Header SignIn Trap Ignored -> Adventure "Apply" -> Async "Start Your Application" Modal -> "Apply Manually" -> "Sign in with email" -> Sign In Fail -> Switch to Create Account -> Read More + opacity:0 Checkbox + opacity:0 click_filter -> Background Email Verification Link Activation -> Step 2 Sign In via click_filter -> Workday searchBox Combobox + State countryRegion + Spinbutton Date + Tailored PDF -> Submit -> Auto-Track!)
     const wdE2eCdp = await openTabAndConnect("http://127.0.0.1:18765/sandbox/workday-full-e2e");
+    let wdInitialUi = null;
     for (let i = 0; i < 20; i++) {
-      const hasQuickPill = await wdE2eCdp
-        .eval(`Boolean(document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-pill-tailor-apply"))`)
-        .catch(() => false);
-      if (hasQuickPill) break;
+      wdInitialUi = await wdE2eCdp
+        .eval(`(() => {
+          const sr = document.getElementById("jobify-copilot-host")?.shadowRoot;
+          const pill = sr?.getElementById("jb-pill");
+          const drawer = sr?.getElementById("jb-drawer");
+          if (!pill || !drawer) return null;
+          return {
+            pillVisible: getComputedStyle(pill).display !== "none",
+            drawerOpenOnJobPosting: drawer.classList.contains("open")
+          };
+        })()`)
+        .catch(() => null);
+      if (wdInitialUi?.pillVisible) break;
       await sleep(300);
+    }
+    if (!wdInitialUi?.pillVisible || wdInitialUi.drawerOpenOnJobPosting !== false) {
+      throw new Error(`Expected non-intrusive docked pill (drawer closed) on job posting page: ${JSON.stringify(wdInitialUi)}`);
     }
     await wdE2eCdp.eval(`
       (async () => {
         const sr = document.getElementById("jobify-copilot-host").shadowRoot;
         sr.getElementById("jb-pill").click();
         await new Promise(r => setTimeout(r, 200));
-        sr.querySelector(".jb-tab[data-tab='ai']").click();
+        sr.querySelector(".jb-tab[data-tab='keywords']").click();
         await new Promise(r => setTimeout(r, 200));
         sr.getElementById("jb-run-tailor").click();
       })()
@@ -481,8 +494,10 @@ async function main() {
     await ghCdp.eval(`
       (async () => {
         const sr = document.getElementById("jobify-copilot-host").shadowRoot;
-        sr.getElementById("jb-pill").click();
-        await new Promise(r => setTimeout(r, 200));
+        if (!sr.getElementById("jb-drawer").classList.contains("open")) {
+          sr.getElementById("jb-pill").click();
+          await new Promise(r => setTimeout(r, 200));
+        }
         sr.getElementById("jb-btn-autofill").click();
       })()
     `);
@@ -539,8 +554,10 @@ async function main() {
     await wdCdp.eval(`
       (async () => {
         const sr = document.getElementById("jobify-copilot-host").shadowRoot;
-        sr.getElementById("jb-pill").click();
-        await new Promise(r => setTimeout(r, 200));
+        if (!sr.getElementById("jb-drawer").classList.contains("open")) {
+          sr.getElementById("jb-pill").click();
+          await new Promise(r => setTimeout(r, 200));
+        }
         sr.getElementById("jb-btn-autofill").click();
       })()
     `);
@@ -580,8 +597,10 @@ async function main() {
     await lvCdp.eval(`
       (async () => {
         const sr = document.getElementById("jobify-copilot-host").shadowRoot;
-        sr.getElementById("jb-pill").click();
-        await new Promise(r => setTimeout(r, 200));
+        if (!sr.getElementById("jb-drawer").classList.contains("open")) {
+          sr.getElementById("jb-pill").click();
+          await new Promise(r => setTimeout(r, 200));
+        }
         sr.getElementById("jb-btn-autofill").click();
       })()
     `);
@@ -624,7 +643,7 @@ async function main() {
     const trickyCdp = await openTabAndConnect("http://127.0.0.1:18765/sandbox/tricky-submit");
     for (let i = 0; i < 20; i++) {
       const hasWidget = await trickyCdp
-        .eval(`Boolean(document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-pill"))`)
+        .eval(`Boolean(document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-btn-fast-auto"))`)
         .catch(() => false);
       if (hasWidget) break;
       await sleep(250);
@@ -632,8 +651,10 @@ async function main() {
     await trickyCdp.eval(`
       (async () => {
         const sr = document.getElementById("jobify-copilot-host").shadowRoot;
-        sr.getElementById("jb-pill").click();
-        await new Promise(r => setTimeout(r, 250));
+        if (!sr.getElementById("jb-drawer").classList.contains("open")) {
+          sr.getElementById("jb-pill").click();
+          await new Promise(r => setTimeout(r, 250));
+        }
         sr.getElementById("jb-btn-fast-auto").click();
       })()
     `);
@@ -665,7 +686,7 @@ async function main() {
     }
     trickyCdp.close();
 
-    // 4e. Autonomous AI Form Error Doctor + Top-Right Extension Popup Lifecycle (/sandbox/ai-error-heal)
+    // 4e. Autonomous AI Form Error Doctor + Simplify-Style Widget Lifecycle (/sandbox/ai-error-heal)
     const aiHealCdp = await openTabAndConnect("http://127.0.0.1:18765/sandbox/ai-error-heal");
     let initialPopupState = null;
     for (let i = 0; i < 25; i++) {
@@ -676,29 +697,55 @@ async function main() {
           const drawer = sr.getElementById("jb-drawer");
           if (!drawer || !drawer.classList.contains("open")) return null;
           const rect = drawer.getBoundingClientRect();
+          const compChipText = sr.querySelector(".jb-mini-chip.comp")?.textContent?.trim() || null;
           return {
             drawerOpenOnLoad: drawer.classList.contains("open") && getComputedStyle(drawer).display !== "none",
-            hasBottomRightPillBar: Boolean(sr.querySelector(".jb-pill-bar")),
             topPx: Math.round(rect.top),
             rightGapPx: Math.round(window.innerWidth - rect.right),
-            hasFastAutoBtn: Boolean(sr.getElementById("jb-btn-fast-auto"))
+            hasFastAutoBtn: Boolean(sr.getElementById("jb-btn-fast-auto")),
+            compChipText
           };
         })()`)
         .catch(() => null);
-      if (initialPopupState?.drawerOpenOnLoad) break;
+      if (initialPopupState?.drawerOpenOnLoad && initialPopupState?.compChipText) break;
       await sleep(250);
     }
 
+    // Verify Profile tab masks password and Minimize -> Right-Edge Docked Pill -> Re-Open Lifecycle
+    const minimizeReopenCheck = await aiHealCdp.eval(`
+      (async () => {
+        const sr = document.getElementById("jobify-copilot-host").shadowRoot;
+        sr.querySelector(".jb-tab[data-tab='profile']").click();
+        await new Promise(r => setTimeout(r, 80));
+        const passwordMaskedInWidget = (sr.getElementById("jb-body")?.innerText || "").includes("••••••••••••");
+        sr.querySelector(".jb-tab[data-tab='autofill']").click();
+        await new Promise(r => setTimeout(r, 80));
+        const closeBtn = sr.getElementById("jb-close");
+        const pill = sr.getElementById("jb-pill");
+        const drawer = sr.getElementById("jb-drawer");
+        closeBtn.click();
+        await new Promise(r => setTimeout(r, 120));
+        const pillVisibleWhenMinimized = getComputedStyle(pill).display !== "none" && !drawer.classList.contains("open");
+        pill.click();
+        await new Promise(r => setTimeout(r, 120));
+        const drawerReopened = drawer.classList.contains("open") && getComputedStyle(pill).display === "none";
+        return { passwordMaskedInWidget, pillVisibleWhenMinimized, drawerReopened };
+      })()
+    `);
+
     if (
       !initialPopupState?.drawerOpenOnLoad ||
-      initialPopupState.hasBottomRightPillBar !== false ||
       initialPopupState.topPx > 26 ||
-      initialPopupState.rightGapPx > 40
+      initialPopupState.rightGapPx > 40 ||
+      !initialPopupState.compChipText?.includes("$180,000 - $210,000") ||
+      !minimizeReopenCheck?.passwordMaskedInWidget ||
+      !minimizeReopenCheck?.pillVisibleWhenMinimized ||
+      !minimizeReopenCheck?.drawerReopened
     ) {
-      throw new Error(`Top-right auto-popup on job link open failed: ${JSON.stringify(initialPopupState)}`);
+      throw new Error(`Simplify-style widget lifecycle or salary/masking check failed: ${JSON.stringify({ initialPopupState, minimizeReopenCheck })}`);
     }
 
-    // Trigger Auto-Apply directly from the top-right popup (zero manual pill click needed!)
+    // Trigger Auto-Apply directly from the open panel
     await aiHealCdp.eval(`
       document.getElementById("jobify-copilot-host").shadowRoot.getElementById("jb-btn-fast-auto").click()
     `);
@@ -724,23 +771,27 @@ async function main() {
       }
     }
 
-    // Wait ~2.1s for the popup to animate upward and collapse completely back to Chrome's Extensions bar
+    // Wait ~2.1s for the panel & HUD to collapse cleanly and dock the right-edge pill ("✓ Applied")
     await sleep(2150);
     const postDonePopupState = await aiHealCdp.eval(`(() => {
       const sr = document.getElementById("jobify-copilot-host")?.shadowRoot;
       const drawer = sr?.getElementById("jb-drawer");
       const hud = sr?.getElementById("jb-hud");
       const frame = sr?.getElementById("jb-control-frame");
+      const pill = sr?.getElementById("jb-pill");
+      const pillScore = sr?.getElementById("jb-pill-score")?.textContent || "";
       return {
         drawerDisplay: drawer ? getComputedStyle(drawer).display : "none",
         hudDisplay: hud ? getComputedStyle(hud).display : "none",
         frameDisplay: frame ? getComputedStyle(frame).display : "none",
-        hasAnyBottomRightUi: Boolean(sr?.querySelector(".jb-pill-bar"))
+        pillDockedVisible: Boolean(pill && getComputedStyle(pill).display !== "none"),
+        pillScore
       };
     })()`);
 
-    console.log("6e. ✅ Autonomous AI Error Doctor + Top-Right Popup → Return-to-Extensions Lifecycle Verified:", JSON.stringify({
+    console.log("6e. ✅ Autonomous AI Error Doctor + Simplify-Style Edge-Pill Lifecycle Verified:", JSON.stringify({
       initialPopupState,
+      minimizeReopenCheck,
       sawTakeControlHud,
       aiHealAudit,
       postDonePopupState
@@ -756,16 +807,17 @@ async function main() {
       aiHealAudit.finalValues?.fullName !== "Raviteja Velanati" ||
       aiHealAudit.finalValues?.resumeName !== "Raviteja_velanati_Mistral_AI.pdf" ||
       aiHealAudit.finalValues?.phone !== "7748108481" ||
-      !/^\$\d{2,3},\d{3}$/.test(aiHealAudit.finalValues?.salary || "") ||
+      aiHealAudit.finalValues?.salary !== "$195,000" ||
       !(aiHealAudit.finalValues?.pod?.length >= 30) ||
       aiHealAudit.finalValues?.authYes !== true ||
       aiHealAudit.finalValues?.consentChecked !== true ||
       postDonePopupState.drawerDisplay !== "none" ||
       postDonePopupState.hudDisplay !== "none" ||
       postDonePopupState.frameDisplay !== "none" ||
-      postDonePopupState.hasAnyBottomRightUi !== false
+      postDonePopupState.pillDockedVisible !== true ||
+      postDonePopupState.pillScore !== "✓ Applied"
     ) {
-      throw new Error(`AI Error Doctor or Return-to-Extensions assertion failed: ${JSON.stringify({ sawTakeControlHud, aiHealAudit, postDonePopupState })}`);
+      throw new Error(`AI Error Doctor or Edge-Pill Lifecycle assertion failed: ${JSON.stringify({ sawTakeControlHud, aiHealAudit, postDonePopupState })}`);
     }
     aiHealCdp.close();
 
@@ -844,10 +896,14 @@ async function main() {
         await new Promise(r => setTimeout(r, 100));
         const autopilotMode = document.getElementById("ap-mode")?.value || null;
 
-        // Check Vault autoSubmitEnabled checkbox
+        // Check Vault autoSubmitEnabled checkbox & masked secret inputs
         document.querySelector('#main-nav [data-view="vault"]').click();
         await new Promise(r => setTimeout(r, 100));
         const vaultAutoSubmitChecked = Boolean(document.getElementById("vc-auto-sub")?.checked);
+        const vaultSecretsMasked =
+          document.getElementById("vc-pass")?.type === "password" &&
+          document.getElementById("vc-app-pass")?.type === "password" &&
+          document.getElementById("vc-api-key")?.type === "password";
 
         // Check COMPILE_COVER_LETTER_PDF RPC
         const clPdf = await chrome.runtime.sendMessage({
@@ -863,6 +919,7 @@ async function main() {
           hasTrackerFilters,
           autopilotMode,
           vaultAutoSubmitChecked,
+          vaultSecretsMasked,
           clPdfOk: Boolean(clPdf?.ok && clPdf?.pdfBase64?.length > 200)
         };
       })()
@@ -872,6 +929,7 @@ async function main() {
       !dashAudit.hasTrackerFilters ||
       dashAudit.autopilotMode !== "full_auto" ||
       !dashAudit.vaultAutoSubmitChecked ||
+      !dashAudit.vaultSecretsMasked ||
       !dashAudit.clPdfOk ||
       Object.values(dashAudit.rendered).some((len) => len < 40)
     ) {
@@ -905,14 +963,16 @@ async function main() {
       hasFullAuto: Boolean(document.getElementById("sp-full-auto")),
       hasFastAuto: Boolean(document.getElementById("sp-fast-auto")),
       hasFillOnly: Boolean(document.getElementById("sp-fill-only")),
-      identityCards: document.querySelectorAll("#sp-identity-grid .copy-card").length
+      identityCards: document.querySelectorAll("#sp-identity-grid .copy-card").length,
+      passwordMaskedInSidePanel: document.getElementById("sp-identity-grid")?.innerText?.includes("••••••••••••")
     })`);
     if (
       spCdp.exceptions.length > 0 ||
       !spAudit.hasFullAuto ||
       !spAudit.hasFastAuto ||
       !spAudit.hasFillOnly ||
-      spAudit.identityCards < 6
+      spAudit.identityCards < 6 ||
+      !spAudit.passwordMaskedInSidePanel
     ) {
       throw new Error(`SidePanel UI sanity check failed: exceptions=${JSON.stringify(spCdp.exceptions)} audit=${JSON.stringify(spAudit)}`);
     }

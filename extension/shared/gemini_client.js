@@ -724,7 +724,15 @@ export async function diagnoseFormErrorsWithGemini(
   savedAnswers = [],
   settings = {}
 ) {
-  const fields = Array.isArray(diagnostics?.fields) ? diagnostics.fields.slice(0, 24) : [];
+  const rawFields = Array.isArray(diagnostics?.fields) ? diagnostics.fields.slice(0, 24) : [];
+  const fields = rawFields.filter((f) => {
+    if (f.flaggedInvalid || f.errorMessage || f.required) return true;
+    const lblText = `${f.label || ""} ${f.helperText || ""}`;
+    if (/\boptional\b|\(optional\)|additional\s*(information|comments|notes|context)|anything\s*else/i.test(lblText)) {
+      return false;
+    }
+    return true;
+  });
   const pageErrors = Array.isArray(diagnostics?.pageErrors) ? diagnostics.pageErrors.slice(0, 12) : [];
   if (fields.length === 0 && pageErrors.length === 0) {
     return {
@@ -794,7 +802,7 @@ export async function diagnoseFormErrorsWithGemini(
       }
 
       if (/salary|compensation|pay|remuneration/i.test(lbl) || /digits?\s*only|numeric|valid\s*number|no\s*\$|leading\s*\$|format\s+currency/i.test(err)) {
-        const num = Number(jobMeta?.compensation?.midpoint || 165000);
+        const num = Number(jobMeta?.compensation?.midpoint || jobMeta?.compensation?.targetAnnual || eeo?.desiredSalaryTarget || 165000);
         const val = /leading\s*\$|with\s*\$|format\s+currency/i.test(err) ? `$${num.toLocaleString("en-US")}` : String(num);
         repairs.push({ refId: f.refId, action: "fill_text", value: val, reason: "Repaired compensation format" });
         continue;

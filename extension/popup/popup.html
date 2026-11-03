@@ -11,21 +11,22 @@
       <div class="brand">
         <div class="logo">J</div>
         <div>
-          <div class="title">Jobify Copilot</div>
-          <div class="sub" id="candidate-line">Raviteja Velanati • Simplify+ AI</div>
+          <div class="title">Jobify</div>
+          <div class="sub" id="candidate-line">Raviteja Velanati</div>
         </div>
       </div>
-      <div style="display:flex;gap:5px;align-items:center;">
-        <button class="hdr-btn" id="btn-reload-ext" title="Reload Extension after git pull">↻</button>
-        <button class="hdr-btn" id="btn-dashboard" title="Open Full Dashboard">Hub ↗</button>
+      <div class="hdr-actions">
+        <button class="hdr-btn icon" id="btn-reload-ext" title="Reload Extension">↻</button>
+        <button class="hdr-btn" id="btn-sidepanel" title="Open Quick-Copy SidePanel">SidePanel</button>
+        <button class="hdr-btn primary-link" id="btn-dashboard" title="Open Full Career Hub">Hub ↗</button>
       </div>
     </header>
 
     <section class="live-banner" id="popup-live-banner">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+      <div class="live-banner-row">
         <div style="overflow:hidden;">
-          <div style="font-weight:800;color:#6ee7b7;" id="popup-live-step">Auto-Apply Running...</div>
-          <div style="font-size:10.5px;color:#cbd5e1;margin-top:2px;" id="popup-live-detail"></div>
+          <div class="live-step" id="popup-live-step">Auto-Apply Running...</div>
+          <div class="live-detail" id="popup-live-detail"></div>
         </div>
         <button class="btn danger-sm" id="btn-stop-auto">■ Stop</button>
       </div>
@@ -34,26 +35,30 @@
     <section class="card" id="active-page-card">
       <div class="row-between">
         <span class="badge-ats" id="page-ats">Detecting Tab...</span>
-        <span class="badge-score" id="page-score">--% Match</span>
+        <span class="badge-score" id="page-score">Standby</span>
       </div>
       <div class="job-title" id="page-title">Active Browser Tab</div>
-      <div class="job-company" id="page-company">Ready to autofill or bookmark</div>
+      <div class="job-company" id="page-company">Open a job posting to autofill in 1 click</div>
 
-      <label class="toggle-row" for="chk-auto-submit" style="cursor:pointer;">
-        <span>🎯 <strong>Auto-Submit When Ready</strong></span>
-        <input type="checkbox" id="chk-auto-submit" checked style="accent-color:#10b981;width:15px;height:15px;cursor:pointer;" />
-      </label>
+      <button class="btn auto-hero" id="btn-full-auto">🚀 Tailor &amp; Auto-Apply</button>
+      <div class="grid-2" style="margin-top:7px;">
+        <button class="btn secondary" id="btn-autofill" title="Fill current screen only without submitting">⚡ Autofill Page</button>
+        <button class="btn fast-auto" id="btn-fast-auto" title="Fast Fill &amp; Auto-Submit with Default Resume">⚡ Fast Apply</button>
+      </div>
 
-      <button class="btn auto-hero" id="btn-full-auto">🚀 Tailor Resume &amp; Auto-Apply (End-to-End)</button>
-      <button class="btn fast-auto" id="btn-fast-auto" style="margin-top:7px;">⚡ Fast Fill &amp; Auto-Submit (Default PDF)</button>
-      <div class="grid-3" style="margin-top:8px;">
-        <button class="btn secondary" id="btn-autofill" title="Fill current screen only without submitting">✍️ Fill Only</button>
-        <button class="btn secondary" id="btn-open-drawer">🪄 Copilot</button>
-        <button class="btn secondary" id="btn-bookmark">📌 Save</button>
+      <div class="card-footer-strip">
+        <label class="toggle-inline" for="chk-auto-submit" title="Automatically click final Submit when ready">
+          <input type="checkbox" id="chk-auto-submit" checked />
+          <span>Auto-submit</span>
+        </label>
+        <div style="display:flex;gap:5px;">
+          <button class="chip-btn" id="btn-open-drawer" title="Open In-Page Copilot Panel">Panel</button>
+          <button class="chip-btn" id="btn-bookmark" title="Save Job to Tracker">📌 Save</button>
+        </div>
       </div>
     </section>
 
-    <section class="stats-grid">
+    <section class="stats-grid" id="stats-strip" title="Click to open Application Tracker in Hub">
       <div class="stat-box">
         <span class="stat-num" id="st-saved">0</span>
         <span class="stat-lbl">Saved</span>
@@ -66,27 +71,10 @@
         <span class="stat-num" id="st-interview">0</span>
         <span class="stat-lbl">Interviews</span>
       </div>
-      <div class="stat-box">
-        <span class="stat-num" id="st-tailored">0</span>
-        <span class="stat-lbl">AI Resumes</span>
-      </div>
     </section>
 
-    <section class="card compact">
-      <div class="row-between">
-        <label class="lbl" for="sel-model">Tailoring AI Engine</label>
-        <span class="pill-live">● Smart Quota Ready</span>
-      </div>
-      <select id="sel-model" class="select">
-        <option value="gemini-3.5-flash">Gemini 3.5 Flash (Fast From-Scratch)</option>
-        <option value="gemini-3-flash-preview">Gemini 3 Flash Preview (Deep Tailoring)</option>
-      </select>
-    </section>
-
-    <footer class="ftr-grid">
-      <button class="btn ghost" id="btn-sidepanel">📋 SidePanel Copy</button>
-      <button class="btn ghost" id="btn-jobs">🔍 Live AI Jobs</button>
-      <button class="btn ghost" id="btn-autopilot">🤖 Autopilot</button>
+    <footer class="ftr-row">
+      <button class="btn ghost" id="btn-jobs">🔍 Browse Live Matched Jobs ↗</button>
     </footer>
 
     <div class="status-toast" id="status-msg"></div>
