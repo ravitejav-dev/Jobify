@@ -1364,7 +1364,7 @@
   function findEmailAuthChoiceButton(doc = document) {
     const candidates = Array.from(
       doc.querySelectorAll(
-        "[data-automation-id='SignInWithEmailButton'], [data-jobify-signin-email], button, a[role='button'], [role='button']"
+        "[data-automation-id='SignInWithEmailButton'], [data-jobify-signin-email], button, a[role='button'], [role='button'], a"
       )
     ).filter((el) => !el.disabled && isElementVisible(el) && !isHeaderOrNavButton(el));
 
@@ -1374,61 +1374,87 @@
           return true;
         }
         const txt = (el.innerText || el.textContent || el.getAttribute("aria-label") || "")
+          .replace(/[→›»↗⟶➔▶]+/g, "")
           .replace(/\s+/g, " ")
           .trim();
-        return /^(sign\s*(in|up)\s*with\s*email|continue\s*with\s*email|use\s*(my\s*)?email(\s*address)?|log\s*in\s*with\s*email)$/i.test(
+        return /^(sign\s*(in|up)\s*with\s*email|continue\s*with\s*email|use\s*(my\s*)?email(\s*address)?|log\s*in\s*with\s*email|register\s*with\s*email|apply\s*with\s*email)$/i.test(
           txt
         );
       }) || null
     );
   }
 
-  // Detect Email-First 2-Step Auth Screen (Email -> Continue -> Password, used on iCIMS, Eightfold, SuccessFactors)
+  // Detect Email-First 2-Step Auth Screen (Email -> Continue -> Password/OTP/CreateAccount, used on iCIMS, Eightfold, SuccessFactors, Phenom, Oracle)
   function detectEmailFirstAuthStep(doc = document) {
     const pwVisible = Array.from(doc.querySelectorAll("input[type='password']")).filter(isVisibleAndEditable);
     if (pwVisible.length > 0) return null;
     if (Array.from(doc.querySelectorAll("input[type='file']")).some(isActionableFileInput)) return null;
 
-    const allEditable = Array.from(doc.querySelectorAll("input, select, textarea")).filter(isVisibleAndEditable);
-    if (allEditable.length === 0 || allEditable.length > 2) return null;
+    const allEditable = Array.from(doc.querySelectorAll("input, select, textarea")).filter((el) => {
+      if (!isVisibleAndEditable(el)) return false;
+      if (el.type === "checkbox" || el.type === "radio" || el.type === "hidden" || el.type === "submit" || el.type === "button") {
+        return false;
+      }
+      return true;
+    });
+    if (allEditable.length === 0 || allEditable.length > 4) return null;
 
     const emailInput = allEditable.find((el) => {
-      const sig = `${el.type || ""} ${el.name || ""} ${el.id || ""} ${el.autocomplete || ""} ${el.dataset?.automationId || ""}`;
-      return /email|username/i.test(sig) && !isComboboxInput(el);
+      const ctx = getFieldContext(el);
+      const sig = `${el.type || ""} ${el.name || ""} ${el.id || ""} ${el.autocomplete || ""} ${el.placeholder || ""} ${el.dataset?.automationId || ""} ${ctx.fullLabel || ""}`;
+      return /email|username|user\s*id/i.test(sig) && !isComboboxInput(el);
     });
     if (!emailInput) return null;
 
-    const headingsText = Array.from(doc.querySelectorAll("h1, h2, h3, [id*='auth' i], [class*='login' i], [class*='signin' i]"))
+    const headingsText = Array.from(
+      doc.querySelectorAll(
+        "h1, h2, h3, h4, legend, [role='heading'], [id*='auth' i], [class*='login' i], [class*='signin' i], [class*='auth' i], form p, main p"
+      )
+    )
       .filter(isElementVisible)
       .map((h) => (h.innerText || "").trim())
-      .join(" ");
-    if (!/sign\s*in|log\s*in|create\s*account|candidate\s*login|enter\s*your\s*email|welcome\s*back/i.test(headingsText)) {
+      .join(" ")
+      .slice(0, 900);
+    const urlAuthHint = /login|signin|sign-in|register|signup|sign-up|auth|account|candidate/i.test(location.href);
+    if (
+      !urlAuthHint &&
+      !/sign\s*in|log\s*in|create\s*(an?\s*)?account|register|sign\s*up|candidate\s*(login|portal)|enter\s*your\s*email|verify\s*your\s*email|welcome\s*back|start\s*your\s*application|continue\s*with\s*your\s*email/i.test(
+        headingsText
+      )
+    ) {
       return null;
     }
 
-    const continueBtn = Array.from(doc.querySelectorAll("button[type='submit'], input[type='submit'], button"))
+    const continueBtn = Array.from(doc.querySelectorAll("button[type='submit'], input[type='submit'], button, [role='button']"))
       .filter((b) => !b.disabled && isElementVisible(b) && !isHeaderOrNavButton(b))
       .find((b) => {
-        const t = (b.innerText || b.value || "").replace(/\s+/g, " ").trim();
-        return /^(continue|next|sign\s*in|log\s*in|proceed)$/i.test(t) && !/with\s+(google|linkedin|apple|microsoft)/i.test(t);
+        const t = (b.innerText || b.value || b.getAttribute("aria-label") || "")
+          .replace(/[→›»↗⟶➔▶]+/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        return (
+          /^(continue|next|sign\s*in|log\s*in|proceed|submit|send\s*(verification\s*)?code|verify(\s*email)?|get\s*started|start|register|sign\s*up)$/i.test(
+            t
+          ) && !/with\s+(google|linkedin|apple|microsoft|facebook|indeed)/i.test(t)
+        );
       });
 
-    return continueBtn ? { emailInput, continueBtn } : null;
+    return continueBtn ? { emailInput, continueBtn, extraInputs: allEditable.filter((e) => e !== emailInput) } : null;
   }
 
-  // Detect "Verify your email address / Click activation link in email" banner (e.g. Workday post-signup email verification)
+  // Detect "Verify your email address / Click activation link in email" banner (e.g. Workday / iCIMS / SmartRecruiters post-signup email verification)
   function detectEmailVerificationBanner(doc = document) {
     if (detectOtpChallenge(doc).detected) return false;
     const containers = Array.from(
       doc.querySelectorAll(
-        "[data-automation-id='signInContent'], [data-automation-id='errorMessage'], [data-jobify-verify-email-banner], [role='alert'], main, .card"
+        "[data-automation-id='signInContent'], [data-automation-id='errorMessage'], [data-jobify-verify-email-banner], [role='alert'], [role='status'], main, .card, form, body"
       )
     ).filter(isElementVisible);
     for (const c of containers) {
       if (c.hasAttribute("data-jobify-verify-email-banner")) return true;
-      const t = (c.innerText || c.textContent || "").replace(/\s+/g, " ").trim().slice(0, 900);
+      const t = (c.innerText || c.textContent || "").replace(/\s+/g, " ").trim().slice(0, 1200);
       if (
-        /verify\s+your\s+(email|account)|verification\s+(email|link)\s+(has\s+been\s+|was\s+)?sent|check\s+your\s+email\s+to\s+(verify|activate|complete)|click\s+the\s+link\s+in\s+the\s+email|account\s+has\s+not\s+been\s+(verified|activated)/i.test(
+        /verify\s+your\s+(email|account)|verification\s+(email|link)\s+(has\s+been\s+|was\s+)?sent|check\s+your\s+(email|inbox)\s+to\s+(verify|activate|complete|confirm)|click\s+the\s+(verification\s+|activation\s+)?link\s+in\s+(the|your)\s+email|account\s+has\s+not\s+been\s+(verified|activated)|sent\s+an?\s+(verification|activation|confirmation)\s+(email|link)|activate\s+your\s+account\s+by\s+clicking|awaiting\s+email\s+verification/i.test(
           t
         )
       ) {
@@ -1438,25 +1464,170 @@
     return false;
   }
 
-  // Sharp Portal Login / Account Creation + Verify Password + Workday Consent Filler
-  async function autofillPortalAuth(credentials) {
+  function hasDirectApplicationResumeOrSections(doc = document) {
+    if (Array.from(doc.querySelectorAll("input[type='file']")).some(isActionableFileInput)) {
+      return true;
+    }
+    if (
+      doc.querySelector(
+        "[data-automation-id^='workExperience-'], [data-automation-id^='education-'], [data-jobify-exp-index], [data-jobify-edu-index], #application_form, #grnhse_app, [class*='ashby-application-form']"
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  // Human-like analyzer: determines whether the current auth page is asking to CREATE AN ACCOUNT ("create") vs. SIGN IN ("signin")
+  function analyzeAuthPageMode(doc = document) {
+    const pwInputs = Array.from(doc.querySelectorAll("input[type='password']")).filter(isVisibleAndEditable);
+    const pwCount = pwInputs.length;
+
+    // 1. Check if there are registration-only personal fields (First Name, Last Name, Full Name, Confirm Email) alongside password
+    const visibleTextInputs = Array.from(doc.querySelectorAll("input:not([type='password']):not([type='hidden']):not([type='checkbox']):not([type='radio']):not([type='submit']):not([type='button']), select")).filter(
+      (el) => isVisibleAndEditable(el) && !isComboboxInput(el)
+    );
+    let hasRegistrationProfileFields = false;
+    let emailFieldCount = 0;
+    for (const inp of visibleTextInputs) {
+      const ctx = getFieldContext(inp);
+      const sig = `${inp.name || ""} ${inp.id || ""} ${inp.autocomplete || ""} ${inp.placeholder || ""} ${inp.dataset?.automationId || ""} ${ctx.fullLabel || ""}`.toLowerCase();
+      if (/email/i.test(sig)) emailFieldCount++;
+      if (
+        /first[_-\s]?name|last[_-\s]?name|given[_-\s]?name|family[_-\s]?name|full[_-\s]?name|confirm[_-\s]?email|re[-_]?enter[_-\s]?email|verify[_-\s]?email|phone|mobile/i.test(
+          sig
+        )
+      ) {
+        hasRegistrationProfileFields = true;
+      }
+    }
+    if (emailFieldCount >= 2) {
+      hasRegistrationProfileFields = true;
+    }
+
+    // 2. Inspect active headings, legends, and selected tabs
+    const headingsText = Array.from(
+      doc.querySelectorAll(
+        "[data-automation-id='signInContent'] h1, [data-automation-id='signInContent'] h2, [data-automation-id='signInContent'] h3, form h1, form h2, form h3, form legend, [role='tab'][aria-selected='true'], .tab.active, .nav-link.active, h1, h2, h3"
+      )
+    )
+      .filter(isElementVisible)
+      .map((el) => (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim())
+      .join(" | ");
+
+    const headingSaysCreate =
+      /create\s*(an?\s*|your\s*|my\s*|new\s*|candidate\s*)?(account|profile)|sign\s*up|register(\s+account|\s+now)?|new\s*(user|candidate|applicant)\s*registration/i.test(
+        headingsText
+      ) && !/^(sign\s*in|log\s*in|candidate\s*login|welcome\s*back)\b/i.test(headingsText);
+
+    // 3. Inspect visible submit button text inside the auth container
+    const submitBtns = Array.from(
+      doc.querySelectorAll(
+        "[data-jobify-auth-submit], [data-automation-id*='createAccountSubmit' i], [data-automation-id*='signInSubmit' i], button[type='submit'], input[type='submit'], form button"
+      )
+    ).filter((b) => isElementVisible(b) && !isHeaderOrNavButton(b));
+
+    const hasExplicitCreateSubmitBtn = submitBtns.some((b) => {
+      const autoId = b.dataset?.automationId || "";
+      if (/createAccountSubmit/i.test(autoId)) return true;
+      if (/^(createAccountLink|signInLink)$/i.test(autoId)) return false;
+      if (b.hasAttribute("data-jobify-switch-signup") || b.hasAttribute("data-jobify-switch-signin")) return false;
+      const txt = (b.innerText || b.value || b.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
+      return /^(create\s*(an?\s*|your\s*|my\s*|new\s*|candidate\s*)?(account|profile)|sign\s*up(\s*now)?|register(\s*(now|account))?|complete\s*registration)$/i.test(
+        txt
+      );
+    });
+
+    const hasExplicitSignInSubmitBtn = submitBtns.some((b) => {
+      const autoId = b.dataset?.automationId || "";
+      if (/signInSubmit/i.test(autoId)) return true;
+      if (/^(createAccountLink|signInLink)$/i.test(autoId)) return false;
+      if (b.hasAttribute("data-jobify-switch-signup") || b.hasAttribute("data-jobify-switch-signin")) return false;
+      const txt = (b.innerText || b.value || b.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
+      return /^(sign\s*in|log\s*in|login)$/i.test(txt);
+    });
+
+    const isCreateMode =
+      pwCount >= 2 ||
+      (pwCount >= 1 && hasRegistrationProfileFields) ||
+      (pwCount >= 1 && hasExplicitCreateSubmitBtn && !hasExplicitSignInSubmitBtn) ||
+      (pwCount >= 1 && headingSaysCreate && !hasExplicitSignInSubmitBtn);
+
+    return {
+      isCreateMode,
+      pwCount,
+      hasRegistrationProfileFields,
+      hasExplicitCreateSubmitBtn,
+      hasExplicitSignInSubmitBtn
+    };
+  }
+
+  // Sharp Portal Login & Full Account Creation Filler:
+  // Fills Email (+ Confirm Email), Password (+ Confirm/Verify Password), ALL Personal/Registration Fields (First/Last Name, Phone, Country, State, City, Zip, etc.),
+  // expands/scrolls Terms boxes, and checks all Consent/Terms checkboxes!
+  async function autofillPortalAuth(credentials, profile = null) {
     if (!credentials?.portalEmail || !credentials?.portalPassword) {
-      return { filled: 0, passwordFieldsFilled: 0 };
+      return { filled: 0, passwordFieldsFilled: 0, isCreateMode: false };
     }
     let filled = 0;
     let passwordFieldsFilled = 0;
 
-    const emailInputs = Array.from(
-      document.querySelectorAll(
-        "input[type='email'], input[autocomplete='email'], input[autocomplete='username'], input[name*='email' i], input[name*='username' i], input[name*='user' i], input[data-automation-id*='email' i]"
-      )
+    const effectiveProfile = profile?.personal
+      ? profile
+      : {
+          personal: {
+            firstName: "Raviteja",
+            lastName: "Velanati",
+            fullName: "Raviteja Velanati",
+            preferredName: "Ravi",
+            email: credentials.portalEmail,
+            phone: "(774) 810-8481",
+            phoneDigits: "7748108481",
+            phoneCountryCode: "+1",
+            streetAddress: "39861 Potrero Dr",
+            city: "Newark",
+            state: "California",
+            stateCode: "CA",
+            postalCode: "94560",
+            country: "United States",
+            locationDisplay: "Newark, California, United States",
+            linkedin: "https://www.linkedin.com/in/raviteja-velanati/",
+            github: "https://github.com/ravitejav-dev",
+            currentCompany: "GlobalLogic (Client: Google AI)",
+            currentTitle: "Senior AI Solutions Engineer"
+          },
+          workAuthAndEEO: {
+            authorizedUS: "Yes",
+            requireSponsorship: "Yes",
+            howDidYouHear: "LinkedIn",
+            over18: "Yes"
+          }
+        };
+
+    // 1. Fill all Email / Confirm Email / Username inputs
+    const allVisibleInputs = Array.from(
+      document.querySelectorAll("input, select, textarea")
     ).filter((el) => isVisibleAndEditable(el) && !isComboboxInput(el));
 
-    for (const em of emailInputs) {
-      if (setNativeValue(em, credentials.portalEmail)) filled++;
+    const handledEls = new WeakSet();
+
+    for (const el of allVisibleInputs) {
+      if (el.type === "password" || el.type === "checkbox" || el.type === "radio" || el.type === "file") continue;
+      const ctx = getFieldContext(el);
+      const sig = `${el.type || ""} ${el.name || ""} ${el.id || ""} ${el.autocomplete || ""} ${el.placeholder || ""} ${el.dataset?.automationId || ""} ${ctx.fullLabel || ""}`;
+      if (/email|e-mail|username|user[_-\s]?id|login[_-\s]?id/i.test(sig) && !/phone|first|last|given|family|city|state|zip|postal/i.test(sig)) {
+        const valToUse =
+          /username|user[_-\s]?id/i.test(sig) && !/email/i.test(sig) && el.pattern && !el.pattern.includes("@")
+            ? credentials.portalEmail.split("@")[0]
+            : credentials.portalEmail;
+        if (setNativeValue(el, valToUse)) {
+          filled++;
+          handledEls.add(el);
+        }
+      }
     }
 
-    // Fill primary password + any Verify / Confirm / Repeat Password inputs
+    // 2. Fill primary Password + any Verify / Confirm / Repeat Password inputs
     const pwInputs = Array.from(
       document.querySelectorAll(
         "input[type='password'], input[data-automation-id*='password' i], input[name*='verify_password' i], input[name*='confirm_password' i], input[id*='verifyPassword' i], input[id*='confirmPassword' i]"
@@ -1467,51 +1638,131 @@
       if (setNativeValue(pw, credentials.portalPassword)) {
         filled++;
         passwordFieldsFilled++;
+        handledEls.add(pw);
       }
     }
 
-    // Workday "Read More" expand button on Create Account terms (unlocks checkbox on strict tenants)
-    const expandBtn = document.querySelector("[data-automation-id='createAccountExpandButton']");
-    if (expandBtn && isElementVisible(expandBtn) && passwordFieldsFilled >= 2) {
-      const txt = (expandBtn.innerText || "").trim();
-      if (/read\s*more|expand/i.test(txt)) {
-        dispatchRealClick(expandBtn);
-        await sleep(120);
+    const modeInfo = analyzeAuthPageMode(document);
+
+    // 3. Fill ALL other registration fields on the page (First Name, Last Name, Full Name, Phone, Country, State, City, Zip, Security Question, etc.)
+    // Only skip if a full multi-section job application with Resume Upload is inline below (handled by runFullAutofill)
+    if (!hasDirectApplicationResumeOrSections(document)) {
+      // 3a. Fill any custom comboboxes on the registration page (e.g. Country, State, Phone Country Code, How did you hear)
+      const authCombos = Array.from(
+        document.querySelectorAll(
+          "input[role='combobox'], button[aria-haspopup='listbox'], button[aria-haspopup='true'], [role='combobox']"
+        )
+      ).filter((el) => {
+        if (isTrapOrSystemInput(el) || isInHiddenAncestor(el) || el.disabled) return false;
+        if (el.tagName !== "INPUT" && el.querySelector?.("input[role='combobox']")) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+      for (const combo of authCombos) {
+        if (hasComboboxSelection(combo)) continue;
+        const ctx = getFieldContext(combo);
+        const resolved = resolveDesiredValueForField(ctx, effectiveProfile, combo, null);
+        if (resolved && !resolved.skip) {
+          const ok = await fillComboboxControl(combo, resolved, ctx, null, false);
+          if (ok) filled++;
+        }
+      }
+
+      // 3b. Fill standard <input> and <select> fields on the registration page
+      for (const el of allVisibleInputs) {
+        if (handledEls.has(el)) continue;
+        if (el.type === "password" || el.type === "checkbox" || el.type === "radio" || el.type === "file") continue;
+        if (el.getAttribute("maxlength") === "1" || el.dataset?.otpBox === "true" || el.autocomplete === "one-time-code") continue;
+        const ctx = getFieldContext(el);
+        const desired = resolveDesiredValueForField(ctx, effectiveProfile, el, null);
+        if (!desired || desired.skip) continue;
+        if (el.tagName === "SELECT") {
+          if (selectBestOption(el, desired)) {
+            filled++;
+            handledEls.add(el);
+          }
+        } else if (setNativeValue(el, desired[0])) {
+          filled++;
+          handledEls.add(el);
+        }
       }
     }
 
+    // 4. Expand "Read More" / Scrollable Terms containers (unlocks checkbox or Create Account button on strict portals)
+    const expandBtns = Array.from(
+      document.querySelectorAll("[data-automation-id='createAccountExpandButton'], button, a[role='button'], [role='button']")
+    ).filter((b) => isElementVisible(b) && /^(read\s*more|view\s*terms|expand(\s*terms)?|show\s*terms)$/i.test((b.innerText || "").trim()));
+    for (const eb of expandBtns) {
+      dispatchRealClick(eb);
+      await sleep(100);
+    }
+
+    const scrollableTerms = Array.from(
+      document.querySelectorAll("[data-automation-id='signInContent'] div, form div, [role='dialog'] div")
+    ).filter((d) => {
+      if (!isElementVisible(d)) return false;
+      return d.scrollHeight > d.clientHeight + 30 && d.clientHeight >= 60 && d.clientHeight <= 420;
+    });
+    for (const box of scrollableTerms) {
+      try {
+        box.scrollTop = box.scrollHeight;
+        box.dispatchEvent(new Event("scroll", { bubbles: true }));
+      } catch (_) {}
+    }
+
+    // 5. Check all Terms / Privacy / Consent / Account Creation Checkboxes (both native <input type="checkbox"> and custom [role="checkbox"])
     const checkboxes = Array.from(
-      document.querySelectorAll(
-        "input[type='checkbox'][data-automation-id*='createAccount' i], input[type='checkbox'][name*='terms' i], input[type='checkbox'][name*='agree' i], input[type='checkbox'][name*='consent' i], input[type='checkbox'][data-jobify-auth-consent]"
-      )
+      document.querySelectorAll("input[type='checkbox']")
     ).filter((cb) => !cb.disabled && !isInHiddenAncestor(cb));
 
     for (const cb of checkboxes) {
       const ctx = getFieldContext(cb);
+      const optTxt = `${getChoiceOptionLabel(cb)} ${ctx.fullLabel} ${cb.dataset?.automationId || ""} ${cb.name || ""} ${cb.id || ""}`;
+      if (NEGATIVE_CHECKBOX_REGEX.test(optTxt) || /remember\s*me|keep\s*me\s*signed|show\s*password/i.test(optTxt)) {
+        continue;
+      }
       if (
         !cb.checked &&
         (cb.hasAttribute("data-jobify-auth-consent") ||
           cb.dataset?.automationId === "createAccountCheckbox" ||
-          /agree|terms|privacy|create|consent|accept/i.test(`${ctx.fullLabel} ${cb.dataset?.automationId || ""}`))
+          isFieldRequired(cb, ctx) ||
+          /agree|terms|privacy|create|consent|accept|acknowledge|policy|18\s*years|age|authorize|confirm/i.test(optTxt))
       ) {
-        dispatchRealClick(cb);
-        if (!cb.checked && cb.id) {
-          const assocLbl = document.querySelector(`label[for="${CSS.escape(cb.id)}"]`);
-          if (assocLbl) dispatchRealClick(assocLbl);
-        }
+        clickCheckboxOrRadioReliably(cb);
         if (cb.checked || cb.getAttribute("aria-checked") === "true") {
           filled++;
         }
       }
     }
 
-    return { filled, passwordFieldsFilled };
+    const ariaAuthCheckboxes = Array.from(
+      document.querySelectorAll("[role='checkbox'], [role='switch']")
+    ).filter((cb) => isElementVisible(cb) && cb.getAttribute("aria-disabled") !== "true");
+    for (const acb of ariaAuthCheckboxes) {
+      if (isCustomOptionSelected(acb)) continue;
+      const ctx = getFieldContext(acb);
+      const optTxt = `${getChoiceOptionLabel(acb)} ${ctx.fullLabel} ${acb.dataset?.automationId || ""}`;
+      if (NEGATIVE_CHECKBOX_REGEX.test(optTxt) || /remember\s*me|keep\s*me\s*signed|show\s*password/i.test(optTxt)) continue;
+      if (
+        isFieldRequired(acb, ctx) ||
+        /agree|terms|privacy|create|consent|accept|acknowledge|policy|18\s*years|age|authorize|confirm/i.test(optTxt)
+      ) {
+        dispatchRealClick(acb);
+        filled++;
+      }
+    }
+
+    return {
+      filled,
+      passwordFieldsFilled,
+      isCreateMode: modeInfo.isCreateMode || passwordFieldsFilled >= 2
+    };
   }
 
-  function findAuthSubmitButton(preferCreateAccount = false) {
+  function findAuthSubmitButton(preferCreateAccount = false, doc = document) {
     // 1. Workday click_filter overlay sits on top of signInSubmitButton / createAccountSubmitButton with opacity: 0!
     const wdClickFilters = Array.from(
-      document.querySelectorAll(
+      doc.querySelectorAll(
         "[data-automation-id='signInContent'] [data-automation-id='click_filter'], [data-automation-id='noCaptchaWrapper'] [data-automation-id='click_filter'], form [data-automation-id='click_filter'], [data-jobify-click-filter='true']"
       )
     ).filter((cf) => {
@@ -1535,79 +1786,161 @@
 
     // 2. Standard Auth Submit Buttons (excluding top-navbar Sign In traps & switch links!)
     const candidates = Array.from(
-      document.querySelectorAll(
-        "[data-jobify-auth-submit], [data-automation-id*='createAccountSubmit' i], [data-automation-id*='signInSubmit' i], button[type='submit'], input[type='submit'], button"
+      doc.querySelectorAll(
+        "[data-jobify-auth-submit], [data-automation-id*='createAccountSubmit' i], [data-automation-id*='signInSubmit' i], button[type='submit'], input[type='submit'], button, [role='button'], input[type='button']"
       )
     ).filter((b) => {
-      if (b.disabled || !isElementVisible(b)) return false;
+      if (isButtonDisabledState(b) || !isElementVisible(b)) return false;
       if (isHeaderOrNavButton(b)) return false;
+      if (b.closest("#jobify-copilot-host")) return false;
       const autoId = b.dataset?.automationId || "";
       if (/^(createAccountLink|signInLink|forgotPasswordLink|createAccountExpandButton)$/i.test(autoId)) return false;
       if (b.hasAttribute("data-jobify-switch-signup") || b.hasAttribute("data-jobify-switch-signin")) return false;
-      const txt = (b.innerText || b.value || b.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
-      if (/with\s+(google|apple|linkedin|microsoft|facebook|sso|github)/i.test(txt)) return false;
+      const txt = (b.innerText || b.value || b.getAttribute("aria-label") || "")
+        .replace(/[→›»↗⟶➔▶]+/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (/with\s+(google|apple|linkedin|microsoft|facebook|sso|github|indeed)/i.test(txt)) return false;
+      if (/^(forgot|reset|cancel|back|clear|show\s*password|hide\s*password|read\s*more)$/i.test(txt)) return false;
       return true;
     });
 
-    const pattern = preferCreateAccount
-      ? /^(create\s*(an?\s*)?account|sign\s*up|register|continue|verify|next)$/i
-      : /^(sign\s*in|log\s*in|submit|continue|next)$/i;
+    const createPattern =
+      /^(create\s*(an?\s*|your\s*|my\s*|new\s*|candidate\s*)?(account|profile)|sign\s*up(\s*(now| and\s*continue|&\s*apply))?|register(\s*(now|account|and\s*continue|&\s*apply))?|complete\s*registration|join(\s*now)?|get\s*started|continue|verify|next|submit)$/i;
+    const signInPattern =
+      /^(sign\s*in(\s*(and\s*continue|&\s*apply|to\s*apply))?|log\s*in(\s*(and\s*continue|&\s*apply|to\s*apply))?|login|submit|continue|next|proceed|verify|enter)$/i;
 
+    // Pass 1: Strict match for preferred mode (Create Account vs Sign In)
     for (const b of candidates) {
-      const txt = (b.innerText || b.value || b.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
+      const txt = (b.innerText || b.value || b.getAttribute("aria-label") || "")
+        .replace(/[→›»↗⟶➔▶]+/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
       const autoId = b.dataset?.automationId || "";
       if (
         b.hasAttribute("data-jobify-auth-submit") ||
         (preferCreateAccount && /createAccountSubmit/i.test(autoId)) ||
         (!preferCreateAccount && /signInSubmit/i.test(autoId)) ||
-        pattern.test(txt)
+        (preferCreateAccount ? createPattern.test(txt) : signInPattern.test(txt))
       ) {
+        return b;
+      }
+    }
+
+    // Pass 2: If page only has a Create Account submit button (or only a Sign In submit button), return whichever valid auth submit button exists inside the form
+    for (const b of candidates) {
+      const txt = (b.innerText || b.value || b.getAttribute("aria-label") || "")
+        .replace(/[→›»↗⟶➔▶]+/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (createPattern.test(txt) || signInPattern.test(txt)) {
+        return b;
+      }
+      if ((b.type === "submit" || b.getAttribute("type") === "submit") && b.closest("form")) {
         return b;
       }
     }
     return null;
   }
 
-  function findCreateAccountSwitchLink() {
-    const els = Array.from(
-      document.querySelectorAll(
-        "[data-automation-id='createAccountLink'], [data-jobify-switch-signup], button, a, [role='button'], [role='tab']"
+  function findCreateAccountSwitchLink(doc = document) {
+    // 1. Explicit automation IDs or href patterns
+    const explicit = Array.from(
+      doc.querySelectorAll(
+        "[data-automation-id='createAccountLink'], [data-uxi-element-id*='createAccount' i], [data-jobify-switch-signup]"
       )
-    ).filter((el) => isElementVisible(el) && !isHeaderOrNavButton(el) && !el.hasAttribute("data-jobify-auth-submit"));
-    return (
-      els.find((el) => {
-        if (el.dataset?.automationId === "createAccountLink" || el.hasAttribute("data-jobify-switch-signup")) return true;
-        const txt = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
-        return /^(create\s*(an?\s*)?account|sign\s*up|register|new\s*user\??|don'?t\s*have\s*an\s*account)/i.test(txt);
-      }) || null
+    ).find((el) => isElementVisible(el) && !el.disabled);
+    if (explicit) return explicit;
+
+    const els = Array.from(
+      doc.querySelectorAll(
+        "button, a, [role='button'], [role='tab'], [role='link'], span[class*='link' i], div[class*='link' i], label[role='tab']"
+      )
+    ).filter(
+      (el) =>
+        isElementVisible(el) &&
+        !isHeaderOrNavButton(el) &&
+        !el.closest("#jobify-copilot-host") &&
+        !el.hasAttribute("data-jobify-auth-submit") &&
+        !/createAccountSubmit|signInSubmit/i.test(el.dataset?.automationId || "")
     );
+
+    // 2. Direct text match on link / button / tab
+    const directMatch = els.find((el) => {
+      const txt = (el.innerText || el.textContent || el.getAttribute("aria-label") || "")
+        .replace(/[→›»↗⟶➔▶]+/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!txt || txt.length > 95) return false;
+      if (/with\s+(google|apple|linkedin|microsoft|facebook|indeed)/i.test(txt)) return false;
+      return /(create\s*(an?\s*|your\s*|my\s*|new\s*|candidate\s*)?(account|profile)|sign\s*up(\s*(now|here|today|for\s*an?\s*account))?|\bregister(\s*(now|here|today|an?\s*account))?\b|new\s*(user|candidate|applicant|member)\b|don'?t\s*have\s*an?\s*account|not\s*registered|need\s*an?\s*account|first\s*time\s*(user|here|applying))/i.test(
+        txt
+      );
+    });
+    if (directMatch) return directMatch;
+
+    // 3. Contextual parent match (e.g. <p>Don't have an account? <a href="/register">Click here / Create one</a></p>)
+    const contextMatch = els.find((el) => {
+      if (el.tagName !== "A" && el.tagName !== "BUTTON" && el.getAttribute("role") !== "button") return false;
+      const parentTxt = (el.parentElement?.innerText || "").replace(/\s+/g, " ").trim();
+      if (parentTxt.length > 160) return false;
+      return /don'?t\s*have\s*an?\s*account|new\s*(user|candidate|applicant)|not\s*registered|need\s*an?\s*account|first\s*time\s*(user|here)/i.test(
+        parentTxt
+      );
+    });
+    return contextMatch || null;
   }
 
-  function findSignInSwitchLink() {
+  function findSignInSwitchLink(doc = document) {
+    const explicit = Array.from(
+      doc.querySelectorAll("[data-automation-id='signInLink'], [data-jobify-switch-signin]")
+    ).find((el) => isElementVisible(el) && !el.disabled);
+    if (explicit) return explicit;
+
     const els = Array.from(
-      document.querySelectorAll(
-        "[data-automation-id='signInLink'], [data-jobify-switch-signin], button, a, [role='button'], [role='tab']"
-      )
-    ).filter((el) => isElementVisible(el) && !isHeaderOrNavButton(el) && !el.hasAttribute("data-jobify-auth-submit"));
-    return (
-      els.find((el) => {
-        if (el.dataset?.automationId === "signInLink" || el.hasAttribute("data-jobify-switch-signin")) return true;
-        const txt = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
-        return /^(sign\s*in|log\s*in|already\s*have\s*an?\s*account\??)$/i.test(txt);
-      }) || null
+      doc.querySelectorAll("button, a, [role='button'], [role='tab'], [role='link'], span[class*='link' i]")
+    ).filter(
+      (el) =>
+        isElementVisible(el) &&
+        !isHeaderOrNavButton(el) &&
+        !el.closest("#jobify-copilot-host") &&
+        !el.hasAttribute("data-jobify-auth-submit") &&
+        !/createAccountSubmit|signInSubmit/i.test(el.dataset?.automationId || "")
     );
+
+    const directMatch = els.find((el) => {
+      const txt = (el.innerText || el.textContent || el.getAttribute("aria-label") || "")
+        .replace(/[→›»↗⟶➔▶]+/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!txt || txt.length > 90) return false;
+      if (/with\s+(google|apple|linkedin|microsoft|facebook|indeed)/i.test(txt)) return false;
+      return /^(sign\s*in|log\s*in|already\s*(have\s*an?\s*account|registered)|existing\s*(user|candidate|account)|return\s*to\s*(sign\s*in|log\s*in)|back\s*to\s*(sign\s*in|log\s*in))/i.test(
+        txt
+      );
+    });
+    if (directMatch) return directMatch;
+
+    const contextMatch = els.find((el) => {
+      if (el.tagName !== "A" && el.tagName !== "BUTTON" && el.getAttribute("role") !== "button") return false;
+      const parentTxt = (el.parentElement?.innerText || "").replace(/\s+/g, " ").trim();
+      if (parentTxt.length > 160) return false;
+      return /already\s*(have\s*an?\s*account|registered)|existing\s*(user|candidate|account)/i.test(parentTxt);
+    });
+    return contextMatch || null;
   }
 
-  function hasVisibleAuthError() {
+  function hasVisibleAuthError(doc = document) {
     const errEls = Array.from(
-      document.querySelectorAll(
-        "[data-automation-id='errorMessage'], [role='alert'], .error, .error-message, [class*='error' i], [data-jobify-auth-error]"
+      doc.querySelectorAll(
+        "[data-automation-id='errorMessage'], [role='alert'], [role='status'], .error, .error-message, .alert-danger, .text-danger, [class*='error' i], [class*='invalid' i], [data-jobify-auth-error], form p, form div, form span, [data-automation-id='signInContent'] div"
       )
-    ).filter(isElementVisible);
+    ).filter((el) => isElementVisible(el) && (!el.children || el.children.length <= 3));
     for (const el of errEls) {
       const t = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+      if (!t || t.length > 260) continue;
       if (
-        /invalid|incorrect|wrong|not\s*found|no\s*account|doesn'?t\s*exist|unable\s*to\s*(sign\s*in|create)|unrecognized|already\s*(exists|registered|in\s*use)|duplicate\s*account|locked/i.test(
+        /invalid|incorrect|wrong|not\s*found|no\s*account|doesn'?t\s*exist|does\s*not\s*exist|unable\s*to\s*(sign\s*in|log\s*in|create|authenticate)|authentication\s*failed|login\s*failed|unrecognized|already\s*(exists|registered|in\s*use|taken)|duplicate\s*account|check\s*your\s*(email|credentials|password)|locked|not\s*match/i.test(
           t
         )
       ) {
@@ -1617,26 +1950,43 @@
     return "";
   }
 
-  async function waitForAuthStateTransition(prevPwCount, maxWaitMs = 3600) {
+  async function waitForAuthStateTransition(prevPwCount, prevUrl = location.href, maxWaitMs = 3600) {
     const loops = Math.ceil(maxWaitMs / 300);
     for (let i = 0; i < loops; i++) {
       await sleep(300);
       const pwNow = Array.from(document.querySelectorAll("input[type='password']")).filter(isVisibleAndEditable);
       if (pwNow.length !== prevPwCount) {
-        return { pwCount: pwNow.length, err: hasVisibleAuthError(), verifyBanner: detectEmailVerificationBanner(document) };
+        return {
+          pwCount: pwNow.length,
+          err: hasVisibleAuthError(),
+          verifyBanner: detectEmailVerificationBanner(document),
+          hasFormNow: hasDirectApplicationResumeOrSections(document)
+        };
+      }
+      if (hasDirectApplicationResumeOrSections(document)) {
+        return { pwCount: 0, err: "", verifyBanner: false, hasFormNow: true };
       }
       const err = hasVisibleAuthError();
       if (err) return { pwCount: pwNow.length, err };
       if (detectEmailVerificationBanner(document)) return { pwCount: pwNow.length, err: "", verifyBanner: true };
       if (detectOtpChallenge(document).detected) return { pwCount: pwNow.length, err: "", otp: true };
+      if (location.href !== prevUrl && pwNow.length === 0) {
+        return { pwCount: 0, err: "", verifyBanner: detectEmailVerificationBanner(document) };
+      }
     }
     const pwFinal = Array.from(document.querySelectorAll("input[type='password']")).filter(isVisibleAndEditable);
-    return { pwCount: pwFinal.length, err: hasVisibleAuthError(), verifyBanner: detectEmailVerificationBanner(document) };
+    return {
+      pwCount: pwFinal.length,
+      err: hasVisibleAuthError(),
+      verifyBanner: detectEmailVerificationBanner(document),
+      hasFormNow: hasDirectApplicationResumeOrSections(document)
+    };
   }
 
   // Autonomous Multi-Stage Auth Executor:
-  // Handles "Sign in with email" -> Email-First -> Sign In <-> Create Account (+ Verify Password + Consent) -> Post-Signup Sign In!
-  async function performAutonomousAuth(credentials, authHistory = {}) {
+  // Analyzes any Login or Create Account page like a human:
+  // Handles "Sign in with email" -> Email-First -> Sign In <-> Create Account (filling ALL fields + Verify Password + Consent) -> Post-Signup Sign In!
+  async function performAutonomousAuth(credentials, authHistory = {}, profile = null) {
     let totalFilled = 0;
     let createdAccount = Boolean(authHistory?.createdAccount);
     let triedSignIn = Boolean(authHistory?.triedSignIn);
@@ -1644,7 +1994,7 @@
     // Stage 0: Click "Sign in with email" (Workday SignInWithEmailButton / SSO choice gate) if present
     const emailGateBtn = findEmailAuthChoiceButton(document);
     if (emailGateBtn) {
-      dispatchRealClick(emailGateBtn);
+      clickElementAndInner(emailGateBtn);
       for (let i = 0; i < 12; i++) {
         await sleep(300);
         const mounted =
@@ -1657,17 +2007,23 @@
 
     let pwVisible = Array.from(document.querySelectorAll("input[type='password']")).filter(isVisibleAndEditable);
 
-    // Stage 0b: Two-step Email-First Login (Email -> Continue -> Password)
+    // Stage 0b: Two-step Email-First Login / Signup (Email -> Continue -> Password / Registration / OTP)
     if (pwVisible.length === 0) {
       const emailFirst = detectEmailFirstAuthStep(document);
       if (emailFirst && credentials?.portalEmail) {
-        if (setNativeValue(emailFirst.emailInput, credentials.portalEmail)) totalFilled++;
-        await sleep(120);
-        dispatchRealClick(emailFirst.continueBtn);
-        for (let i = 0; i < 10; i++) {
+        const stepFill = await autofillPortalAuth(credentials, profile);
+        totalFilled += stepFill.filled;
+        if (!stepFill.filled && setNativeValue(emailFirst.emailInput, credentials.portalEmail)) {
+          totalFilled++;
+        }
+        await sleep(140);
+        clickElementAndInner(emailFirst.continueBtn);
+        for (let i = 0; i < 11; i++) {
           await sleep(300);
           pwVisible = Array.from(document.querySelectorAll("input[type='password']")).filter(isVisibleAndEditable);
-          if (pwVisible.length > 0) break;
+          if (pwVisible.length > 0 || detectOtpChallenge(document).detected || detectEmailVerificationBanner(document)) {
+            break;
+          }
         }
         if (pwVisible.length === 0) {
           return {
@@ -1676,74 +2032,105 @@
             submittedAuthForm: true,
             mode: "email_first",
             createdAccount,
-            triedSignIn
+            triedSignIn,
+            needsEmailVerification: detectEmailVerificationBanner(document)
           };
         }
       } else {
-        return {
-          handled: Boolean(emailGateBtn),
-          filled: totalFilled,
-          clickedEmailGate: Boolean(emailGateBtn),
-          createdAccount,
-          triedSignIn,
-          needsEmailVerification: detectEmailVerificationBanner(document)
-        };
+        // Stage 0c: If no password input and no email-first input, check if a "Create Account" or "Sign In" gate button opens the auth inputs
+        const gateSwitch = !createdAccount ? findCreateAccountSwitchLink(document) || findSignInSwitchLink(document) : findSignInSwitchLink(document);
+        if (gateSwitch) {
+          clickElementAndInner(gateSwitch);
+          for (let i = 0; i < 10; i++) {
+            await sleep(280);
+            pwVisible = Array.from(document.querySelectorAll("input[type='password']")).filter(isVisibleAndEditable);
+            if (pwVisible.length > 0) break;
+          }
+        }
+        if (pwVisible.length === 0) {
+          return {
+            handled: Boolean(emailGateBtn || gateSwitch),
+            filled: totalFilled,
+            clickedEmailGate: Boolean(emailGateBtn || gateSwitch),
+            createdAccount,
+            triedSignIn,
+            needsEmailVerification: detectEmailVerificationBanner(document)
+          };
+        }
       }
     }
 
-    // Guard: If full application form is simultaneously inline below password fields, only fill without clicking standalone auth submit
-    const nonAuthInputs = Array.from(document.querySelectorAll("input[type='file'], select, textarea")).filter((el) =>
-      el.type === "file" ? isActionableFileInput(el) : isVisibleAndEditable(el)
-    );
-    if (nonAuthInputs.length > 2 && !document.querySelector("[data-jobify-auth-step-only='true']")) {
-      const inlineFill = await autofillPortalAuth(credentials);
+    // Guard: If full application form WITH resume upload / work history is simultaneously inline below password fields, only fill without clicking standalone auth submit
+    if (hasDirectApplicationResumeOrSections(document) && !document.querySelector("[data-jobify-auth-step-only='true']")) {
+      const inlineFill = await autofillPortalAuth(credentials, profile);
       return {
         handled: true,
         filled: totalFilled + inlineFill.filled,
         submittedAuthForm: false,
-        mode: inlineFill.passwordFieldsFilled >= 2 ? "create_inline" : "signin_inline",
+        mode: inlineFill.isCreateMode ? "create_inline" : "signin_inline",
         createdAccount,
         triedSignIn
       };
     }
 
-    // Pre-switch check:
-    // - If we are on Create Account (2 passwords) AFTER already creating the account -> switch to Sign In!
-    // - If we are on Sign In (1 password) with a pre-existing error and haven't created an account -> switch to Create Account!
+    // Stage 1: Analyze current page mode (Sign In vs Create Account) and pre-switch if appropriate!
+    let modeAnalysis = analyzeAuthPageMode(document);
     const preErr = hasVisibleAuthError();
-    if (pwVisible.length >= 2 && createdAccount) {
+
+    if (modeAnalysis.isCreateMode && createdAccount && /already\s*(exists|registered|in\s*use|taken)|duplicate/i.test(preErr)) {
       const toSignIn = findSignInSwitchLink();
       if (toSignIn) {
-        dispatchRealClick(toSignIn);
-        await sleep(800);
-        pwVisible = Array.from(document.querySelectorAll("input[type='password']")).filter(isVisibleAndEditable);
+        clickElementAndInner(toSignIn);
+        await sleep(750);
+        modeAnalysis = analyzeAuthPageMode(document);
       }
-    } else if (pwVisible.length === 1 && preErr && !createdAccount) {
+    } else if (modeAnalysis.isCreateMode && createdAccount && authHistory?.verifiedEmailLink) {
+      const toSignIn = findSignInSwitchLink();
+      if (toSignIn) {
+        clickElementAndInner(toSignIn);
+        await sleep(750);
+        modeAnalysis = analyzeAuthPageMode(document);
+      }
+    } else if (!modeAnalysis.isCreateMode && !createdAccount && (preErr || triedSignIn)) {
+      // We already tried Sign In (or an error is already on screen) -> immediately switch to Create Account!
       const toCreate = findCreateAccountSwitchLink();
       if (toCreate) {
-        dispatchRealClick(toCreate);
-        await sleep(800);
-        pwVisible = Array.from(document.querySelectorAll("input[type='password']")).filter(isVisibleAndEditable);
+        clickElementAndInner(toCreate);
+        for (let i = 0; i < 10; i++) {
+          await sleep(250);
+          modeAnalysis = analyzeAuthPageMode(document);
+          if (modeAnalysis.isCreateMode) break;
+        }
       }
     }
 
-    // Fill active auth form (Sign In or Create Account)
-    const fillRes = await autofillPortalAuth(credentials);
+    // Stage 2: Fill all fields on the active auth form (Email, Password, Confirm Password, First/Last Name, Phone, Country, Checkboxes, etc.)
+    const fillRes = await autofillPortalAuth(credentials, profile);
     totalFilled += fillRes.filled;
-    const isCreateMode = fillRes.passwordFieldsFilled >= 2;
+    const isCreateMode = fillRes.isCreateMode || modeAnalysis.isCreateMode;
     if (isCreateMode) createdAccount = true;
     else triedSignIn = true;
 
-    const authBtn = findAuthSubmitButton(isCreateMode);
+    await sleep(120);
+    let authBtn = findAuthSubmitButton(isCreateMode);
+    if (!authBtn) {
+      // Wait up to 600ms in case filling fields asynchronously enabled the submit button
+      for (let w = 0; w < 3; w++) {
+        await sleep(200);
+        authBtn = findAuthSubmitButton(isCreateMode);
+        if (authBtn) break;
+      }
+    }
     if (!authBtn) {
       return { handled: true, filled: totalFilled, submittedAuthForm: false, createdAccount, triedSignIn };
     }
 
-    dispatchRealClick(authBtn);
-    const afterFirst = await waitForAuthStateTransition(fillRes.passwordFieldsFilled, 3600);
+    const urlBeforeSubmit = location.href;
+    clickElementAndInner(authBtn);
+    const afterFirst = await waitForAuthStateTransition(fillRes.passwordFieldsFilled, urlBeforeSubmit, 3600);
 
     // Case 1: Logged straight into the application form or OTP challenge!
-    if (afterFirst.pwCount === 0 || afterFirst.otp) {
+    if (afterFirst.pwCount === 0 || afterFirst.hasFormNow || afterFirst.otp) {
       return {
         handled: true,
         filled: totalFilled,
@@ -1771,13 +2158,13 @@
         }
         // Step 1 (Create Account) succeeded and opened Step 2 (Sign In) — immediately Sign In!
         await sleep(350);
-        const loginFill = await autofillPortalAuth(credentials);
+        const loginFill = await autofillPortalAuth(credentials, profile);
         totalFilled += loginFill.filled;
         triedSignIn = true;
         const loginBtn = findAuthSubmitButton(false);
         if (loginBtn) {
-          dispatchRealClick(loginBtn);
-          await waitForAuthStateTransition(1, 3400);
+          clickElementAndInner(loginBtn);
+          await waitForAuthStateTransition(1, location.href, 3400);
         }
         return {
           handled: true,
@@ -1790,19 +2177,19 @@
         };
       }
 
-      if (afterFirst.err) {
+      if (afterFirst.err || /already\s*(exists|registered|in\s*use|taken)|duplicate/i.test(afterFirst.err || "")) {
         // Account already exists on this tenant -> switch from Create Account to Sign In and log in!
         const signInSwitch = findSignInSwitchLink();
         if (signInSwitch) {
-          dispatchRealClick(signInSwitch);
-          await sleep(850);
-          const loginFill = await autofillPortalAuth(credentials);
+          clickElementAndInner(signInSwitch);
+          await sleep(800);
+          const loginFill = await autofillPortalAuth(credentials, profile);
           totalFilled += loginFill.filled;
           triedSignIn = true;
           const loginBtn = findAuthSubmitButton(false);
           if (loginBtn) {
-            dispatchRealClick(loginBtn);
-            await waitForAuthStateTransition(1, 3400);
+            clickElementAndInner(loginBtn);
+            await waitForAuthStateTransition(1, location.href, 3400);
           }
           return {
             handled: true,
@@ -1817,32 +2204,48 @@
       }
     }
 
-    // Case 3: Started on Sign In -> returned "wrong email or password / no account" -> switch to Create Account (+ Verify Password) -> and if needed Sign In!
-    if (!isCreateMode && afterFirst.err && !authHistory?.createdAccount) {
+    // Case 3: Started on Sign In -> did NOT log in (either showed an error OR stayed on the password screen) -> Switch to Create Account, fill ALL fields, and tap Create Account!
+    if (!isCreateMode && (afterFirst.err || afterFirst.pwCount >= 1) && !authHistory?.createdAccount) {
       const switchBtn = findCreateAccountSwitchLink();
       if (switchBtn) {
-        dispatchRealClick(switchBtn);
-        for (let i = 0; i < 8; i++) {
-          await sleep(250);
-          const pws = Array.from(document.querySelectorAll("input[type='password']")).filter(isVisibleAndEditable);
-          if (pws.length >= 2) break;
+        const urlBeforeSwitch = location.href;
+        clickElementAndInner(switchBtn);
+        for (let i = 0; i < 10; i++) {
+          await sleep(260);
+          const checkMode = analyzeAuthPageMode(document);
+          if (checkMode.isCreateMode || location.href !== urlBeforeSwitch) break;
         }
-        const signupRes = await autofillPortalAuth(credentials);
+        await sleep(200);
+        const signupRes = await autofillPortalAuth(credentials, profile);
         totalFilled += signupRes.filled;
         createdAccount = true;
-        const createBtn = findAuthSubmitButton(true);
+        await sleep(120);
+        let createBtn = findAuthSubmitButton(true);
+        if (!createBtn) {
+          for (let w = 0; w < 3; w++) {
+            await sleep(200);
+            createBtn = findAuthSubmitButton(true);
+            if (createBtn) break;
+          }
+        }
         if (createBtn) {
-          dispatchRealClick(createBtn);
-          const afterSignup = await waitForAuthStateTransition(signupRes.passwordFieldsFilled, 3600);
+          const urlBeforeCreate = location.href;
+          clickElementAndInner(createBtn);
+          const afterSignup = await waitForAuthStateTransition(signupRes.passwordFieldsFilled, urlBeforeCreate, 3600);
           // If creating the account immediately landed back on 1-password Sign In (and no email-verify gate is blocking yet), log right in!
-          if (afterSignup.pwCount === 1 && !afterSignup.err && !(afterSignup.verifyBanner || detectEmailVerificationBanner(document))) {
+          if (
+            afterSignup.pwCount === 1 &&
+            !afterSignup.err &&
+            !analyzeAuthPageMode(document).isCreateMode &&
+            !(afterSignup.verifyBanner || detectEmailVerificationBanner(document))
+          ) {
             await sleep(350);
-            const postLogin = await autofillPortalAuth(credentials);
+            const postLogin = await autofillPortalAuth(credentials, profile);
             totalFilled += postLogin.filled;
             const postLoginBtn = findAuthSubmitButton(false);
             if (postLoginBtn) {
-              dispatchRealClick(postLoginBtn);
-              await waitForAuthStateTransition(1, 3400);
+              clickElementAndInner(postLoginBtn);
+              await waitForAuthStateTransition(1, location.href, 3400);
             }
           }
         }
@@ -2691,6 +3094,13 @@
     // If an Apply-Method modal ("Apply Manually") is open on top of the page, we are not in the candidate form yet
     if (findApplyModalChoiceButton(doc)) return false;
 
+    // If a password input is visible and there is no Resume upload or application section on the page,
+    // this is a Login / Create Account wall (even if Create Account asks for First Name, Last Name, Phone, Country, etc.)
+    const hasVisiblePassword = Array.from(doc.querySelectorAll("input[type='password']")).some(isVisibleAndEditable);
+    if (hasVisiblePassword && !hasDirectApplicationResumeOrSections(doc)) {
+      return false;
+    }
+
     if (Array.from(doc.querySelectorAll("input[type='file']")).some(isActionableFileInput)) {
       return true;
     }
@@ -2784,7 +3194,7 @@
       if (/^application$/i.test(rawTxt)) {
         return el.getAttribute("role") === "tab" || /\/application(\?|$)/i.test(href);
       }
-      return /^(apply(\s+(now|(for|to)\s+(this\s+|the\s+|a\s+)?(job|role|position|opening|opportunity)|online|here|externally|on\s+company\s+(site|website)|directly|today|manually|with\s+resume))?|quick\s+apply|easy\s+apply|1[-\s]?click\s+apply|instant\s+apply|start(\s+your)?\s+application|begin\s+application|continue\s+to\s+application|go\s+to\s+application|submit\s+an?\s+application|i'?m\s+interested)$/i.test(
+      return /^(apply(\s+(now|(for|to)\s+(this\s+|the\s+|a\s+)?(job|role|position|opening|opportunity|posting|requisition)|online|here|externally|on\s+company\s+(site|website|page|portal)|directly|today|manually|with\s+resume))?|quick\s+apply|easy\s+apply|1[-\s]?click\s+apply|instant\s+apply|start(\s+(your|my|new))?\s+application|begin(\s+(your|my))?\s+application|continue\s+to\s+application|go\s+to\s+application|submit\s+an?\s+application|i'?m\s+interested)$/i.test(
         rawTxt
       );
     });
@@ -2872,7 +3282,7 @@
         (c) =>
           c.hasAttribute("data-jobify-apply-btn") ||
           c.dataset?.automationId === "adventureButton" ||
-          /^apply(\s+(now|(for|to)\s+(this\s+)?(job|role|position)))?$/i.test(
+          /^apply(\s+(now|(for|to)\s+(this\s+|the\s+|a\s+)?(job|role|position|opening|opportunity)))?$/i.test(
             (c.innerText || "").replace(/[→›»↗⟶➔▶]+/g, "").replace(/\s+/g, " ").trim()
           )
       ) || candidates[0];
@@ -3400,10 +3810,17 @@
     const hasCandidateForm = hasRealCandidateFormFields(document);
     const hasApplyChoiceModal = Boolean(findApplyModalChoiceButton(document));
     const needsEmailVerificationBanner = detectEmailVerificationBanner(document);
+    const authModeInfo = analyzeAuthPageMode(document);
+    const hasAuthLandingGate =
+      !hasCandidateForm &&
+      Boolean(findCreateAccountSwitchLink(document) || findSignInSwitchLink(document)) &&
+      /\/(login|signin|sign-in|register|signup|sign-up|auth|account|candidate-login)\b/i.test(
+        `${location.pathname || ""}${location.search || ""}${location.hash || ""}`
+      );
 
     const isStandaloneAuthWall =
       !hasApplyChoiceModal &&
-      (pwVisible.length > 0 || hasEmailAuthGate || hasEmailFirstAuth) &&
+      (pwVisible.length > 0 || hasEmailAuthGate || hasEmailFirstAuth || hasAuthLandingGate) &&
       (!hasCandidateForm || Boolean(document.querySelector("[data-jobify-auth-step-only='true']")));
 
     const inventory = extractFormFieldsInventory(profile, mergedMeta);
@@ -3419,6 +3836,7 @@
       isSubmittedConfirmation,
       otpChallenge,
       isStandaloneAuthWall,
+      authMode: authModeInfo.mode,
       hasEmailAuthGate,
       hasApplyChoiceModal,
       needsEmailVerificationBanner,
@@ -3519,7 +3937,7 @@
 
     // 1. Portal Login / Account Creation Wall
     if (meta.isAuthWall && credentials?.autoFillPortalSignups !== false) {
-      const authRes = await autofillPortalAuth(credentials);
+      const authRes = await autofillPortalAuth(credentials, profile);
       if (authRes.filled > 0) {
         filledCount += authRes.filled;
         await reportStep(`Portal Login / Verify Password (${authRes.filled} fields)`);

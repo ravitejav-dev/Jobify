@@ -538,7 +538,7 @@ function extractVerificationLinkFromRawText(subj, bodyText) {
     .replace(/&amp;/gi, "&")
     .replace(/&#38;/g, "&")
     .replace(/=\r?\n/g, "");
-  if (!/verify|activate|confirm|workday|candidate|account|welcome/i.test(combined)) {
+  if (!/verify|activate|confirm|workday|candidate|account|welcome|registration|sign[-\s]?in|portal/i.test(combined)) {
     return null;
   }
   const urls = [...combined.matchAll(/https?:\/\/[^\s"'<>)\]]+/gi)].map((m) =>
@@ -546,14 +546,18 @@ function extractVerificationLinkFromRawText(subj, bodyText) {
   );
   const filtered = urls.filter(
     (u) =>
-      !/unsubscribe|privacy|terms|support\.google|linkedin\.com|twitter\.com|facebook\.com|instagram\.com|fonts\.googleapis|\.(png|jpg|jpeg|gif|svg|css|ico)(\?|$)/i.test(
+      !/unsubscribe|privacy|terms|support\.google|accounts\.google|mail\.google|linkedin\.com|twitter\.com|facebook\.com|instagram\.com|fonts\.googleapis|\.(png|jpg|jpeg|gif|svg|css|ico)(\?|$)/i.test(
         u
       )
   );
   return (
     filtered.find((u) =>
-      /verify|activate|confirm|validation|token=|myworkdayjobs\.com|myworkdaysite\.com|wd\d+\.myworkday/i.test(u)
-    ) || null
+      /verify|activate|confirm|validation|token=|code=|key=|auth|magic|myworkdayjobs\.com|myworkdaysite\.com|wd\d+\.myworkday|icims\.com|smartrecruiters\.com|successfactors|oraclecloud|greenhouse\.io|ashbyhq\.com|lever\.co/i.test(
+        u
+      )
+    ) ||
+    filtered[0] ||
+    null
   );
 }
 
@@ -644,11 +648,15 @@ async function fetchVerificationLinkDualEngine(state, { tabUrl = "", sinceEpochM
             }
           } catch (_) {}
         }
-        return { xmlPayloads };
+        const domHrefs = Array.from(document.querySelectorAll("a[href^='http']"))
+          .map((a) => a.href)
+          .slice(0, 120);
+        return { xmlPayloads, domHrefs, domText: (document.body?.innerText || "").slice(0, 8000) };
       }
     });
     const minTs = sinceEpochMs > 0 ? sinceEpochMs - 120000 : 0;
-    for (const xml of scriptRes?.[0]?.result?.xmlPayloads || []) {
+    const { xmlPayloads = [], domHrefs = [], domText = "" } = scriptRes?.[0]?.result || {};
+    for (const xml of xmlPayloads) {
       const entryBlocks = [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/gi)].map((m) => m[1]);
       for (const block of entryBlocks) {
         const title = (block.match(/<title>([\s\S]*?)<\/title>/i)?.[1] || "").trim();
@@ -662,6 +670,12 @@ async function fetchVerificationLinkDualEngine(state, { tabUrl = "", sinceEpochM
         if (vUrl) {
           return { ok: true, verificationUrl: vUrl, subject: title, source: "chrome_gmail_session" };
         }
+      }
+    }
+    if (domHrefs.length > 0) {
+      const domUrl = extractVerificationLinkFromRawText("Verify your account", `${domText}\n${domHrefs.join("\n")}`);
+      if (domUrl) {
+        return { ok: true, verificationUrl: domUrl, subject: "Gmail Session", source: "chrome_gmail_dom" };
       }
     }
   } catch (_) {
@@ -1490,7 +1504,12 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         if (!hasPortalPassword) {
           if (screen.hasEmailAuthGate && authAttempts === 0) {
             authAttempts++;
-            await executeAdapterAcrossTab(tabId, "performAutonomousAuth", [state.credentials, authHistory]);
+            await executeAdapterAcrossTab(
+              tabId,
+              "performAutonomousAuth",
+              [state.credentials, authHistory, state.profile],
+              { timeoutMs: 18000 }
+            );
             await waitForTabSettle(tabId, 900, 4000);
           }
           await broadcastAutoApplyProgress(tabId, {
@@ -1518,14 +1537,18 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
             ? "🔐 Selecting 'Sign in with Email' & Authenticating"
             : authHistory.createdAccount
             ? "🔐 Completing Post-Signup Portal Sign In"
+            : screen.authMode === "create"
+            ? "🔐 Creating Candidate Account (Filling All Registration Fields)"
             : "🔐 Portal Sign In / Create Account",
-          detail: `Using ${state.credentials.portalEmail} (handling Create Account + Sign In + Verify Password)...`
+          detail: `Using ${state.credentials.portalEmail} (handling Login, Registration Fields & Terms)...`
         });
 
-        const authExec = await executeAdapterAcrossTab(tabId, "performAutonomousAuth", [
-          state.credentials,
-          authHistory
-        ]);
+        const authExec = await executeAdapterAcrossTab(
+          tabId,
+          "performAutonomousAuth",
+          [state.credentials, authHistory, state.profile],
+          { timeoutMs: 18000 }
+        );
 
         let needsVerifyLinkNow = false;
         for (const entry of authExec || []) {

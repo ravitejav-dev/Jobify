@@ -971,6 +971,166 @@ async function main() {
     }
     step2RegCdp.close();
 
+    // 4h. UNIVERSAL LOGIN -> MULTI-FIELD CREATE ACCOUNT (1-PASSWORD + FIRST/LAST NAME + CONFIRM EMAIL + PHONE + COUNTRY + TERMS) REGRESSION TEST (Gate 6g)
+    // Verifies that on any portal:
+    // 1. Clicking "Apply to Job" opens a Login portal.
+    // 2. Trying "Sign In" fails (even without .error/.alert classes) and automatically clicks "<p>Don't have an account? <a>Click here</a></p>".
+    // 3. The Create Account page (which asks for First Name, Last Name, Email, Confirm Email, Phone, Country, 1 Password, and Terms Checkbox) is recognized as an Auth Wall (not misclassified as the candidate form), fills ALL registration fields, and taps "Create an Account".
+    // 4. Transitions to the Application Form, uploads tailored PDF resume (Raviteja_velanati_Cohere.pdf), fills remaining fields, and submits!
+    const authRegCdp = await openTabAndConnect("http://127.0.0.1:18765/ats/greenhouse?universal_auth_test=1");
+    await authRegCdp.eval(`
+      (() => {
+        document.title = "Senior LLM Systems Engineer - Cohere";
+        document.body.innerHTML = \`
+          <div id="cohere-portal" style="max-width:680px;margin:24px auto;font-family:sans-serif;">
+            <h1>Senior LLM Systems Engineer — Cohere</h1>
+            <p>Location: San Francisco, CA | Compensation: $195,000 - $240,000</p>
+            <p>Architect high-throughput LLM serving, RAG pipelines, Python, TypeScript, Kubernetes, and evaluation systems.</p>
+            <button id="btn-apply-to-job" type="button">Apply to Job</button>
+          </div>
+        \`;
+        window.__AUTH_REG_AUDIT__ = {
+          clickedApplyToJob: false,
+          triedSignIn: false,
+          switchedViaClickHere: false,
+          registrationFieldsFilled: null,
+          createdAccountSuccess: false,
+          submittedApp: null
+        };
+        document.getElementById("btn-apply-to-job").addEventListener("click", () => {
+          window.__AUTH_REG_AUDIT__.clickedApplyToJob = true;
+          document.body.innerHTML = \`
+            <div id="login-view" style="max-width:520px;margin:24px auto;font-family:sans-serif;">
+              <h1>Candidate Sign In</h1>
+              <p>Please sign in to your account to apply for this position.</p>
+              <div id="plain-login-msg" style="display:none;padding:8px;margin-bottom:8px;"></div>
+              <div><label for="login-email">Email Address *</label><input id="login-email" type="email" required /></div>
+              <div><label for="login-pw">Password *</label><input id="login-pw" type="password" required /></div>
+              <button id="btn-login-submit" type="button">Sign In</button>
+              <p style="margin-top:16px;">Don't have an account yet? <a id="link-click-here" href="#create-account">Click here</a></p>
+            </div>
+          \`;
+          document.getElementById("btn-login-submit").addEventListener("click", () => {
+            window.__AUTH_REG_AUDIT__.triedSignIn = true;
+            const msg = document.getElementById("plain-login-msg");
+            msg.style.display = "block";
+            msg.textContent = "We could not find an account matching that email address.";
+          });
+          document.getElementById("link-click-here").addEventListener("click", (e) => {
+            e.preventDefault();
+            window.__AUTH_REG_AUDIT__.switchedViaClickHere = true;
+            document.body.innerHTML = \`
+              <div id="register-view" style="max-width:560px;margin:24px auto;font-family:sans-serif;">
+                <h1>Create an Account</h1>
+                <p>Complete all fields below to register your candidate profile.</p>
+                <div class="field"><label for="reg-fn">First Name *</label><input id="reg-fn" name="firstName" type="text" required /></div>
+                <div class="field"><label for="reg-ln">Last Name *</label><input id="reg-ln" name="lastName" type="text" required /></div>
+                <div class="field"><label for="reg-email">Email Address *</label><input id="reg-email" name="email" type="email" required /></div>
+                <div class="field"><label for="reg-email2">Confirm Email Address *</label><input id="reg-email2" name="confirmEmail" type="email" required /></div>
+                <div class="field"><label for="reg-phone">Mobile Phone Number *</label><input id="reg-phone" name="phone" type="tel" required /></div>
+                <div class="field">
+                  <label for="reg-country">Country / Region *</label>
+                  <select id="reg-country" name="country" required>
+                    <option value="">Select Country</option>
+                    <option value="United States">United States</option>
+                    <option value="Canada">Canada</option>
+                  </select>
+                </div>
+                <div class="field"><label for="reg-pw">Create Password *</label><input id="reg-pw" name="password" type="password" required /></div>
+                <div class="field">
+                  <label><input id="reg-terms" type="checkbox" required /> I have read and agree to the Candidate Privacy Policy and Terms of Service *</label>
+                </div>
+                <div id="reg-err" style="color:rgb(210,30,30);display:none;"></div>
+                <button id="btn-create-account" type="button">Create an Account</button>
+              </div>
+            \`;
+            document.getElementById("btn-create-account").addEventListener("click", () => {
+              const fn = document.getElementById("reg-fn").value.trim();
+              const ln = document.getElementById("reg-ln").value.trim();
+              const em = document.getElementById("reg-email").value.trim();
+              const em2 = document.getElementById("reg-email2").value.trim();
+              const ph = document.getElementById("reg-phone").value.trim();
+              const co = document.getElementById("reg-country").value;
+              const pw = document.getElementById("reg-pw").value;
+              const tm = document.getElementById("reg-terms").checked;
+              window.__AUTH_REG_AUDIT__.registrationFieldsFilled = { fn, ln, em, em2, ph, co, hasPw: pw.length >= 8, tm };
+              if (!fn || !ln || !em || em !== em2 || !ph || co !== "United States" || pw.length < 8 || !tm) {
+                const err = document.getElementById("reg-err");
+                err.style.display = "block";
+                err.textContent = "Please complete all required registration fields.";
+                return;
+              }
+              window.__AUTH_REG_AUDIT__.createdAccountSuccess = true;
+              document.body.innerHTML = \`
+                <form id="application_form" style="max-width:640px;margin:24px auto;font-family:sans-serif;">
+                  <h2>Candidate Application — Cohere</h2>
+                  <div class="field"><label for="app-res">Resume/CV *</label><input id="app-res" type="file" required /></div>
+                  <div class="field"><label for="app-li">LinkedIn URL *</label><input id="app-li" type="text" required /></div>
+                  <button id="btn-final-sub" type="submit">Submit Application</button>
+                </form>
+              \`;
+              document.getElementById("application_form").addEventListener("submit", (ev) => {
+                ev.preventDefault();
+                window.__AUTH_REG_AUDIT__.submittedApp = {
+                  resumeFile: document.getElementById("app-res").files[0]?.name || null,
+                  linkedin: document.getElementById("app-li").value
+                };
+                const done = document.createElement("div");
+                done.id = "submit-banner";
+                done.textContent = "Thank you for applying to Cohere!";
+                document.body.appendChild(done);
+              });
+            });
+          });
+        });
+      })();
+    `);
+
+    const authRegRes = await dashCdp.eval(
+      `chrome.runtime.sendMessage({
+        type: "START_FULL_AUTO_APPLY",
+        payload: {
+          tabId: ${authRegCdp.tabId},
+          awaitCompletion: true,
+          options: {
+            tailorResume: true,
+            autoSubmit: true,
+            jobMeta: {
+              company: "Cohere",
+              title: "Senior LLM Systems Engineer",
+              location: "San Francisco, CA",
+              description: "Architect high-throughput LLM serving, RAG pipelines, Python, TypeScript, Kubernetes, and evaluation systems."
+            }
+          }
+        }
+      })`,
+      65000
+    );
+    const authRegAudit = await authRegCdp.eval(`window.__AUTH_REG_AUDIT__ || null`).catch(() => null);
+    console.log("6g. ✅ Universal Login -> Multi-Field Create Account -> Auto-Submit Verified:", JSON.stringify({
+      ok: authRegRes?.ok,
+      submitted: authRegRes?.submitted,
+      authRegAudit
+    }, null, 2));
+    if (
+      !authRegRes?.ok ||
+      !authRegRes?.submitted ||
+      !authRegAudit?.clickedApplyToJob ||
+      !authRegAudit?.triedSignIn ||
+      !authRegAudit?.switchedViaClickHere ||
+      !authRegAudit?.createdAccountSuccess ||
+      authRegAudit?.registrationFieldsFilled?.fn !== "Raviteja" ||
+      authRegAudit?.registrationFieldsFilled?.ln !== "Velanati" ||
+      authRegAudit?.registrationFieldsFilled?.em !== "ravitejavelanati11@gmail.com" ||
+      authRegAudit?.registrationFieldsFilled?.em2 !== "ravitejavelanati11@gmail.com" ||
+      authRegAudit?.registrationFieldsFilled?.co !== "United States" ||
+      !authRegAudit?.registrationFieldsFilled?.tm ||
+      authRegAudit?.submittedApp?.resumeFile !== "Raviteja_velanati_Cohere.pdf"
+    ) {
+      throw new Error(`Universal Login & Create Account Regression failed: ${JSON.stringify({ authRegRes, authRegAudit })}`);
+    }
+    authRegCdp.close();
+
     // 5. Full UI & Runtime Sanity Check Across Dashboard (all 8 views), Popup, SidePanel & Auto-Tracker
     const trackedApps = await dashCdp.eval(`chrome.runtime.sendMessage({ type: "GET_ALL_STATE" }).then(r => r.state.applications)`);
     console.log(
@@ -989,6 +1149,7 @@ async function main() {
       throw new Error(`Auto-tracker failed to log all submitted applications or company resume filenames: ${JSON.stringify(trackedApps)}`);
     }
 
+    await dashCdp.send("Page.bringToFront", {}).catch(() => {});
     const dashAudit = await dashCdp.eval(`
       (async () => {
         const views = ["overview", "tracker", "resume", "cover", "jobs", "autopilot", "network", "vault"];
@@ -996,22 +1157,22 @@ async function main() {
         for (const v of views) {
           const btn = document.querySelector(\`#main-nav [data-view="\${v}"]\`);
           btn.click();
-          await new Promise(r => setTimeout(r, 140));
+          await new Promise(r => setTimeout(r, 60));
           rendered[v] = document.getElementById("view-container").innerText.trim().length;
         }
         // Check Tracker filter controls
         document.querySelector('#main-nav [data-view="tracker"]').click();
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 50));
         const hasTrackerFilters = Boolean(document.getElementById("trk-filter-q") && document.getElementById("trk-filter-stage"));
 
         // Check Autopilot default mode = full_auto
         document.querySelector('#main-nav [data-view="autopilot"]').click();
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 50));
         const autopilotMode = document.getElementById("ap-mode")?.value || null;
 
         // Check Vault autoSubmitEnabled checkbox & masked secret inputs
         document.querySelector('#main-nav [data-view="vault"]').click();
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 50));
         const vaultAutoSubmitChecked = Boolean(document.getElementById("vc-auto-sub")?.checked);
         const vaultSecretsMasked =
           document.getElementById("vc-pass")?.type === "password" &&
@@ -1036,7 +1197,7 @@ async function main() {
           clPdfOk: Boolean(clPdf?.ok && clPdf?.pdfBase64?.length > 200)
         };
       })()
-    `);
+    `, 30000);
     if (
       dashCdp.exceptions.length > 0 ||
       !dashAudit.hasTrackerFilters ||
