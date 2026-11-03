@@ -1360,13 +1360,55 @@
     return r.width > 0 && r.height > 0;
   }
 
+  function queryAllDeep(root = document, selector = "*") {
+    const out = [];
+    const seen = new Set();
+    const visit = (node) => {
+      if (!node || seen.has(node)) return;
+      seen.add(node);
+      try {
+        const matches = node.querySelectorAll?.(selector) || [];
+        for (const m of matches) out.push(m);
+      } catch (_) {}
+      try {
+        const allNodes = node.querySelectorAll?.("*") || [];
+        for (const el of allNodes) {
+          if (el.shadowRoot) visit(el.shadowRoot);
+        }
+      } catch (_) {}
+    };
+    visit(root);
+    return out;
+  }
+
+  // Detect "Apply as a Guest" / "Continue without signing in" bypass buttons
+  function findGuestOrSkipAuthButton(doc = document) {
+    const candidates = queryAllDeep(
+      doc,
+      "[data-jobify-guest-apply], button, a[role='button'], [role='button'], a, input[type='button']"
+    ).filter((el) => !el.disabled && isElementVisible(el) && !isHeaderOrNavButton(el) && !el.closest(COOKIE_CONSENT_SELECTOR));
+
+    return (
+      candidates.find((el) => {
+        if (el.hasAttribute("data-jobify-guest-apply")) return true;
+        const txt = (el.innerText || el.textContent || el.value || el.getAttribute("aria-label") || "")
+          .replace(/[→›»↗⟶➔▶]+/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (!txt || txt.length > 80) return false;
+        return /^(apply\s*as\s*(a\s*)?guest|continue\s*as\s*(a\s*)?guest|continue\s*without\s*(signing\s*in|an?\s*account|login|logging\s*in)|skip\s*(sign\s*in|login)|apply\s*without\s*(signing\s*in|an?\s*account|registering))$/i.test(
+          txt
+        );
+      }) || null
+    );
+  }
+
   // Detect SSO-vs-Email auth gate (e.g. Workday [data-automation-id="SignInWithEmailButton"], SmartRecruiters "Continue with email")
   function findEmailAuthChoiceButton(doc = document) {
-    const candidates = Array.from(
-      doc.querySelectorAll(
-        "[data-automation-id='SignInWithEmailButton'], [data-jobify-signin-email], button, a[role='button'], [role='button'], a"
-      )
-    ).filter((el) => !el.disabled && isElementVisible(el) && !isHeaderOrNavButton(el));
+    const candidates = queryAllDeep(
+      doc,
+      "[data-automation-id='SignInWithEmailButton'], [data-jobify-signin-email], button, a[role='button'], [role='button'], a"
+    ).filter((el) => !el.disabled && isElementVisible(el) && !isHeaderOrNavButton(el) && !el.closest(COOKIE_CONSENT_SELECTOR));
 
     return (
       candidates.find((el) => {
@@ -1377,11 +1419,402 @@
           .replace(/[→›»↗⟶➔▶]+/g, "")
           .replace(/\s+/g, " ")
           .trim();
-        return /^(sign\s*(in|up)\s*with\s*email|continue\s*with\s*email|use\s*(my\s*)?email(\s*address)?|log\s*in\s*with\s*email|register\s*with\s*email|apply\s*with\s*email)$/i.test(
+        return /^(sign\s*(in|up)\s*(with|using)\s*email|continue\s*(with|using)\s*email|use\s*(my\s*|an?\s*)?email(\s*address|\s*instead)?|log\s*in\s*(with|using)\s*email|register\s*(with|using)\s*email|apply\s*(with|using)\s*email|email\s*(and|&)\s*password|sign\s*in\s*with\s*credentials)$/i.test(
           txt
         );
       }) || null
     );
+  }
+
+  // Detect Multi-Provider OAuth / Social Login Chooser Modals & Pages (e.g. Microsoft Careers "Sign in with Google / Microsoft / LinkedIn / Facebook")
+  function findSsoProviderChoiceButton(doc = document, preferredEmail = "") {
+    if (findApplyModalChoiceButton(doc)) return null;
+    if (hasRealCandidateFormFields(doc)) return null;
+
+    const now = Date.now();
+    const emailLow = String(preferredEmail || "ravitejavelanati11@gmail.com").toLowerCase();
+    const prefersMicrosoft = /@(outlook|hotmail|live|msn|microsoft)\.com$/i.test(emailLow);
+
+    const authDialogs = queryAllDeep(
+      doc,
+      "[role='dialog'], [aria-modal='true'], dialog[open], .modal, [class*='modal' i], [class*='signin' i], [class*='sign-in' i], [class*='login' i], [class*='auth' i], [data-automation-id*='signIn' i], [data-jobify-sso-modal]"
+    ).filter(isElementVisible);
+
+    const pageHeadingsText = queryAllDeep(doc, "h1, h2, h3, h4, [role='heading'], title")
+      .map((h) => (h.innerText || h.textContent || "").replace(/\s+/g, " ").trim())
+      .join(" | ")
+      .slice(0, 800);
+
+    const isPageLevelAuthContext =
+      /\/(login|signin|sign-in|auth|oauth|sso|account|candidate-login)\b/i.test(
+        `${location.pathname || ""}${location.search || ""}${location.hash || ""}`
+      ) ||
+      /sign\s*in(\s*to\s*apply|\s*with|\s*to\s*your\s*account)?|choose\s*an?\s*account|select\s*a?\s*sign[-\s]?in|log\s*in\s*to\s*continue|continue\s*with/i.test(
+        pageHeadingsText
+      );
+
+    const candidates = queryAllDeep(
+      doc,
+      "[data-jobify-sso-provider], [data-provider], [data-idp], button, a[role='button'], [role='button'], a, input[type='button'], div[tabindex='0']"
+    ).filter((el) => {
+      if (el.disabled || !isElementVisible(el)) return false;
+      if (el.closest("#jobify-copilot-host") || el.closest(COOKIE_CONSENT_SELECTOR)) return false;
+      const inAuthModal = authDialogs.some((d) => d.contains(el));
+      if (!inAuthModal && (isHeaderOrNavButton(el) || el.closest("footer"))) return false;
+      const lastClicked = Number(el.getAttribute?.("data-jobify-sso-clicked-ts") || 0);
+      if (lastClicked > 0 && now - lastClicked < 3500) return false;
+      // Avoid matching outer container if an inner button/link exists
+      if (
+        el.tagName === "DIV" &&
+        el.querySelector?.("button, a, [role='button']") &&
+        !el.hasAttribute("data-jobify-sso-provider")
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    const scoredMatches = [];
+
+    for (const el of candidates) {
+      const rawTxt = (el.innerText || el.textContent || el.value || "")
+        .replace(/[→›»↗⟶➔▶]+/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const aria = (el.getAttribute("aria-label") || el.getAttribute("title") || "").replace(/\s+/g, " ").trim();
+      const imgAlt = Array.from(el.querySelectorAll?.("img[alt], svg[aria-label]") || [])
+        .map((n) => n.getAttribute("alt") || n.getAttribute("aria-label") || "")
+        .join(" ")
+        .trim();
+      const dataProv = `${el.getAttribute("data-jobify-sso-provider") || ""} ${el.getAttribute("data-provider") || ""} ${el.getAttribute("data-idp") || ""} ${el.getAttribute("data-testid") || ""} ${el.id || ""}`.toLowerCase();
+      const combined = `${rawTxt} ${aria} ${imgAlt}`.replace(/\s+/g, " ").trim();
+
+      if (!combined && !dataProv) continue;
+      if (combined.length > 95) continue;
+      if (/share\s*(on|with|this)|follow\s*us|tweet|post\s*(on|to)|visit\s*our|privacy|terms|cookie|help|support|cancel|close/i.test(combined)) {
+        continue;
+      }
+
+      const inAuthContainer =
+        authDialogs.some((d) => d.contains(el)) ||
+        Boolean(
+          el.closest(
+            "[class*='signin' i], [class*='sign-in' i], [class*='login' i], [class*='auth' i], [class*='sso' i], [id*='signin' i], [id*='login' i], [data-jobify-sso-modal]"
+          )
+        ) ||
+        isPageLevelAuthContext;
+
+      const explicitVerbMatch =
+        /\b(sign\s*(in|up)|log\s*in|continue|connect|authenticate|access)\s*(with|using)\s*(google|microsoft|linkedin|github|apple|facebook|personal\s+account)\b/i.test(
+          combined
+        ) || Boolean(el.getAttribute("data-jobify-sso-provider"));
+
+      if (!explicitVerbMatch && !inAuthContainer) continue;
+
+      let provider = null;
+      if (
+        /\bgoogle\b/i.test(dataProv) ||
+        /^((sign\s*(in|up)|log\s*in|continue|connect|authenticate)\s*(with|using)\s*google|google(\s*(account|sign\s*in|login))?)$/i.test(
+          rawTxt || aria || imgAlt
+        ) ||
+        (inAuthContainer && /\b(sign\s*(in|up)|continue|log\s*in)?\s*(with\s*)?google\b/i.test(combined))
+      ) {
+        provider = "google";
+      } else if (
+        /\bmicrosoft\b|\bmsa\b|\baad\b|\bentra\b/i.test(dataProv) ||
+        /^((sign\s*(in|up)|log\s*in|continue|connect|authenticate)\s*(with|using)\s*microsoft(\s*(personal\s*)?account)?|microsoft(\s*(personal\s*)?(account|sign\s*in|login))?|personal\s*microsoft\s*account)$/i.test(
+          rawTxt || aria || imgAlt
+        ) ||
+        (inAuthContainer && /\b(sign\s*(in|up)|continue|log\s*in)?\s*(with\s*)?microsoft(\s+personal)?(\s+account)?\b/i.test(combined))
+      ) {
+        provider = "microsoft";
+      } else if (
+        /\blinkedin\b/i.test(dataProv) ||
+        /^((sign\s*(in|up)|log\s*in|continue|connect|authenticate)\s*(with|using)\s*linkedin|linkedin(\s*(account|sign\s*in|login))?)$/i.test(
+          rawTxt || aria || imgAlt
+        ) ||
+        (inAuthContainer && /\b(sign\s*(in|up)|continue|log\s*in)\s*(with\s*)?linkedin\b/i.test(combined))
+      ) {
+        provider = "linkedin";
+      } else if (
+        /\bgithub\b/i.test(dataProv) ||
+        /^((sign\s*(in|up)|log\s*in|continue|connect|authenticate)\s*(with|using)\s*github|github)$/i.test(rawTxt || aria || imgAlt)
+      ) {
+        provider = "github";
+      } else if (
+        /\bapple\b/i.test(dataProv) ||
+        /^((sign\s*(in|up)|log\s*in|continue|connect|authenticate)\s*(with|using)\s*apple|sign\s*in\s*with\s*apple|apple)$/i.test(
+          rawTxt || aria || imgAlt
+        )
+      ) {
+        provider = "apple";
+      } else if (
+        /\bfacebook\b/i.test(dataProv) ||
+        /^((sign\s*(in|up)|log\s*in|continue|connect|authenticate)\s*(with|using)\s*facebook|facebook)$/i.test(
+          rawTxt || aria || imgAlt
+        )
+      ) {
+        provider = "facebook";
+      }
+
+      if (!provider) continue;
+
+      let score = 50;
+      if (provider === "google") score = prefersMicrosoft ? 95 : 115;
+      else if (provider === "microsoft") score = prefersMicrosoft ? 115 : 90;
+      else if (provider === "linkedin") score = 75;
+      else if (provider === "github") score = 65;
+      else if (provider === "apple") score = 55;
+      else if (provider === "facebook") score = 45;
+
+      if (explicitVerbMatch) score += 10;
+
+      scoredMatches.push({ element: el, provider, score, label: rawTxt || aria || provider });
+    }
+
+    if (scoredMatches.length === 0) return null;
+    scoredMatches.sort((a, b) => b.score - a.score);
+    return scoredMatches[0];
+  }
+
+  // Detect when current screen or popup is an OAuth / Identity Provider screen (Google Accounts, Microsoft Live/Entra, Okta, Auth0, or embedded OAuth chooser)
+  function isOAuthProviderScreen(doc = document) {
+    const host = (location.hostname || "").toLowerCase();
+    const href = (location.href || "").toLowerCase();
+    if (
+      /(^|\.)(accounts\.google\.com|login\.live\.com|login\.microsoftonline\.com|b2clogin\.com|appleid\.apple\.com|auth0\.com|okta\.com|onelogin\.com)$/i.test(
+        host
+      ) ||
+      /linkedin\.com\/(uas\/)?oauth|github\.com\/login\/oauth/i.test(href)
+    ) {
+      return true;
+    }
+
+    if (
+      doc.querySelector(
+        "[data-jobify-oauth-screen], [data-jobify-oauth-account], [data-identifier*='@'], [data-email*='@'], input#identifierId, #identifierNext, #passwordNext, #submit_approve_access, #tilesHolder, input[name='loginfmt'], #idSIButton9"
+      )
+    ) {
+      return true;
+    }
+
+    const headings = queryAllDeep(doc, "h1, h2, h3, [role='heading'], [class*='heading' i], [class*='title' i]")
+      .filter(isElementVisible)
+      .map((h) => (h.innerText || h.textContent || "").replace(/\s+/g, " ").trim())
+      .join(" | ");
+
+    if (
+      /choose\s+an?\s+account(\s+to\s+continue)?|pick\s+an?\s+account|sign\s+in\s+with\s+google|sign\s+in\s+to\s+your\s+microsoft\s+account|wants\s+to\s+access\s+your\s+google\s+account|continue\s+to\s+microsoft\s+careers/i.test(
+        headings
+      )
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  // Execute Google / Microsoft / Generic OAuth Account Chooser, Identifier/Password Login & Consent Approval
+  async function performOAuthProviderStep(credentials, profile = null, doc = document) {
+    const targetEmail = String(
+      credentials?.portalEmail || profile?.personal?.email || "ravitejavelanati11@gmail.com"
+    )
+      .toLowerCase()
+      .trim();
+    const targetPassword = String(credentials?.portalPassword || "").trim();
+    let actionsTaken = 0;
+
+    // 1. Account Chooser Tile Selection (Google [data-identifier] / [data-email], Microsoft #tilesHolder, or matching email tile)
+    const findAccountTile = () => {
+      const tileCandidates = queryAllDeep(
+        doc,
+        "[data-jobify-oauth-account], [data-identifier], [data-email], [data-test-id], #tilesHolder [role='button'], #tilesHolder .table, li [role='link'], div[role='link'], div[role='button'], button, a"
+      ).filter((el) => !el.disabled && isElementVisible(el) && !el.closest("#jobify-copilot-host"));
+
+      // Pass A: Exact match on user's email (e.g. ravitejavelanati11@gmail.com)
+      const exactTile = tileCandidates.find((el) => {
+        const idAttr = (
+          el.getAttribute("data-identifier") ||
+          el.getAttribute("data-email") ||
+          el.getAttribute("data-test-id") ||
+          el.getAttribute("data-jobify-oauth-account") ||
+          ""
+        )
+          .toLowerCase()
+          .trim();
+        const txt = (el.innerText || el.textContent || "").replace(/\s+/g, " ").toLowerCase();
+        if (/use\s+another\s+account|add\s+another\s+account|sign\s+out|remove\s+an?\s+account/i.test(txt)) {
+          return false;
+        }
+        return idAttr === targetEmail || (targetEmail && txt.includes(targetEmail) && txt.length < 180);
+      });
+      if (exactTile) return exactTile;
+
+      // Pass B: Any active signed-in Google/Microsoft account tile with an email address
+      return (
+        tileCandidates.find((el) => {
+          const idAttr = (
+            el.getAttribute("data-identifier") ||
+            el.getAttribute("data-email") ||
+            el.getAttribute("data-test-id") ||
+            el.getAttribute("data-jobify-oauth-account") ||
+            ""
+          )
+            .toLowerCase()
+            .trim();
+          const txt = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+          if (/use\s+another\s+account|add\s+another\s+account|sign\s+out|remove|forgot|privacy|terms/i.test(txt)) {
+            return false;
+          }
+          if (idAttr && idAttr.includes("@")) return true;
+          if (el.hasAttribute("data-jobify-oauth-account")) return true;
+          return false;
+        }) || null
+      );
+    };
+
+    const findOAuthConsentButton = () => {
+      const btns = queryAllDeep(
+        doc,
+        "#submit_approve_access, #acceptButton, [data-jobify-oauth-consent], #idSIButton9, button[type='submit'], input[type='submit'], button, [role='button'], a[role='button']"
+      ).filter((b) => !isButtonDisabledState(b) && isElementVisible(b) && !b.closest("#jobify-copilot-host"));
+
+      return (
+        btns.find((b) => {
+          if (b.id === "submit_approve_access" || b.id === "acceptButton" || b.hasAttribute("data-jobify-oauth-consent")) {
+            return true;
+          }
+          const txt = (b.innerText || b.value || b.getAttribute("aria-label") || "")
+            .replace(/[→›»↗⟶➔▶]+/g, "")
+            .replace(/\s+/g, " ")
+            .trim();
+          return /^(continue(\s+as\s+.+)?|allow(\s+access)?|accept(\s*(&|and)\s*continue)?|authorize(\s+app)?|confirm|yes,?\s*i'?m\s*in|yes|agree(\s*(&|and)\s*continue)?)$/i.test(
+            txt
+          );
+        }) || null
+      );
+    };
+
+    const accountTile = findAccountTile();
+    if (accountTile) {
+      clickElementAndInner(accountTile);
+      actionsTaken++;
+      for (let w = 0; w < 8; w++) {
+        await sleep(280);
+        const consentBtn = findOAuthConsentButton();
+        const pwNow = queryAllDeep(doc, "input[type='password']").filter(isVisibleAndEditable);
+        if (consentBtn && pwNow.length === 0) {
+          clickElementAndInner(consentBtn);
+          actionsTaken++;
+          await sleep(600);
+          break;
+        }
+        if (pwNow.length > 0) break;
+      }
+      if (queryAllDeep(doc, "input[type='password']").filter(isVisibleAndEditable).length === 0) {
+        return { handled: true, filled: actionsTaken, submittedAuthForm: true, mode: "oauth_account_chooser" };
+      }
+    }
+
+    // 2. If on an Account Chooser screen with only "Use another account" and no visible inputs yet, click "Use another account"
+    const visibleEmailInputs = queryAllDeep(
+      doc,
+      "input#identifierId, input[name='loginfmt'], #i0116, input[type='email'], input[name='identifier'], input[name='username'], input[autocomplete='username']"
+    ).filter(isVisibleAndEditable);
+    const visiblePwInputs = queryAllDeep(doc, "input[type='password']").filter(isVisibleAndEditable);
+
+    if (visibleEmailInputs.length === 0 && visiblePwInputs.length === 0) {
+      const useAnotherBtn = queryAllDeep(doc, "li, div[role='link'], div[role='button'], button, a").find((el) => {
+        if (!isElementVisible(el)) return false;
+        const t = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+        return /^(use\s+another\s+account|use\s+a\s+different\s+account|sign\s+in\s+with\s+a\s+different\s+account)$/i.test(t);
+      });
+      if (useAnotherBtn) {
+        clickElementAndInner(useAnotherBtn);
+        actionsTaken++;
+        await sleep(750);
+      }
+    }
+
+    // 3. OAuth Email / Identifier Input Step (Google #identifierId, Microsoft loginfmt / #i0116)
+    const emailInputsNow = queryAllDeep(
+      doc,
+      "input#identifierId, input[name='loginfmt'], #i0116, input[type='email'], input[name='identifier'], input[name='username'], input[autocomplete='username']"
+    ).filter(isVisibleAndEditable);
+
+    if (emailInputsNow.length > 0 && targetEmail) {
+      if (setNativeValue(emailInputsNow[0], targetEmail)) {
+        actionsTaken++;
+      }
+      await sleep(120);
+      if (queryAllDeep(doc, "input[type='password']").filter(isVisibleAndEditable).length === 0) {
+        const nextBtn =
+          doc.querySelector("#identifierNext button, #identifierNext, #idSIButton9") ||
+          queryAllDeep(doc, "button[type='submit'], input[type='submit'], button, [role='button']").find((b) => {
+            if (isButtonDisabledState(b) || !isElementVisible(b)) return false;
+            const t = (b.innerText || b.value || "").replace(/\s+/g, " ").trim();
+            return /^(next|continue|sign\s*in|proceed|submit)$/i.test(t);
+          });
+        if (nextBtn) {
+          clickElementAndInner(nextBtn);
+          actionsTaken++;
+          for (let i = 0; i < 9; i++) {
+            await sleep(280);
+            if (
+              queryAllDeep(doc, "input[type='password']").filter(isVisibleAndEditable).length > 0 ||
+              Boolean(findOAuthConsentButton())
+            ) {
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // 4. OAuth Password Step (Google Passwd / #passwordNext, Microsoft passwd / #i0118)
+    const pwInputsNow = queryAllDeep(doc, "input[type='password'], input[name='Passwd'], input[name='passwd'], #i0118").filter(
+      isVisibleAndEditable
+    );
+    if (pwInputsNow.length > 0 && targetPassword) {
+      for (const pw of pwInputsNow) {
+        if (setNativeValue(pw, targetPassword)) actionsTaken++;
+      }
+      await sleep(140);
+      const pwSubmit =
+        doc.querySelector("#passwordNext button, #passwordNext, #idSIButton9") ||
+        findAuthSubmitButton(false, doc);
+      if (pwSubmit) {
+        clickElementAndInner(pwSubmit);
+        actionsTaken++;
+        for (let i = 0; i < 8; i++) {
+          await sleep(280);
+          const consentAfterPw = findOAuthConsentButton();
+          if (consentAfterPw && queryAllDeep(doc, "input[type='password']").filter(isVisibleAndEditable).length === 0) {
+            clickElementAndInner(consentAfterPw);
+            actionsTaken++;
+            await sleep(500);
+            break;
+          }
+        }
+      }
+      return { handled: true, filled: actionsTaken, submittedAuthForm: true, mode: "oauth_password" };
+    }
+
+    // 5. Final Consent / "Continue" / "Allow" / "Stay signed in?" Step
+    const consentBtnFinal = findOAuthConsentButton();
+    if (consentBtnFinal) {
+      clickElementAndInner(consentBtnFinal);
+      actionsTaken++;
+      await sleep(600);
+      return { handled: true, filled: actionsTaken, submittedAuthForm: true, mode: "oauth_consent" };
+    }
+
+    return {
+      handled: actionsTaken > 0,
+      filled: actionsTaken,
+      submittedAuthForm: actionsTaken > 0,
+      mode: "oauth_provider"
+    };
   }
 
   // Detect Email-First 2-Step Auth Screen (Email -> Continue -> Password/OTP/CreateAccount, used on iCIMS, Eightfold, SuccessFactors, Phenom, Oracle)
@@ -1984,14 +2417,44 @@
   }
 
   // Autonomous Multi-Stage Auth Executor:
-  // Analyzes any Login or Create Account page like a human:
-  // Handles "Sign in with email" -> Email-First -> Sign In <-> Create Account (filling ALL fields + Verify Password + Consent) -> Post-Signup Sign In!
+  // Analyzes any Login, OAuth Provider, SSO Chooser, or Create Account page like a human:
+  // Handles OAuth Account Chooser -> Guest Bypass -> "Sign in with email" -> "Sign in with Google/Microsoft" -> Email-First -> Sign In <-> Create Account!
   async function performAutonomousAuth(credentials, authHistory = {}, profile = null) {
     let totalFilled = 0;
     let createdAccount = Boolean(authHistory?.createdAccount);
     let triedSignIn = Boolean(authHistory?.triedSignIn);
 
-    // Stage 0: Click "Sign in with email" (Workday SignInWithEmailButton / SSO choice gate) if present
+    // Stage 0a: If already inside an OAuth Provider Screen (Google Accounts, Microsoft Live/Entra, or embedded OAuth Account Chooser)
+    if (isOAuthProviderScreen(document)) {
+      const oauthRes = await performOAuthProviderStep(credentials, profile, document);
+      if (oauthRes.handled) {
+        return {
+          ...oauthRes,
+          createdAccount,
+          triedSignIn,
+          needsEmailVerification: detectEmailVerificationBanner(document)
+        };
+      }
+    }
+
+    // Stage 0b: Click "Apply as a Guest" / "Continue without signing in" if available
+    const guestBtn = findGuestOrSkipAuthButton(document);
+    if (guestBtn) {
+      clickElementAndInner(guestBtn);
+      await sleep(900);
+      return {
+        handled: true,
+        filled: 1,
+        clickedGuestBypass: true,
+        submittedAuthForm: true,
+        mode: "guest_bypass",
+        createdAccount,
+        triedSignIn,
+        needsEmailVerification: false
+      };
+    }
+
+    // Stage 0c: Click "Sign in with email" (Workday SignInWithEmailButton / SSO choice gate) if present
     const emailGateBtn = findEmailAuthChoiceButton(document);
     if (emailGateBtn) {
       clickElementAndInner(emailGateBtn);
@@ -2007,7 +2470,7 @@
 
     let pwVisible = Array.from(document.querySelectorAll("input[type='password']")).filter(isVisibleAndEditable);
 
-    // Stage 0b: Two-step Email-First Login / Signup (Email -> Continue -> Password / Registration / OTP)
+    // Stage 0d: Two-step Email-First Login / Signup (Email -> Continue -> Password / Registration / OTP)
     if (pwVisible.length === 0) {
       const emailFirst = detectEmailFirstAuthStep(document);
       if (emailFirst && credentials?.portalEmail) {
@@ -2021,9 +2484,18 @@
         for (let i = 0; i < 11; i++) {
           await sleep(300);
           pwVisible = Array.from(document.querySelectorAll("input[type='password']")).filter(isVisibleAndEditable);
-          if (pwVisible.length > 0 || detectOtpChallenge(document).detected || detectEmailVerificationBanner(document)) {
+          if (
+            pwVisible.length > 0 ||
+            detectOtpChallenge(document).detected ||
+            detectEmailVerificationBanner(document) ||
+            isOAuthProviderScreen(document)
+          ) {
             break;
           }
+        }
+        if (isOAuthProviderScreen(document)) {
+          const oauthStep = await performOAuthProviderStep(credentials, profile, document);
+          totalFilled += oauthStep.filled || 0;
         }
         if (pwVisible.length === 0) {
           return {
@@ -2037,7 +2509,49 @@
           };
         }
       } else {
-        // Stage 0c: If no password input and no email-first input, check if a "Create Account" or "Sign In" gate button opens the auth inputs
+        // Stage 0e: Multi-Provider OAuth / Social Login Chooser (e.g. Microsoft Careers "Sign in with Google / Microsoft / LinkedIn / Facebook")
+        const ssoChoice = findSsoProviderChoiceButton(
+          document,
+          credentials?.portalEmail || profile?.personal?.email || "ravitejavelanati11@gmail.com"
+        );
+        if (ssoChoice?.element) {
+          document.documentElement.removeAttribute("data-jobify-last-window-open");
+          try {
+            ssoChoice.element.setAttribute("data-jobify-sso-clicked-ts", String(Date.now()));
+          } catch (_) {}
+          const ssoHref = extractElementHref(ssoChoice.element);
+          clickElementAndInner(ssoChoice.element);
+          totalFilled++;
+          for (let i = 0; i < 8; i++) {
+            await sleep(280);
+            if (isOAuthProviderScreen(document)) {
+              const inlineOAuth = await performOAuthProviderStep(credentials, profile, document);
+              totalFilled += inlineOAuth.filled || 0;
+              break;
+            }
+            pwVisible = Array.from(document.querySelectorAll("input[type='password']")).filter(isVisibleAndEditable);
+            if (pwVisible.length > 0 || hasRealCandidateFormFields(document)) break;
+          }
+          const capturedWinOpen = document.documentElement.getAttribute("data-jobify-last-window-open") || "";
+          if (pwVisible.length === 0) {
+            return {
+              handled: true,
+              filled: totalFilled,
+              clickedSsoGate: true,
+              ssoProvider: ssoChoice.provider,
+              ssoLabel: ssoChoice.label,
+              windowOpenUrl: /^https?:\/\//i.test(capturedWinOpen) ? capturedWinOpen : null,
+              href: ssoHref || null,
+              submittedAuthForm: true,
+              mode: `sso_${ssoChoice.provider}`,
+              createdAccount,
+              triedSignIn,
+              needsEmailVerification: detectEmailVerificationBanner(document)
+            };
+          }
+        }
+
+        // Stage 0f: If no password input, email-first input, or SSO chooser, check if a "Create Account" or "Sign In" gate button opens the auth inputs
         const gateSwitch = !createdAccount ? findCreateAccountSwitchLink(document) || findSignInSwitchLink(document) : findSignInSwitchLink(document);
         if (gateSwitch) {
           clickElementAndInner(gateSwitch);
@@ -3238,7 +3752,10 @@
       if (
         location.href !== prevUrl ||
         hasRealCandidateFormFields(document) ||
+        Boolean(findGuestOrSkipAuthButton(document)) ||
         Boolean(findEmailAuthChoiceButton(document)) ||
+        Boolean(findSsoProviderChoiceButton(document)) ||
+        isOAuthProviderScreen(document) ||
         Boolean(detectEmailFirstAuthStep(document)) ||
         Array.from(document.querySelectorAll("input[type='password']")).some(isVisibleAndEditable)
       ) {
@@ -3266,7 +3783,10 @@
           !findApplyModalChoiceButton(document) ||
           location.href !== prevUrl ||
           hasRealCandidateFormFields(document) ||
+          Boolean(findGuestOrSkipAuthButton(document)) ||
           Boolean(findEmailAuthChoiceButton(document)) ||
+          Boolean(findSsoProviderChoiceButton(document)) ||
+          isOAuthProviderScreen(document) ||
           Array.from(document.querySelectorAll("input[type='password']")).some(isVisibleAndEditable)
         ) {
           break;
@@ -3332,7 +3852,10 @@
             !findApplyModalChoiceButton(document) ||
             location.href !== urlAtModal ||
             hasRealCandidateFormFields(document) ||
+            Boolean(findGuestOrSkipAuthButton(document)) ||
             Boolean(findEmailAuthChoiceButton(document)) ||
+            Boolean(findSsoProviderChoiceButton(document)) ||
+            isOAuthProviderScreen(document) ||
             Array.from(document.querySelectorAll("input[type='password']")).some(isVisibleAndEditable)
           ) {
             break;
@@ -3352,7 +3875,10 @@
 
       const formOrAuthReady =
         hasRealCandidateFormFields(document) ||
+        Boolean(findGuestOrSkipAuthButton(document)) ||
         Boolean(findEmailAuthChoiceButton(document)) ||
+        Boolean(findSsoProviderChoiceButton(document)) ||
+        isOAuthProviderScreen(document) ||
         Boolean(detectEmailFirstAuthStep(document)) ||
         Array.from(document.querySelectorAll("input[type='password']")).some(isVisibleAndEditable);
 
@@ -3436,7 +3962,14 @@
       document.querySelectorAll(
         "[data-jobify-next], [data-jobify-submit], .ashby-application-form-submit-button, #submit_app, #btn-submit, .template-btn-submit, button[class*='submitButton' i], [data-uxi-element-id*='submit' i], [data-automation-id='bottom-navigation-next-button'], [data-automation-id='pageFooterNextButton'], button[type='submit'], input[type='submit'], button, [role='button']"
       )
-    ).filter((b) => (includeDisabled || !isButtonDisabledState(b)) && isElementVisible(b) && !isHeaderOrNavButton(b));
+    ).filter(
+      (b) =>
+        (includeDisabled || !isButtonDisabledState(b)) &&
+        isElementVisible(b) &&
+        !isHeaderOrNavButton(b) &&
+        !b.closest(COOKIE_CONSENT_SELECTOR) &&
+        !b.closest("#jobify-copilot-host")
+    );
 
     let nextBtn = null;
     let submitBtn = null;
@@ -3467,7 +4000,7 @@
 
       if (
         b.hasAttribute("data-jobify-next") ||
-        (/^(next(\s*(step|page|section))?|continue(\s+to\s+\w+)?|save\s*(and|&)\s*continue|proceed|review(\s*application)?)$/i.test(
+        (/^(next(\s*(step|page|section))?|continue(\s+to\s+[\w\s]+)?|(save|agree|accept|confirm)\s*(and|&)\s*continue|i\s*agree(\s*(and|&)\s*continue)?|accept\s+terms|proceed(\s+to\s+application)?|review(\s*application)?)$/i.test(
           txt
         ) &&
           !/submit/i.test(txt)) ||
@@ -3828,7 +4361,11 @@
     const isSubmittedConfirmation = detectSubmissionConfirmation(document);
     const otpChallenge = detectOtpChallenge(document);
     const pwVisible = Array.from(document.querySelectorAll("input[type='password']")).filter(isVisibleAndEditable);
+    const hasGuestAuthBypass = Boolean(findGuestOrSkipAuthButton(document));
     const hasEmailAuthGate = Boolean(findEmailAuthChoiceButton(document));
+    const ssoChoice = findSsoProviderChoiceButton(document, profile?.personal?.email || "ravitejavelanati11@gmail.com");
+    const hasSsoAuthGate = Boolean(ssoChoice);
+    const isOAuthProviderPage = isOAuthProviderScreen(document);
     const hasEmailFirstAuth = Boolean(detectEmailFirstAuthStep(document));
     const hasCandidateForm = hasRealCandidateFormFields(document);
     const hasApplyChoiceModal = Boolean(findApplyModalChoiceButton(document));
@@ -3843,7 +4380,13 @@
 
     const isStandaloneAuthWall =
       !hasApplyChoiceModal &&
-      (pwVisible.length > 0 || hasEmailAuthGate || hasEmailFirstAuth || hasAuthLandingGate) &&
+      (pwVisible.length > 0 ||
+        hasGuestAuthBypass ||
+        hasEmailAuthGate ||
+        hasSsoAuthGate ||
+        isOAuthProviderPage ||
+        hasEmailFirstAuth ||
+        hasAuthLandingGate) &&
       (!hasCandidateForm || Boolean(document.querySelector("[data-jobify-auth-step-only='true']")));
 
     const inventory = extractFormFieldsInventory(profile, mergedMeta);
@@ -3860,7 +4403,12 @@
       otpChallenge,
       isStandaloneAuthWall,
       authMode: authModeInfo.mode,
+      hasGuestAuthBypass,
       hasEmailAuthGate,
+      hasSsoAuthGate,
+      ssoProvider: ssoChoice?.provider || null,
+      ssoLabel: ssoChoice?.label || null,
+      isOAuthProviderPage,
       hasApplyChoiceModal,
       needsEmailVerificationBanner,
       hasCandidateForm,
@@ -4961,7 +5509,11 @@
     attachBase64PdfToInput,
     autofillPortalAuth,
     performAutonomousAuth,
+    findGuestOrSkipAuthButton,
     findEmailAuthChoiceButton,
+    findSsoProviderChoiceButton,
+    isOAuthProviderScreen,
+    performOAuthProviderStep,
     detectEmailVerificationBanner,
     detectOtpChallenge,
     fillOtpChallengeAndSubmit,

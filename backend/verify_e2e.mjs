@@ -1131,6 +1131,48 @@ async function main() {
     }
     authRegCdp.close();
 
+    // 4i. MICROSOFT CAREERS MULTI-PROVIDER SSO ("Sign in with Google" / Microsoft / LinkedIn / Facebook) + GOOGLE OAUTH POPUP + PRIVACY CONSENT + AUTO-SUBMIT (Gate 6h)
+    const msSsoCdp = await openTabAndConnect("http://127.0.0.1:18765/sandbox/microsoft-sso");
+    const msSsoRes = await dashCdp.eval(
+      `chrome.runtime.sendMessage({
+        type: "START_FULL_AUTO_APPLY",
+        payload: {
+          tabId: ${msSsoCdp.tabId},
+          awaitCompletion: true,
+          options: {
+            tailorResume: true,
+            autoSubmit: true
+          }
+        }
+      })`,
+      65000
+    );
+    const msSsoAudit = await msSsoCdp.eval(`window.__MS_SSO_AUDIT__ || null`).catch(() => null);
+    console.log("6h. ✅ Microsoft Careers Multi-Provider SSO ('Sign in with Google') + Google OAuth Account Chooser Popup + Privacy Consent + Auto-Submit Verified:", JSON.stringify({
+      ok: msSsoRes?.ok,
+      submitted: msSsoRes?.submitted,
+      tailoredResumeFile: msSsoRes?.tailoredResumeFile,
+      msSsoAudit
+    }, null, 2));
+    if (
+      !msSsoRes?.ok ||
+      !msSsoRes?.submitted ||
+      msSsoAudit?.navSignInTrapClicked !== false ||
+      msSsoAudit?.applyClicked !== true ||
+      msSsoAudit?.ssoProviderClicked !== "google" ||
+      msSsoAudit?.oauthCompletedEmail !== "ravitejavelanati11@gmail.com" ||
+      msSsoAudit?.privacyAccepted !== true ||
+      msSsoAudit?.submitted !== true ||
+      msSsoAudit?.finalValues?.firstName !== "Raviteja" ||
+      msSsoAudit?.finalValues?.lastName !== "Velanati" ||
+      msSsoAudit?.finalValues?.email !== "ravitejavelanati11@gmail.com" ||
+      msSsoAudit?.finalValues?.resumeName !== "Raviteja_velanati_Microsoft.pdf" ||
+      msSsoAudit?.finalValues?.workAuth !== "Yes"
+    ) {
+      throw new Error(`Microsoft Careers Multi-Provider SSO + Google OAuth Popup E2E failed: ${JSON.stringify({ msSsoRes, msSsoAudit })}`);
+    }
+    msSsoCdp.close();
+
     // 5. Full UI & Runtime Sanity Check Across Dashboard (all 8 views), Popup, SidePanel & Auto-Tracker
     const trackedApps = await dashCdp.eval(`chrome.runtime.sendMessage({ type: "GET_ALL_STATE" }).then(r => r.state.applications)`);
     console.log(
@@ -1139,7 +1181,8 @@ async function main() {
         .join(", ")})`
     );
     if (
-      trackedApps.length < 5 ||
+      trackedApps.length < 6 ||
+      !trackedApps.some((a) => a.company === "Microsoft" && a.status === "Applied" && a.resumeUsed === "Raviteja_velanati_Microsoft.pdf") ||
       !trackedApps.some((a) => a.company === "OpenAI" && a.status === "Applied" && a.resumeUsed === "Raviteja_velanati_OpenAI.pdf") ||
       !trackedApps.some((a) => a.company === "NVIDIA" && a.status === "Applied" && a.resumeUsed === "Raviteja_velanati_NVIDIA.pdf") ||
       !trackedApps.some((a) => a.company === "Perplexity AI" && a.status === "Applied" && a.resumeUsed === "Raviteja_velanati_Perplexity_AI.pdf") ||
@@ -1256,6 +1299,41 @@ async function main() {
       popup: popupAudit,
       sidepanel: spAudit
     }, null, 2));
+
+    // 5c. Jobify Web Platform (http://127.0.0.1:18765/) + Live Job Aggregator + Chrome Extension Bridge Verification
+    const webAppCdp = await openTabAndConnect("http://127.0.0.1:18765/");
+    let webAppAudit = null;
+    for (let w = 0; w < 25; w++) {
+      await sleep(350);
+      webAppAudit = await webAppCdp
+        .eval(`({
+          isWebAppAttr: document.documentElement.getAttribute("data-jobify-webapp") === "true",
+          extensionConnected: document.documentElement.getAttribute("data-jobify-extension-connected") === "true",
+          statusText: document.getElementById("ext-status-text")?.textContent || "",
+          liveJobsCount: Number(document.getElementById("stat-live-jobs")?.textContent || 0),
+          syncedAppliedCount: Number(document.getElementById("stat-applied-count")?.textContent || 0),
+          renderedJobCards: document.querySelectorAll(".job-card[data-job-id]").length,
+          hasCustomUrlLauncher: Boolean(document.getElementById("custom-job-url") && document.getElementById("btn-launch-custom-url")),
+          floatingCopilotSuppressedOnWebApp: !document.getElementById("jobify-copilot-host")
+        })`)
+        .catch(() => null);
+      if (webAppAudit?.extensionConnected && webAppAudit?.renderedJobCards >= 4 && webAppAudit?.syncedAppliedCount >= 6) {
+        break;
+      }
+    }
+    console.log("7c. ✅ Jobify Web Platform (http://127.0.0.1:18765/) + Live Multi-Board Job Aggregator + Chrome Extension Bridge Verified:", JSON.stringify(webAppAudit, null, 2));
+    if (
+      !webAppAudit?.isWebAppAttr ||
+      !webAppAudit?.extensionConnected ||
+      webAppAudit.liveJobsCount < 4 ||
+      webAppAudit.renderedJobCards < 4 ||
+      webAppAudit.syncedAppliedCount < 6 ||
+      !webAppAudit.hasCustomUrlLauncher ||
+      !webAppAudit.floatingCopilotSuppressedOnWebApp
+    ) {
+      throw new Error(`Jobify Web Platform or Extension Bridge verification failed: ${JSON.stringify(webAppAudit)}`);
+    }
+    webAppCdp.close();
 
     dashCdp.close();
     swCdp.close();

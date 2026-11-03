@@ -37,7 +37,8 @@
     "sidePanel",
     "alarms",
     "notifications",
-    "clipboardWrite"
+    "clipboardWrite",
+    "contentSettings"
   ],
   "host_permissions": [
     "<all_urls>"

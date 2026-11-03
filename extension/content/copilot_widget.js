@@ -1557,7 +1557,18 @@
         return { ok: true, result };
       }
       if (msg.type === "AUTO_APPLY_PROGRESS") {
-        applyAutoApplyProgressUpdate(msg.payload);
+        if (document.documentElement?.hasAttribute("data-jobify-webapp")) {
+          window.postMessage(
+            {
+              source: "jobify-extension",
+              type: "JOBIFY_EXT_PROGRESS",
+              payload: msg.payload
+            },
+            "*"
+          );
+        } else {
+          applyAutoApplyProgressUpdate(msg.payload);
+        }
         return { ok: true };
       }
       if (msg.type === "GET_PAGE_CONTEXT") {
@@ -1624,6 +1635,103 @@
     return true;
   });
 
+  // Jobify Web Platform <-> Chrome Extension Bridge
+  function setupWebAppExtensionBridge() {
+    if (!IS_TOP_FRAME) return false;
+    const isWebApp =
+      document.documentElement?.hasAttribute("data-jobify-webapp") ||
+      (location.hostname === "127.0.0.1" && location.port === "18765" && (location.pathname === "/" || location.pathname.startsWith("/app"))) ||
+      (location.hostname === "localhost" && location.port === "18765" && (location.pathname === "/" || location.pathname.startsWith("/app")));
+    if (!isWebApp) return false;
+
+    document.documentElement.setAttribute("data-jobify-extension-connected", "true");
+    window.postMessage(
+      {
+        source: "jobify-extension",
+        type: "JOBIFY_EXT_READY",
+        payload: { connected: true, version: "2.3.0" }
+      },
+      "*"
+    );
+
+    window.addEventListener("message", async (event) => {
+      if (event.source !== window) return;
+      const data = event.data;
+      if (!data || data.source !== "jobify-webapp" || !data.type) return;
+      const reqId = data.reqId || null;
+
+      const reply = (respPayload) => {
+        window.postMessage(
+          {
+            source: "jobify-extension",
+            type: "JOBIFY_EXT_RESPONSE",
+            reqId,
+            requestType: data.type,
+            payload: respPayload
+          },
+          "*"
+        );
+      };
+
+      try {
+        if (data.type === "JOBIFY_WEB_PING") {
+          document.documentElement.setAttribute("data-jobify-extension-connected", "true");
+          reply({ ok: true, connected: true, version: "2.3.0" });
+          return;
+        }
+        if (data.type === "JOBIFY_WEB_GET_STATE") {
+          const st = await safeSendMessage({ type: "GET_ALL_STATE" });
+          reply(st);
+          return;
+        }
+        if (data.type === "JOBIFY_WEB_AUTO_APPLY") {
+          const res = await safeSendMessage({
+            type: "LAUNCH_TAB_AND_AUTO_APPLY",
+            payload: data.payload || {}
+          });
+          reply(res);
+          return;
+        }
+        if (data.type === "JOBIFY_WEB_TAILOR_RESUME") {
+          const res = await safeSendMessage({
+            type: "TAILOR_RESUME",
+            payload: data.payload || {}
+          });
+          reply(res);
+          return;
+        }
+        if (data.type === "JOBIFY_WEB_STOP_AUTO_APPLY") {
+          const res = await safeSendMessage({ type: "STOP_FULL_AUTO_APPLY" });
+          reply(res);
+          return;
+        }
+        if (data.type === "JOBIFY_WEB_ENQUEUE_BATCH") {
+          const enq = await safeSendMessage({
+            type: "ENQUEUE_AUTOPILOT",
+            payload: { jobs: data.payload?.jobs || [] }
+          });
+          if (data.payload?.startNow) {
+            await safeSendMessage({ type: "RUN_AUTOPILOT_NOW" });
+          }
+          reply(enq);
+          return;
+        }
+        if (data.type === "JOBIFY_WEB_OPEN_HUB") {
+          const res = await safeSendMessage({
+            type: "OPEN_DASHBOARD",
+            payload: data.payload || {}
+          });
+          reply(res);
+          return;
+        }
+      } catch (err) {
+        reply({ ok: false, error: err?.message || String(err) });
+      }
+    });
+
+    return true;
+  }
+
   function shouldAutoOpenPanel(meta) {
     if (!meta?.isRelevantPage || hiddenForTab || userMinimized) return false;
     if (autoApplyStatus?.running) return false;
@@ -1644,6 +1752,9 @@
       await new Promise((r) => setTimeout(r, 250));
     }
     if (typeof chrome === "undefined" || !chrome.runtime?.id) return;
+    if (setupWebAppExtensionBridge()) {
+      return;
+    }
     await refreshStateAndAnalyze();
     attachSubmitAutoTracker();
 

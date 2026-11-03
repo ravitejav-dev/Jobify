@@ -56,8 +56,18 @@ chrome.tabs.onCreated.addListener((tab) => {
   if (recentSpawnedTabs.length > 25) recentSpawnedTabs.shift();
 });
 
+function allowCareerPortalPopups() {
+  try {
+    chrome.contentSettings?.popups?.set({ primaryPattern: "<all_urls>", setting: "allow" }, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (_) {}
+}
+allowCareerPortalPopups();
+
 chrome.runtime.onInstalled.addListener(async () => {
   await ensureInitialized();
+  allowCareerPortalPopups();
   if (chrome.sidePanel?.setPanelBehavior) {
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
   }
@@ -98,6 +108,18 @@ async function broadcastAutoApplyProgress(tabId, patch) {
       .sendMessage(tabId, { type: "AUTO_APPLY_PROGRESS", payload: currentAutoApplyStatus })
       .catch(() => {});
   }
+  try {
+    const webTabs = await chrome.tabs.query({
+      url: ["http://127.0.0.1:18765/*", "http://localhost:18765/*"]
+    });
+    for (const wt of webTabs || []) {
+      if (wt.id && wt.id !== tabId) {
+        chrome.tabs
+          .sendMessage(wt.id, { type: "AUTO_APPLY_PROGRESS", payload: currentAutoApplyStatus })
+          .catch(() => {});
+      }
+    }
+  } catch (_) {}
 }
 
 async function arrayBufferToBase64(buffer) {
@@ -927,6 +949,12 @@ async function inspectTabFrames(tabId, topJobMeta = null) {
       hasValidationErrors: false,
       validationErrors: [],
       hardBlocker: { blocked: false, reason: null },
+      isStandaloneAuthWall: false,
+      hasGuestAuthBypass: false,
+      hasSsoAuthGate: false,
+      isOAuthProviderPage: false,
+      hasEmailAuthGate: false,
+      authMode: null,
       inventory: { totalFields: 0, emptyFieldsCount: 0, emptyRequiredCount: 0, requiresCoverLetter: false, fields: [] },
       hasApplyButton: false,
       hasNextButton: false,
@@ -975,6 +1003,11 @@ async function inspectTabFrames(tabId, topJobMeta = null) {
       Boolean(authFrame) &&
       !hasApplyChoiceModal &&
       !valid.some((v) => v.frameId !== authFrame.frameId && v.hasCandidateForm),
+    hasGuestAuthBypass: Boolean(authFrame?.hasGuestAuthBypass || valid.some((v) => v.hasGuestAuthBypass)),
+    hasSsoAuthGate: Boolean(authFrame?.hasSsoAuthGate || valid.some((v) => v.hasSsoAuthGate)),
+    isOAuthProviderPage: Boolean(authFrame?.isOAuthProviderPage || valid.some((v) => v.isOAuthProviderPage)),
+    hasEmailAuthGate: Boolean(authFrame?.hasEmailAuthGate || valid.some((v) => v.hasEmailAuthGate)),
+    authMode: authFrame?.authMode || null,
     inventory: {
       totalFields,
       emptyFieldsCount,
@@ -1376,8 +1409,76 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         : null
     });
 
+    const driveChildOAuthOrPortalTab = async (childTabId, openerTabId, currentState) => {
+      if (!childTabId) return { targetTabId: openerTabId, closedPopup: false };
+      await waitForTabComplete(childTabId, 10000);
+
+      for (let oauthStep = 1; oauthStep <= 6; oauthStep++) {
+        if (autoApplyAbortFlag) break;
+        const childInfo = await chrome.tabs.get(childTabId).catch(() => null);
+        if (!childInfo) {
+          // OAuth popup completed and closed itself via window.close() — return control to opener job tab!
+          await waitForTabSettle(openerTabId, 900, 4500);
+          return { targetTabId: openerTabId, closedPopup: true };
+        }
+
+        await ensureTabScripts(childTabId);
+        const childScreen = await inspectTabFrames(childTabId, jobMeta);
+
+        if (
+          childScreen.hasCandidateForm ||
+          (childScreen.inventory?.totalFields || 0) > 0 ||
+          childScreen.isSubmittedConfirmation
+        ) {
+          await notifyOpenerTabHandoff(openerTabId, childTabId);
+          return { targetTabId: childTabId, closedPopup: false };
+        }
+
+        if (childScreen.isOAuthProviderPage || childScreen.isStandaloneAuthWall) {
+          await broadcastAutoApplyProgress(openerTabId, {
+            stage: "portal_auth",
+            stepLabel: `🔐 Completing OAuth Sign-In Window (Step ${oauthStep})`,
+            detail: `Selecting ${currentState.credentials.portalEmail} & authorizing portal access...`
+          });
+          await executeAdapterAcrossTab(
+            childTabId,
+            "performAutonomousAuth",
+            [currentState.credentials, authHistory, currentState.profile],
+            { timeoutMs: 14000 }
+          );
+          await sleep(750);
+          const stillOpen = await chrome.tabs.get(childTabId).catch(() => null);
+          if (!stillOpen) {
+            await waitForTabSettle(openerTabId, 900, 4500);
+            return { targetTabId: openerTabId, closedPopup: true };
+          }
+          await waitForTabSettle(childTabId, 900, 4000);
+          continue;
+        }
+
+        await sleep(500);
+      }
+
+      const finalCheck = await chrome.tabs.get(childTabId).catch(() => null);
+      if (!finalCheck) {
+        await waitForTabSettle(openerTabId, 900, 4500);
+        return { targetTabId: openerTabId, closedPopup: true };
+      }
+      await notifyOpenerTabHandoff(openerTabId, childTabId);
+      return { targetTabId: childTabId, closedPopup: false };
+    };
+
     for (let stepIdx = 1; stepIdx <= 20; stepIdx++) {
       if (autoApplyAbortFlag) throw new Error("Stopped by user.");
+
+      // If current tabId was an OAuth popup that closed itself, recover back to initialTabId
+      const activeTabCheck = await chrome.tabs.get(tabId).catch(() => null);
+      if (!activeTabCheck && tabId !== initialTabId) {
+        const initCheck = await chrome.tabs.get(initialTabId).catch(() => null);
+        if (initCheck) {
+          tabId = initialTabId;
+        }
+      }
 
       await ensureTabScripts(tabId);
       state = await getAllState();
@@ -1527,20 +1628,16 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         }
       }
 
-      // Check C: Standalone Portal Auth ("Sign in with email" -> Create Account <-> Sign In -> Post-Signup Sign In!)
-      if (screen.isStandaloneAuthWall && authAttempts < 6) {
+      // Check C: Standalone Portal Auth (Guest Bypass -> Multi-Provider SSO "Sign in with Google" -> OAuth Account Chooser -> Email Gate -> Create Account <-> Sign In!)
+      if (screen.isStandaloneAuthWall && authAttempts < 8) {
         const hasPortalPassword = Boolean(String(state.credentials?.portalPassword || "").trim());
-        if (!hasPortalPassword) {
-          if (screen.hasEmailAuthGate && authAttempts === 0) {
-            authAttempts++;
-            await executeAdapterAcrossTab(
-              tabId,
-              "performAutonomousAuth",
-              [state.credentials, authHistory, state.profile],
-              { timeoutMs: 18000 }
-            );
-            await waitForTabSettle(tabId, 900, 4000);
-          }
+        const canProceedWithoutPassword = Boolean(
+          screen.hasGuestAuthBypass ||
+            screen.hasSsoAuthGate ||
+            screen.isOAuthProviderPage ||
+            screen.hasEmailAuthGate
+        );
+        if (!hasPortalPassword && !canProceedWithoutPassword) {
           await broadcastAutoApplyProgress(tabId, {
             running: false,
             completed: false,
@@ -1562,16 +1659,23 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         authOrSubmitTriggerMs = Date.now();
         await broadcastAutoApplyProgress(tabId, {
           stage: "portal_auth",
-          stepLabel: screen.hasEmailAuthGate
+          stepLabel: screen.hasGuestAuthBypass
+            ? "🔓 Bypassing Login Gate ('Apply as Guest')"
+            : screen.isOAuthProviderPage
+            ? `🔐 Completing OAuth Account Selection (${state.credentials.portalEmail})`
+            : screen.hasSsoAuthGate
+            ? "🔐 Selecting 'Sign in with Google' on SSO Portal"
+            : screen.hasEmailAuthGate
             ? "🔐 Selecting 'Sign in with Email' & Authenticating"
             : authHistory.createdAccount
             ? "🔐 Completing Post-Signup Portal Sign In"
             : screen.authMode === "create"
             ? "🔐 Creating Candidate Account (Filling All Registration Fields)"
             : "🔐 Portal Sign In / Create Account",
-          detail: `Using ${state.credentials.portalEmail} (handling Login, Registration Fields & Terms)...`
+          detail: `Using ${state.credentials.portalEmail} (handling SSO/OAuth, Login, Registration & Terms)...`
         });
 
+        await installWindowOpenCaptureHook(tabId);
         const authExec = await executeAdapterAcrossTab(
           tabId,
           "performAutonomousAuth",
@@ -1580,20 +1684,48 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         );
 
         let needsVerifyLinkNow = false;
+        let clickedSsoGate = false;
         for (const entry of authExec || []) {
           const r = entry?.result;
           if (!r) continue;
           if (r.createdAccount) authHistory.createdAccount = true;
           if (r.triedSignIn) authHistory.triedSignIn = true;
           if (r.needsEmailVerification) needsVerifyLinkNow = true;
+          if (r.action === "sso_provider_gate") clickedSsoGate = true;
         }
 
-        const childTabAfterAuth = findSpawnedChildTab(tabId, authOrSubmitTriggerMs);
+        // Wait briefly in case clicking "Sign in with Google" spawns an OAuth popup window/tab
+        if (clickedSsoGate) {
+          await sleep(450);
+        }
+
+        let childTabAfterAuth = findSpawnedChildTab(tabId, authOrSubmitTriggerMs);
+        if (!childTabAfterAuth?.id && clickedSsoGate) {
+          const capturedRes = await withTimeout(
+            chrome.scripting.executeScript({
+              target: { tabId, frameIds: [0] },
+              func: () => document.documentElement.getAttribute("data-jobify-last-window-open") || ""
+            }),
+            1200,
+            null
+          );
+          const capUrl = capturedRes?.[0]?.result || "";
+          if (/^https?:\/\//i.test(capUrl)) {
+            try {
+              const openedPopup = await chrome.tabs.create({
+                url: capUrl,
+                openerTabId: tabId,
+                active: true
+              });
+              childTabAfterAuth = { id: openedPopup.id, openerTabId: tabId, createdAt: Date.now() };
+            } catch (_) {}
+          }
+        }
+
         if (childTabAfterAuth?.id) {
           const prevTabId = tabId;
-          tabId = childTabAfterAuth.id;
-          await notifyOpenerTabHandoff(prevTabId, tabId);
-          await waitForTabComplete(tabId, 12000);
+          const childOut = await driveChildOAuthOrPortalTab(childTabAfterAuth.id, prevTabId, state);
+          tabId = childOut.targetTabId || prevTabId;
         } else {
           await waitForTabSettle(tabId, 1500, 7500);
         }
@@ -2231,11 +2363,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "LAUNCH_TAB_AND_AUTO_APPLY": {
         const jobUrl = String(payload.url || "").trim();
         if (!jobUrl) return { ok: false, error: "Missing job URL." };
-        const createdTab = await chrome.tabs.create({ url: jobUrl, active: true });
-        (async () => {
+        const createdTab = await chrome.tabs.create({ url: jobUrl, active: payload.active !== false });
+        const runTask = async () => {
           await waitForTabComplete(createdTab.id, 18000);
           await ensureTabScripts(createdTab.id);
-          await runFullAutoApplyWorkflow(createdTab.id, {
+          return await runFullAutoApplyWorkflow(createdTab.id, {
             autoSubmit:
               payload.options?.autoSubmit !== undefined
                 ? Boolean(payload.options.autoSubmit)
@@ -2243,7 +2375,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             tailorResume: payload.options?.tailorResume !== false,
             jobMeta: payload.options?.jobMeta || payload.jobMeta || null
           });
-        })().catch(() => {});
+        };
+        if (payload.awaitCompletion) {
+          const out = await runTask();
+          return { ...out, tabId: out?.tabId || createdTab.id };
+        }
+        runTask().catch(() => {});
         return { ok: true, started: true, tabId: createdTab.id };
       }
 
