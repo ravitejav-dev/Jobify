@@ -2575,6 +2575,48 @@
     );
   }
 
+  function extractElementHref(el) {
+    if (!el) return null;
+    const anchor = el.tagName === "A" ? el : el.closest?.("a[href]") || el.querySelector?.("a[href]");
+    const raw =
+      anchor?.getAttribute?.("href") ||
+      el.getAttribute?.("href") ||
+      el.dataset?.href ||
+      el.dataset?.url ||
+      el.dataset?.applyUrl ||
+      el.getAttribute?.("formaction") ||
+      "";
+    const trimmed = String(raw || "").trim();
+    if (!trimmed || /^#|^javascript:|^mailto:|^tel:/i.test(trimmed)) return null;
+    try {
+      return new URL(trimmed, location.href).href;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function clickElementAndInner(el) {
+    if (!el) return;
+    try {
+      el.scrollIntoView({ block: "center", behavior: "instant" });
+    } catch (_) {}
+    const wdFilter =
+      el.querySelector?.("[data-automation-id='click_filter']") ||
+      el.parentElement?.querySelector?.("[data-automation-id='click_filter']");
+    if (wdFilter && isElementVisible(wdFilter)) {
+      dispatchRealClick(wdFilter);
+      return;
+    }
+    const innerAction =
+      el.tagName !== "A" && el.tagName !== "BUTTON"
+        ? el.querySelector?.("a, button, [role='button']")
+        : null;
+    if (innerAction && isElementVisible(innerAction)) {
+      dispatchRealClick(innerAction);
+    }
+    dispatchRealClick(el);
+  }
+
   // Detect open "Start Your Application" / Apply-Method Choice Modal (e.g. Workday Apply Manually vs LinkedIn / Last Application)
   function findApplyModalChoiceButton(doc = document) {
     const explicitManual = Array.from(
@@ -2582,36 +2624,61 @@
         "[data-automation-id='applyManually'], [data-uxi-element-id*='applyManually' i], [data-jobify-apply-manual]"
       )
     ).find((el) => isElementVisible(el) && !el.disabled);
-    if (explicitManual) return explicitManual;
+    if (explicitManual) {
+      return explicitManual.querySelector?.("a, button") || explicitManual;
+    }
 
     const visibleInteractive = Array.from(
-      doc.querySelectorAll("a, button, [role='button']")
-    ).filter((el) => !el.disabled && isElementVisible(el) && !isHeaderOrNavButton(el));
+      doc.querySelectorAll("a, button, [role='button'], input[type='button'], input[type='submit']")
+    ).filter(
+      (el) =>
+        !el.disabled &&
+        isElementVisible(el) &&
+        !isHeaderOrNavButton(el) &&
+        !el.closest("#application_form, #application-form, #grnhse_app, [class*='ashby-application-form']")
+    );
 
     const manualTextBtn = visibleInteractive.find((el) => {
-      const txt = (el.innerText || el.textContent || el.getAttribute("aria-label") || "")
+      const txt = (el.innerText || el.textContent || el.value || el.getAttribute("aria-label") || "")
+        .replace(/[→›»↗⟶➔▶]+/g, "")
         .replace(/\s+/g, " ")
         .trim();
-      return /^(apply\s*manually|fill\s*(out\s*)?manually|manual\s*application|continue\s*manually)$/i.test(txt);
+      return /^(apply\s*manually|manually\s*apply|fill\s*out\s*manually|manual\s*application|continue\s*manually|apply\s*without\s*linkedin)$/i.test(
+        txt
+      );
     });
     if (manualTextBtn) return manualTextBtn;
 
     // Fallback inside an open dialog ONLY if no "Apply Manually" exists (never pick LinkedIn or Use My Last Application!)
     const modalRoot = Array.from(
-      doc.querySelectorAll("[data-automation-id='wd-popup-frame'], [role='dialog'], [aria-modal='true']")
+      doc.querySelectorAll(
+        "[data-automation-id='wd-popup-frame'], [data-automation-id*='popup' i], [role='dialog'], [aria-modal='true'], dialog[open]"
+      )
     ).find(isElementVisible);
     if (modalRoot) {
+      // Do not treat an active candidate form modal (e.g. Easy Apply with First/Last Name inputs) as a pre-form choice modal
+      const modalInputs = Array.from(modalRoot.querySelectorAll("input, select, textarea")).filter((i) => {
+        if (isTrapOrSystemInput(i) || i.disabled) return false;
+        if (i.type === "hidden" || i.type === "submit" || i.type === "button" || i.type === "password") return false;
+        return isVisibleAndEditable(i);
+      });
+      if (modalInputs.length >= 2) return null;
+
       const autofillBtn = Array.from(
-        modalRoot.querySelectorAll("[data-automation-id='autofillWithResume'], a, button, [role='button']")
+        modalRoot.querySelectorAll(
+          "[data-automation-id='autofillWithResume'], [data-automation-id*='apply' i], a, button, [role='button']"
+        )
       ).find((el) => {
         if (!isElementVisible(el) || el.disabled) return false;
         const autoId = el.dataset?.automationId || "";
-        if (/linkedin|useMyLast/i.test(autoId)) return false;
-        const txt = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
-        if (/linkedin|indeed|last\s*(application|location)/i.test(txt)) return false;
+        if (/linkedin|useMyLast|close|cancel/i.test(autoId)) return false;
+        const txt = (el.innerText || el.textContent || "").replace(/[→›»↗⟶➔▶]+/g, "").replace(/\s+/g, " ").trim();
+        if (/linkedin|indeed|last\s*(application|location)|cancel|close|back/i.test(txt)) return false;
         return (
           autoId === "autofillWithResume" ||
-          /^(autofill\s*with\s*resume|upload\s*resume|continue\s*without\s*linkedin)$/i.test(txt)
+          /^(autofill\s*with\s*resume|upload\s*a?\s*resume|continue\s*without\s*linkedin|start(\s+your|\s+new)?\s+application|create\s+new\s+application)$/i.test(
+            txt
+          )
         );
       });
       if (autofillBtn) return autofillBtn;
@@ -2629,7 +2696,7 @@
     }
 
     const visibleInputs = Array.from(
-      doc.querySelectorAll("input, select, textarea, [role='combobox'], button[aria-haspopup='listbox']")
+      doc.querySelectorAll("input, select, textarea, [role='combobox'], button[aria-haspopup='listbox'], button[aria-haspopup='true']")
     ).filter((el) => {
       if (isTrapOrSystemInput(el) || el.disabled) return false;
       if (el.type === "password" || el.type === "hidden" || el.type === "submit" || el.type === "button") return false;
@@ -2645,10 +2712,18 @@
     });
 
     for (const el of visibleInputs) {
-      const sig = `${el.id || ""} ${el.name || ""} ${el.autocomplete || ""} ${el.dataset?.automationId || ""}`.toLowerCase();
+      const sig = `${el.id || ""} ${el.name || ""} ${el.autocomplete || ""} ${el.placeholder || ""} ${el.dataset?.automationId || ""} ${el.getAttribute?.("aria-label") || ""}`.toLowerCase();
       if (
-        /first[_-]?name|last[_-]?name|given-name|family-name|legalnamesection|_systemfield_name|phone[-_]?number|\bphone\b|linkedin|street[_-]?address|addresssection/i.test(
+        /first[_-\s]?name|last[_-\s]?name|full[_-\s]?name|given[_-\s]?name|family[_-\s]?name|legal[_-\s]?name|_systemfield_name|phone[-_\s]?number|\bphone\b|\bmobile\b|linkedin|github|portfolio|street[_-\s]?address|address[_-\s]?line|addresssection|postal[_-\s]?code|zip[_-\s]?code|how\s+did\s+you\s+hear|work\s+authoriz|sponsorship|visa\s+status|desired\s+salary|compensation|years\s+of\s+experience/i.test(
           sig
+        )
+      ) {
+        return true;
+      }
+      const ctx = getFieldContext(el);
+      if (
+        /first\s*name|last\s*name|full\s*name|given\s*name|family\s*name|legal\s*name|phone\s*number|mobile\s*number|linkedin|github|portfolio|street\s*address|address\s*line|postal\s*code|zip\s*code|how\s+did\s+you\s+hear|authorized\s+to\s+work|work\s+authorization|require\s+sponsorship|visa\s+sponsorship|desired\s+salary|salary\s+expectations|years\s+of\s+experience|cover\s+letter/i.test(
+          ctx.fullLabel
         )
       ) {
         return true;
@@ -2658,28 +2733,33 @@
     const insideAppContainer = visibleInputs.filter((el) =>
       Boolean(
         el.closest(
-          "[data-automation-id='applyFlowPage'], [class*='ashby-application-form'], #application_form, #grnhse_app, .application-form, [class*='applicationForm' i], form:not([role='search']):not([action*='search' i])"
+          "[data-automation-id*='applyFlow' i], [data-automation-id*='myInformation' i], [data-automation-id*='contactInformation' i], [class*='ashby-application-form'], #application_form, #grnhse_app, .application-form, [class*='applicationForm' i], [class*='apply-form' i], [id*='application-form' i], [id*='apply-form' i], [role='dialog'], [aria-modal='true'], form:not([role='search']):not([action*='search' i])"
         )
       )
     );
     if (
       insideAppContainer.some((el) =>
-        Boolean(el.closest("[data-automation-id='applyFlowPage'], [class*='ashby-application-form']"))
+        Boolean(
+          el.closest(
+            "[data-automation-id*='applyFlow' i], [data-automation-id*='myInformation' i], [data-automation-id*='contactInformation' i], [class*='ashby-application-form'], #application_form, #grnhse_app"
+          )
+        )
       )
     ) {
       return true;
     }
-    return insideAppContainer.length >= 3;
+    return insideAppContainer.length >= 2 || visibleInputs.length >= 3;
   }
 
   function findApplyEntryCandidates(doc = document) {
     return Array.from(
       doc.querySelectorAll(
-        "[data-automation-id='adventureButton'], [data-uxi-element-id*='adventureButton' i], [data-jobify-apply-btn], a[href$='/application'], a[href*='/application?'], a.postings-btn[href*='/apply'], a[href*='/careers/apply/'], button, a[role='button'], a[role='tab'], [role='button'], input[type='button'], a"
+        "[data-automation-id='adventureButton'], [data-uxi-element-id*='adventureButton' i], [data-automation-id*='applyButton' i], [data-jobify-apply-btn], a[href$='/application'], a[href*='/application?'], a.postings-btn[href*='/apply'], a[href*='/careers/apply/'], a[href*='/apply/'], [class*='apply-button' i], [id*='apply-button' i], button, a[role='button'], a[role='tab'], [role='button'], input[type='button'], input[type='submit'], a"
       )
     ).filter((el) => {
       if (el.disabled || !isElementVisible(el)) return false;
       if (isHeaderOrNavButton(el)) return false;
+      if (el.closest("#jobify-copilot-host")) return false;
       const autoId = el.dataset?.automationId || "";
       if (/^(applyWithLinkedIn|useMyLastApplication|utilityButtonSignIn)$/i.test(autoId)) return false;
       const rawTxt = (el.innerText || el.textContent || el.value || el.getAttribute("aria-label") || "")
@@ -2704,7 +2784,7 @@
       if (/^application$/i.test(rawTxt)) {
         return el.getAttribute("role") === "tab" || /\/application(\?|$)/i.test(href);
       }
-      return /^(apply(\s+(now|(for|to)\s+(this\s+|the\s+|a\s+)?(job|role|position|opening|opportunity)|online|here|externally|on\s+company\s+site|directly|today|manually))?|quick\s+apply|easy\s+apply|start(\s+your)?\s+application|begin\s+application|continue\s+to\s+application|submit\s+an?\s+application|i'?m\s+interested)$/i.test(
+      return /^(apply(\s+(now|(for|to)\s+(this\s+|the\s+|a\s+)?(job|role|position|opening|opportunity)|online|here|externally|on\s+company\s+(site|website)|directly|today|manually|with\s+resume))?|quick\s+apply|easy\s+apply|1[-\s]?click\s+apply|instant\s+apply|start(\s+your)?\s+application|begin\s+application|continue\s+to\s+application|go\s+to\s+application|submit\s+an?\s+application|i'?m\s+interested)$/i.test(
         rawTxt
       );
     });
@@ -2712,54 +2792,72 @@
 
   // Click "Apply" / "Apply Now" AND handle Workday / multi-option "Start Your Application" -> "Apply Manually" modal!
   async function clickApplyEntryButton() {
-    const navigateLinkFallbackIfNeeded = async (anchorEl, prevUrl) => {
-      if (!anchorEl) return;
-      const rawHref = anchorEl.getAttribute?.("href") || "";
-      const targetAttr = anchorEl.getAttribute?.("target") || "";
-      if (!rawHref || /^#|^javascript:/i.test(rawHref) || targetAttr === "_blank") return;
-      for (let w = 0; w < 5; w++) {
-        await sleep(200);
-        if (
-          location.href !== prevUrl ||
-          hasRealCandidateFormFields(document) ||
-          Boolean(findEmailAuthChoiceButton(document)) ||
-          Array.from(document.querySelectorAll("input[type='password']")).some(isVisibleAndEditable)
-        ) {
-          return;
-        }
+    document.documentElement.removeAttribute("data-jobify-last-window-open");
+
+    const readCapturedWindowOpen = () => {
+      const captured = document.documentElement.getAttribute("data-jobify-last-window-open") || "";
+      return /^https?:\/\//i.test(captured) ? captured : null;
+    };
+
+    const navigateIfStuckOnSameView = async (rawHref, prevUrl) => {
+      if (!rawHref || !/^https?:\/\//i.test(rawHref)) return false;
+      if (findApplyModalChoiceButton(document)) return false;
+      if (
+        location.href !== prevUrl ||
+        hasRealCandidateFormFields(document) ||
+        Boolean(findEmailAuthChoiceButton(document)) ||
+        Boolean(detectEmailFirstAuthStep(document)) ||
+        Array.from(document.querySelectorAll("input[type='password']")).some(isVisibleAndEditable)
+      ) {
+        return false;
       }
       try {
-        window.location.assign(new URL(rawHref, location.href).href);
-      } catch (_) {}
+        window.location.assign(rawHref);
+        return true;
+      } catch (_) {
+        return false;
+      }
     };
 
     // 1. If "Start Your Application" modal ("Apply Manually") is ALREADY open on screen, click it immediately!
     const existingModalBtn = findApplyModalChoiceButton(document);
     if (existingModalBtn) {
       const prevUrl = location.href;
-      const modalHref = existingModalBtn.getAttribute("href") || "";
-      const modalTarget = existingModalBtn.getAttribute("target") || "";
-      try {
-        existingModalBtn.scrollIntoView({ block: "center" });
-      } catch (_) {}
-      await sleep(80);
-      dispatchRealClick(existingModalBtn);
-      await navigateLinkFallbackIfNeeded(existingModalBtn, prevUrl);
+      const modalHref = extractElementHref(existingModalBtn);
+      const modalTarget =
+        existingModalBtn.getAttribute("target") || existingModalBtn.closest("a")?.getAttribute("target") || "";
+      clickElementAndInner(existingModalBtn);
+      for (let w = 0; w < 5; w++) {
+        await sleep(160);
+        if (
+          !findApplyModalChoiceButton(document) ||
+          location.href !== prevUrl ||
+          hasRealCandidateFormFields(document) ||
+          Boolean(findEmailAuthChoiceButton(document)) ||
+          Array.from(document.querySelectorAll("input[type='password']")).some(isVisibleAndEditable)
+        ) {
+          break;
+        }
+      }
+      if (modalHref && modalTarget !== "_blank") {
+        await navigateIfStuckOnSameView(modalHref, prevUrl);
+      }
       return {
         clicked: true,
         clickedModalChoice: true,
-        href: modalHref || null,
-        opensNewTab: modalTarget === "_blank"
+        href: readCapturedWindowOpen() || modalHref || null,
+        windowOpenUrl: readCapturedWindowOpen(),
+        opensNewTab: modalTarget === "_blank" || Boolean(readCapturedWindowOpen())
       };
     }
 
     // 2. If page has a lazy embedded ATS iframe below the fold (e.g. Databricks #grnhse_iframe), scroll it into view
     const embeddedIframe = document.querySelector(
-      "iframe[src*='greenhouse.io'], iframe[src*='ashbyhq.com'], iframe[src*='lever.co'], #grnhse_iframe"
+      "iframe[src*='greenhouse.io'], iframe[src*='ashbyhq.com'], iframe[src*='lever.co'], iframe[src*='myworkdayjobs.com'], iframe[src*='icims.com'], iframe[src*='smartrecruiters.com'], #grnhse_iframe"
     );
     if (embeddedIframe) {
       try {
-        embeddedIframe.scrollIntoView({ block: "center" });
+        embeddedIframe.scrollIntoView({ block: "center", behavior: "instant" });
       } catch (_) {}
     }
 
@@ -2780,73 +2878,97 @@
       ) || candidates[0];
 
     const beforeUrl = location.href;
-    const href = chosenBtn.getAttribute("href") || "";
-    const targetAttr = chosenBtn.getAttribute("target") || "";
-    try {
-      chosenBtn.scrollIntoView({ block: "center" });
-    } catch (_) {}
-    await sleep(80);
-    dispatchRealClick(chosenBtn);
+    const href = extractElementHref(chosenBtn);
+    const targetAttr = chosenBtn.getAttribute("target") || chosenBtn.closest("a")?.getAttribute("target") || "";
+    clickElementAndInner(chosenBtn);
 
-    // 4. Poll up to 4.0s (16 x 250ms) for async "Start Your Application" modal (Workday wd-popup-frame -> Apply Manually)
-    for (let tick = 0; tick < 16; tick++) {
-      await sleep(250);
+    // 4. Poll up to 2.0s (10 x 200ms) for async "Start Your Application" modal (Workday wd-popup-frame -> Apply Manually)
+    // Keep polling concise so backgrounded tabs never stall; service_worker also polls for modal/form/child-tab!
+    for (let tick = 0; tick < 10; tick++) {
+      await sleep(200);
       const modalChoice = findApplyModalChoiceButton(document);
       if (modalChoice) {
-        await sleep(120);
+        await sleep(80);
         const urlAtModal = location.href;
-        const mHref = modalChoice.getAttribute("href") || "";
-        const mTarget = modalChoice.getAttribute("target") || "";
-        dispatchRealClick(modalChoice);
-        await navigateLinkFallbackIfNeeded(modalChoice, urlAtModal);
+        const mHref = extractElementHref(modalChoice);
+        const mTarget = modalChoice.getAttribute("target") || modalChoice.closest("a")?.getAttribute("target") || "";
+        clickElementAndInner(modalChoice);
+        for (let mw = 0; mw < 4; mw++) {
+          await sleep(150);
+          if (
+            !findApplyModalChoiceButton(document) ||
+            location.href !== urlAtModal ||
+            hasRealCandidateFormFields(document) ||
+            Boolean(findEmailAuthChoiceButton(document)) ||
+            Array.from(document.querySelectorAll("input[type='password']")).some(isVisibleAndEditable)
+          ) {
+            break;
+          }
+        }
+        if (mHref && mTarget !== "_blank") {
+          await navigateIfStuckOnSameView(mHref, urlAtModal);
+        }
         return {
           clicked: true,
           clickedModalChoice: true,
-          href: mHref || href || null,
-          opensNewTab: mTarget === "_blank" || targetAttr === "_blank"
+          href: readCapturedWindowOpen() || mHref || href || null,
+          windowOpenUrl: readCapturedWindowOpen(),
+          opensNewTab: mTarget === "_blank" || targetAttr === "_blank" || Boolean(readCapturedWindowOpen())
         };
       }
-      if (
-        location.href !== beforeUrl ||
+
+      const formOrAuthReady =
         hasRealCandidateFormFields(document) ||
         Boolean(findEmailAuthChoiceButton(document)) ||
-        Array.from(document.querySelectorAll("input[type='password']")).some(isVisibleAndEditable)
-      ) {
+        Boolean(detectEmailFirstAuthStep(document)) ||
+        Array.from(document.querySelectorAll("input[type='password']")).some(isVisibleAndEditable);
+
+      // Only exit early on URL change after at least 3 ticks (600ms) so Workday #apply / /apply URL changes that open a modal still catch the modal!
+      if (formOrAuthReady || (tick >= 3 && location.href !== beforeUrl)) {
         return {
           clicked: true,
           clickedModalChoice: false,
-          href: href || null,
-          opensNewTab: targetAttr === "_blank"
+          transitionedToFormOrAuth: formOrAuthReady,
+          href: readCapturedWindowOpen() || href || null,
+          windowOpenUrl: readCapturedWindowOpen(),
+          opensNewTab: targetAttr === "_blank" || Boolean(readCapturedWindowOpen())
         };
       }
     }
 
-    // 5. Direct href navigation fallback if <a href> click was swallowed without modal or route transition
-    await navigateLinkFallbackIfNeeded(chosenBtn, beforeUrl);
+    // 5. Direct href navigation fallback ONLY if no modal is open and same-tab link click was swallowed
+    const isWorkdayAdventure = chosenBtn.dataset?.automationId === "adventureButton";
+    if (href && targetAttr !== "_blank" && !isWorkdayAdventure) {
+      await navigateIfStuckOnSameView(href, beforeUrl);
+    }
 
     return {
       clicked: true,
       clickedModalChoice: false,
-      href: href || null,
-      opensNewTab: targetAttr === "_blank"
+      href: readCapturedWindowOpen() || href || null,
+      windowOpenUrl: readCapturedWindowOpen(),
+      opensNewTab: targetAttr === "_blank" || Boolean(readCapturedWindowOpen())
     };
   }
 
   // Auto-open collapsed / tabbed application views (e.g. Ashby /application tab, Lever /apply button, Workday Apply)
-  async function ensureApplicationFormOpen() {
+  async function ensureApplicationFormOpen(options = {}) {
     if (
-      !findApplyModalChoiceButton(document) &&
-      (hasRealCandidateFormFields(document) ||
-        Array.from(document.querySelectorAll("input[type='password']")).some(isVisibleAndEditable))
+      options?.skipApplyGate ||
+      window !== window.top ||
+      (!findApplyModalChoiceButton(document) &&
+        (hasRealCandidateFormFields(document) ||
+          countActionableFormControls() > 0 ||
+          Array.from(document.querySelectorAll("input[type='password']")).some(isVisibleAndEditable)))
     ) {
       return { hasControls: countActionableFormControls() > 0, clickedApplyGate: false };
     }
     const embeddedIframe = document.querySelector(
-      "iframe[src*='greenhouse.io'], iframe[src*='ashbyhq.com'], iframe[src*='lever.co'], #grnhse_iframe"
+      "iframe[src*='greenhouse.io'], iframe[src*='ashbyhq.com'], iframe[src*='lever.co'], iframe[src*='myworkdayjobs.com'], iframe[src*='icims.com'], iframe[src*='smartrecruiters.com'], #grnhse_iframe"
     );
     if (embeddedIframe) {
       try {
-        embeddedIframe.scrollIntoView({ block: "center" });
+        embeddedIframe.scrollIntoView({ block: "center", behavior: "instant" });
       } catch (_) {}
       return { hasControls: false, clickedApplyGate: false };
     }
@@ -2856,7 +2978,7 @@
       return { hasControls: countActionableFormControls() > 0, clickedApplyGate: false };
     }
 
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 8; i++) {
       await sleep(160);
       if (hasRealCandidateFormFields(document) || countActionableFormControls() > 0) {
         return { hasControls: true, clickedApplyGate: true };
@@ -3331,6 +3453,7 @@
     sequentialOneByOne = false,
     onlyNeededCleanMode = false,
     includeAllUnresolvedOpenEnded = false,
+    skipApplyGate = false,
     onProgress = null,
     jobMeta = null
   }) {
@@ -3358,7 +3481,7 @@
     };
 
     // 0. Ensure application tab / collapsed form is open if needed
-    const gate = await ensureApplicationFormOpen();
+    const gate = await ensureApplicationFormOpen({ skipApplyGate });
     if (!gate.hasControls && !meta.isAuthWall) {
       return {
         filledCount: 0,
@@ -4372,6 +4495,7 @@
       sequentialOneByOne: Boolean(options.sequentialOneByOne),
       onlyNeededCleanMode: Boolean(options.onlyNeededCleanMode),
       includeAllUnresolvedOpenEnded: Boolean(options.includeAllUnresolvedOpenEnded),
+      skipApplyGate: Boolean(options.skipApplyGate),
       jobMeta: options.topJobMeta || null
     });
   }

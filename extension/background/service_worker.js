@@ -177,6 +177,18 @@ function waitForTabComplete(tabId, timeoutMs = 15000) {
   });
 }
 
+function withTimeout(promise, timeoutMs, fallbackValue = null) {
+  let timer = null;
+  return Promise.race([
+    Promise.resolve(promise).catch(() => fallbackValue),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(fallbackValue), timeoutMs);
+    })
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 async function waitForTabSettle(tabId, minWaitMs = 1300, maxWaitMs = 7000) {
   await sleep(minWaitMs);
   try {
@@ -189,23 +201,58 @@ async function waitForTabSettle(tabId, minWaitMs = 1300, maxWaitMs = 7000) {
 
 async function ensureTabScripts(tabId) {
   if (!tabId) return false;
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      files: ["content/ats_adapters.js", "content/copilot_widget.js"]
-    });
-    return true;
-  } catch (_) {
-    try {
-      await chrome.scripting.executeScript({
+  const allOk = await withTimeout(
+    chrome.scripting
+      .executeScript({
+        target: { tabId, allFrames: true },
+        files: ["content/ats_adapters.js", "content/copilot_widget.js"]
+      })
+      .then(() => true),
+    3200,
+    false
+  );
+  if (allOk) return true;
+  const topOk = await withTimeout(
+    chrome.scripting
+      .executeScript({
         target: { tabId },
         files: ["content/ats_adapters.js", "content/copilot_widget.js"]
-      });
-      return true;
-    } catch (__) {
-      return false;
-    }
-  }
+      })
+      .then(() => true),
+    2500,
+    false
+  );
+  return Boolean(topOk);
+}
+
+async function installWindowOpenCaptureHook(tabId) {
+  if (!tabId) return;
+  await withTimeout(
+    chrome.scripting.executeScript({
+      target: { tabId, frameIds: [0] },
+      world: "MAIN",
+      func: () => {
+        try {
+          document.documentElement.removeAttribute("data-jobify-last-window-open");
+          if (!window.__jobifyWindowOpenHooked) {
+            window.__jobifyWindowOpenHooked = true;
+            const origOpen = window.open;
+            window.open = function (url, ...rest) {
+              try {
+                if (url) {
+                  const abs = new URL(String(url), location.href).href;
+                  document.documentElement.setAttribute("data-jobify-last-window-open", abs);
+                }
+              } catch (_) {}
+              return typeof origOpen === "function" ? origOpen.call(this, url, ...rest) : null;
+            };
+          }
+        } catch (_) {}
+      }
+    }),
+    1200,
+    null
+  );
 }
 
 async function buildAndSaveTailoredResume(jobMeta, state, preferredModel = null) {
@@ -652,19 +699,25 @@ async function runAutofillPassAcrossFrames(tabId, opts) {
     }
     return await window.__JOBIFY_ADAPTERS__.runFrameAutofill(frameOpts);
   };
-  let results;
-  try {
-    results = await chrome.scripting.executeScript({
+  let results = await withTimeout(
+    chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
       func: execFn,
       args: [opts]
-    });
-  } catch (_) {
-    results = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: execFn,
-      args: [opts]
-    });
+    }),
+    24000,
+    null
+  );
+  if (!results) {
+    results = await withTimeout(
+      chrome.scripting.executeScript({
+        target: { tabId },
+        func: execFn,
+        args: [opts]
+      }),
+      18000,
+      []
+    );
   }
 
   let filledCount = 0;
@@ -700,9 +753,11 @@ async function executeMultiFrameAutofill(tabId, opts = {}) {
 
   const injected = await ensureTabScripts(tabId);
   if (!injected) {
-    const localResp = await chrome.tabs
-      .sendMessage(tabId, { type: "TRIGGER_LOCAL_AUTOFILL", payload: opts })
-      .catch(() => null);
+    const localResp = await withTimeout(
+      chrome.tabs.sendMessage(tabId, { type: "TRIGGER_LOCAL_AUTOFILL", payload: opts }),
+      12000,
+      null
+    );
     if (localResp?.ok) return localResp;
     return { ok: false, error: "Cannot inject into restricted browser tab." };
   }
@@ -718,45 +773,69 @@ async function executeMultiFrameAutofill(tabId, opts = {}) {
   return { ok: true, ...pass };
 }
 
-async function executeAdapterAcrossTab(tabId, method, args = []) {
-  let frameResults = [];
-  try {
-    frameResults = await chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      func: async (fnName, fnArgs) => {
-        const fn = window.__JOBIFY_ADAPTERS__?.[fnName];
-        if (typeof fn !== "function") return null;
-        return await fn(...(fnArgs || []));
-      },
-      args: [method, args]
-    });
-  } catch (_) {
-    try {
-      frameResults = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: async (fnName, fnArgs) => {
-          const fn = window.__JOBIFY_ADAPTERS__?.[fnName];
-          if (typeof fn !== "function") return null;
-          return await fn(...(fnArgs || []));
-        },
+async function executeAdapterAcrossTab(tabId, method, args = [], opts = {}) {
+  const timeoutMs = Number(opts.timeoutMs || 10000);
+  const runnerFn = async (fnName, fnArgs) => {
+    const fn = window.__JOBIFY_ADAPTERS__?.[fnName];
+    if (typeof fn !== "function") return null;
+    return await fn(...(fnArgs || []));
+  };
+
+  if (opts.topFrameFirst) {
+    const topRes = await withTimeout(
+      chrome.scripting.executeScript({
+        target: { tabId, frameIds: [0] },
+        func: runnerFn,
         args: [method, args]
-      });
-    } catch (__) {
-      const rpcResp = await chrome.tabs
-        .sendMessage(tabId, { type: "ADAPTER_RPC", payload: { method, args } })
-        .catch(() => null);
-      if (rpcResp?.ok && rpcResp.result !== undefined) {
-        frameResults = [{ frameId: 0, result: rpcResp.result }];
-      }
+      }),
+      Math.min(timeoutMs, 4800),
+      null
+    );
+    if (topRes?.[0]?.result?.clicked) {
+      return topRes;
     }
   }
+
+  let frameResults = await withTimeout(
+    chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: runnerFn,
+      args: [method, args]
+    }),
+    timeoutMs,
+    null
+  );
+
+  if (!frameResults) {
+    frameResults = await withTimeout(
+      chrome.scripting.executeScript({
+        target: { tabId },
+        func: runnerFn,
+        args: [method, args]
+      }),
+      Math.min(timeoutMs, 5500),
+      null
+    );
+  }
+
+  if (!frameResults) {
+    const rpcResp = await withTimeout(
+      chrome.tabs.sendMessage(tabId, { type: "ADAPTER_RPC", payload: { method, args } }),
+      4000,
+      null
+    );
+    if (rpcResp?.ok && rpcResp.result !== undefined) {
+      frameResults = [{ frameId: 0, result: rpcResp.result }];
+    }
+  }
+
   return frameResults || [];
 }
 
 async function executeMultiFrameValidationHeal(tabId, opts = {}) {
   if (!tabId) return { healedCount: 0, aiRepairsApplied: 0, analysisSummary: "", remainingErrors: [] };
   await ensureTabScripts(tabId);
-  const frameResults = await executeAdapterAcrossTab(tabId, "healFormValidationErrors", [opts]);
+  const frameResults = await executeAdapterAcrossTab(tabId, "healFormValidationErrors", [opts], { timeoutMs: 14000 });
 
   let healedCount = 0;
   let aiRepairsApplied = 0;
@@ -800,7 +879,7 @@ async function waitForActionableJobScreen(tabId, topJobMeta = null, maxWaitMs = 
     ) {
       return last;
     }
-    await sleep(480);
+    await sleep(420);
     await ensureTabScripts(tabId);
     last = await inspectTabFrames(tabId, topJobMeta);
   }
@@ -809,10 +888,12 @@ async function waitForActionableJobScreen(tabId, topJobMeta = null, maxWaitMs = 
 
 async function inspectTabFrames(tabId, topJobMeta = null) {
   const state = await getAllState();
-  const frameResults = await executeAdapterAcrossTab(tabId, "inspectAutonomousScreenState", [
-    state.profile,
-    topJobMeta
-  ]);
+  const frameResults = await executeAdapterAcrossTab(
+    tabId,
+    "inspectAutonomousScreenState",
+    [state.profile, topJobMeta],
+    { timeoutMs: 5500 }
+  );
 
   const valid = (frameResults || [])
     .map((entry) => (entry?.result ? { frameId: entry.frameId ?? 0, ...entry.result } : null))
@@ -942,13 +1023,159 @@ async function waitForPostSubmitOutcome(tabId, preSubmitScreen, jobMeta, hadHtml
 function findSpawnedChildTab(openerTabId, sinceMs) {
   for (let i = recentSpawnedTabs.length - 1; i >= 0; i--) {
     const item = recentSpawnedTabs[i];
-    if (item.createdAt >= sinceMs - 200 && item.id !== openerTabId) {
+    if (item.createdAt >= sinceMs - 300 && item.id !== openerTabId) {
       if (!item.openerTabId || item.openerTabId === openerTabId) {
         return item;
       }
     }
   }
   return null;
+}
+
+async function notifyOpenerTabHandoff(prevTabId, newTabId) {
+  if (!prevTabId || prevTabId === newTabId) return;
+  chrome.tabs
+    .sendMessage(prevTabId, {
+      type: "AUTO_APPLY_PROGRESS",
+      payload: {
+        running: false,
+        completed: true,
+        stage: "completed",
+        stepLabel: "↗ Continued in Application Tab",
+        detail: "Auto-Apply switched to the newly opened application tab.",
+        tabId: prevTabId,
+        updatedAt: Date.now()
+      }
+    })
+    .catch(() => {});
+  try {
+    await chrome.tabs.update(newTabId, { active: true });
+  } catch (_) {}
+}
+
+// Reliable Step 2 Executor: Clicks Apply / Modal Apply Manually, handles child tabs, popup-blocked target="_blank" / window.open URLs, and waits for Auth Wall or Form!
+async function executeStep2ApplyAndTransition(initialTabId, jobMeta) {
+  let tabId = initialTabId;
+  const clickTs = Date.now();
+  const preTab = await chrome.tabs.get(tabId).catch(() => null);
+  const preUrl = preTab?.url || "";
+
+  await installWindowOpenCaptureHook(tabId);
+  const applyExec = await executeAdapterAcrossTab(tabId, "clickApplyEntryButton", [], {
+    topFrameFirst: true,
+    timeoutMs: 4800
+  });
+
+  const bestApply =
+    (applyExec || []).map((e) => e?.result).find((r) => r?.clicked) ||
+    (applyExec || [])[0]?.result ||
+    {};
+  let candidateHref = bestApply?.windowOpenUrl || bestApply?.href || null;
+  let navigatedFallback = false;
+  let modalClicksInTransition = bestApply?.clickedModalChoice ? 1 : 0;
+  let lastScreen = null;
+
+  for (let iter = 0; iter < 16; iter++) {
+    if (autoApplyAbortFlag) break;
+
+    const childTab = findSpawnedChildTab(tabId, clickTs);
+    if (childTab?.id) {
+      const prevTabId = tabId;
+      tabId = childTab.id;
+      await notifyOpenerTabHandoff(prevTabId, tabId);
+      await waitForTabComplete(tabId, 10000);
+      await ensureTabScripts(tabId);
+      await broadcastAutoApplyProgress(tabId, {
+        stage: "clicking_apply",
+        stepLabel: "↗ Switched to Application Portal Tab",
+        detail: "Scanning candidate form & portal controls..."
+      });
+    }
+
+    await sleep(380);
+
+    try {
+      const tInfo = await chrome.tabs.get(tabId);
+      if (tInfo?.status === "loading") {
+        await waitForTabComplete(tabId, 5500);
+      }
+    } catch (_) {}
+
+    await ensureTabScripts(tabId);
+    const screen = await inspectTabFrames(tabId, jobMeta);
+    lastScreen = screen;
+
+    if (
+      screen.hasCandidateForm ||
+      (screen.inventory?.totalFields || 0) > 0 ||
+      screen.isStandaloneAuthWall ||
+      screen.otpChallenge?.detected ||
+      screen.needsEmailVerificationBanner ||
+      screen.isSubmittedConfirmation
+    ) {
+      return { tabId, screen, transitioned: true };
+    }
+
+    if (screen.hasApplyChoiceModal && modalClicksInTransition < 2) {
+      modalClicksInTransition++;
+      await broadcastAutoApplyProgress(tabId, {
+        stage: "clicking_apply",
+        stepLabel: "🖱️ Step 2: Selecting 'Apply Manually' in Modal",
+        detail: "Choosing manual application workflow..."
+      });
+      const modalExec = await executeAdapterAcrossTab(tabId, "clickApplyEntryButton", [], {
+        topFrameFirst: true,
+        timeoutMs: 4200
+      });
+      const mRes = (modalExec || []).map((e) => e?.result).find((r) => r?.clicked);
+      if (mRes?.windowOpenUrl || mRes?.href) {
+        candidateHref = mRes.windowOpenUrl || mRes.href;
+      }
+      continue;
+    }
+
+    // If Chrome popup blocker blocked <a target="_blank"> or window.open(url) after Step 1 tailoring expired user activation, navigate directly!
+    if (
+      !navigatedFallback &&
+      ((iter >= 1 && modalClicksInTransition >= 1) || (iter >= 2 && !screen.hasApplyChoiceModal))
+    ) {
+      if (!candidateHref) {
+        const capturedRes = await withTimeout(
+          chrome.scripting.executeScript({
+            target: { tabId, frameIds: [0] },
+            func: () => document.documentElement.getAttribute("data-jobify-last-window-open") || ""
+          }),
+          1200,
+          null
+        );
+        const capUrl = capturedRes?.[0]?.result || "";
+        if (/^https?:\/\//i.test(capUrl)) candidateHref = capUrl;
+      }
+      if (
+        candidateHref &&
+        /^https?:\/\//i.test(candidateHref) &&
+        candidateHref !== preUrl &&
+        (!screen.url || screen.url !== candidateHref)
+      ) {
+        navigatedFallback = true;
+        await broadcastAutoApplyProgress(tabId, {
+          stage: "clicking_apply",
+          stepLabel: "↗ Opening Application Portal Link",
+          detail: "Navigating directly to application form..."
+        });
+        try {
+          await chrome.tabs.update(tabId, { url: candidateHref });
+          await waitForTabComplete(tabId, 9500);
+        } catch (_) {}
+      }
+    }
+  }
+
+  return {
+    tabId,
+    screen: lastScreen || (await inspectTabFrames(tabId, jobMeta)),
+    transitioned: false
+  };
 }
 
 // End-to-End Autonomous Full Auto-Apply Workflow:
@@ -958,7 +1185,14 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
     return { ok: false, error: "No active job tab provided." };
   }
   if (autoApplyRunning) {
-    return { ok: false, error: "Full Auto-Apply is already running." };
+    // Allow user to re-trigger cleanly if an earlier session was still running
+    autoApplyAbortFlag = true;
+    for (let w = 0; w < 10 && autoApplyRunning; w++) {
+      await sleep(100);
+    }
+    if (autoApplyRunning) {
+      return { ok: false, error: "Full Auto-Apply is already running." };
+    }
   }
 
   autoApplyRunning = true;
@@ -1070,11 +1304,12 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
     if (autoApplyAbortFlag) throw new Error("Stopped by user.");
 
     // Step 2: Click "Apply Now" / Workday "Apply" -> "Apply Manually" modal if on the job posting gate
-    const preApplyCheck = await waitForActionableJobScreen(tabId, jobMeta, 4500);
+    const preApplyCheck = await waitForActionableJobScreen(tabId, jobMeta, 4000);
     let applyGateClicks = 0;
     if (
       preApplyCheck.hasApplyChoiceModal ||
       (preApplyCheck.hasApplyButton &&
+        !preApplyCheck.hasCandidateForm &&
         !preApplyCheck.isStandaloneAuthWall &&
         !preApplyCheck.otpChallenge?.detected)
     ) {
@@ -1082,40 +1317,13 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
       await broadcastAutoApplyProgress(tabId, {
         stage: "clicking_apply",
         stepLabel: preApplyCheck.hasApplyChoiceModal
-          ? "🖱️ Step 2: Selecting 'Apply Manually'"
+          ? "🖱️ Step 2: Selecting 'Apply Manually' in Modal"
           : "🖱️ Step 2: Clicking Apply & Selecting Manual Flow",
         detail: "Opening candidate application portal..."
       });
-      const clickTs = Date.now();
-      authOrSubmitTriggerMs = clickTs;
-
-      await executeAdapterAcrossTab(tabId, "clickApplyEntryButton", []);
-
-      await sleep(1200);
-      const childTab = findSpawnedChildTab(tabId, clickTs);
-      if (childTab?.id) {
-        const prevTabId = tabId;
-        tabId = childTab.id;
-        chrome.tabs
-          .sendMessage(prevTabId, {
-            type: "AUTO_APPLY_PROGRESS",
-            payload: {
-              running: false,
-              completed: true,
-              stage: "completed",
-              stepLabel: "↗ Continued in Application Tab",
-              detail: "Auto-Apply switched to the newly opened application tab.",
-              tabId: prevTabId,
-              updatedAt: Date.now()
-            }
-          })
-          .catch(() => {});
-        await waitForTabComplete(tabId, 12000);
-      } else {
-        await waitForTabSettle(tabId, 700, 8500);
-      }
-      await ensureTabScripts(tabId);
-      await waitForActionableJobScreen(tabId, jobMeta, 5500);
+      authOrSubmitTriggerMs = Date.now();
+      const step2Out = await executeStep2ApplyAndTransition(tabId, jobMeta);
+      tabId = step2Out.tabId;
     }
 
     // Step 3..6: Autonomous Modal/Apply Gate + Multi-Stage Auth + Email OTP/Link + Clean 1-by-1 Fill + Next + Self-Healing Auto-Submit Loop
@@ -1139,7 +1347,39 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
 
       await ensureTabScripts(tabId);
       state = await getAllState();
-      const screen = await inspectTabFrames(tabId, jobMeta);
+      let screen = await inspectTabFrames(tabId, jobMeta);
+
+      // If page just navigated/transitioned and SPA form controls haven't hydrated yet, wait & scroll for hydration
+      if (
+        !screen.isSubmittedConfirmation &&
+        !screen.hasApplyChoiceModal &&
+        !screen.hasApplyButton &&
+        !screen.otpChallenge?.detected &&
+        !screen.needsEmailVerificationBanner &&
+        !screen.isStandaloneAuthWall &&
+        (screen.inventory?.totalFields || 0) === 0
+      ) {
+        await broadcastAutoApplyProgress(tabId, {
+          stage: "loading_form",
+          stepLabel: "⏳ Step 3: Loading Application Form Controls...",
+          detail: "Waiting for portal fields & embedded form sections to hydrate..."
+        });
+        for (let h = 0; h < 9; h++) {
+          await sleep(420);
+          await ensureTabScripts(tabId);
+          screen = await inspectTabFrames(tabId, jobMeta);
+          if (
+            screen.isSubmittedConfirmation ||
+            screen.hasApplyChoiceModal ||
+            screen.otpChallenge?.detected ||
+            screen.needsEmailVerificationBanner ||
+            screen.isStandaloneAuthWall ||
+            (screen.inventory?.totalFields || 0) > 0
+          ) {
+            break;
+          }
+        }
+      }
 
       // Check A: Submission Confirmation Banner Reached!
       if (screen.isSubmittedConfirmation) {
@@ -1174,7 +1414,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
       }
 
       // Check A2: Open "Start Your Application" Choice Modal ("Apply Manually") OR Secondary Tab Apply Gate!
-      if ((screen.hasApplyChoiceModal || (screen.hasApplyButton && !screen.hasCandidateForm)) && applyGateClicks < 3) {
+      if ((screen.hasApplyChoiceModal || (screen.hasApplyButton && !screen.hasCandidateForm && (screen.inventory?.totalFields || 0) === 0)) && applyGateClicks < 3) {
         applyGateClicks++;
         await broadcastAutoApplyProgress(tabId, {
           stage: "clicking_apply",
@@ -1183,33 +1423,9 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
             : "🖱️ Clicking Apply Entry Button",
           detail: "Advancing past portal entry gate..."
         });
-        const gateTs = Date.now();
-        authOrSubmitTriggerMs = gateTs;
-        await executeAdapterAcrossTab(tabId, "clickApplyEntryButton", []);
-
-        await sleep(1100);
-        const childTab = findSpawnedChildTab(tabId, gateTs);
-        if (childTab?.id) {
-          const prevTabId = tabId;
-          tabId = childTab.id;
-          chrome.tabs
-            .sendMessage(prevTabId, {
-              type: "AUTO_APPLY_PROGRESS",
-              payload: {
-                running: false,
-                completed: true,
-                stage: "completed",
-                stepLabel: "↗ Continued in Application Tab",
-                detail: "Auto-Apply switched to the newly opened application tab.",
-                tabId: prevTabId,
-                updatedAt: Date.now()
-              }
-            })
-            .catch(() => {});
-          await waitForTabComplete(tabId, 12000);
-        } else {
-          await waitForTabSettle(tabId, 700, 8000);
-        }
+        authOrSubmitTriggerMs = Date.now();
+        const gateOut = await executeStep2ApplyAndTransition(tabId, jobMeta);
+        tabId = gateOut.tabId;
         continue;
       }
 
@@ -1324,20 +1540,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         if (childTabAfterAuth?.id) {
           const prevTabId = tabId;
           tabId = childTabAfterAuth.id;
-          chrome.tabs
-            .sendMessage(prevTabId, {
-              type: "AUTO_APPLY_PROGRESS",
-              payload: {
-                running: false,
-                completed: true,
-                stage: "completed",
-                stepLabel: "↗ Continued in Application Tab",
-                detail: "Auto-Apply switched to the newly opened application tab.",
-                tabId: prevTabId,
-                updatedAt: Date.now()
-              }
-            })
-            .catch(() => {});
+          await notifyOpenerTabHandoff(prevTabId, tabId);
           await waitForTabComplete(tabId, 12000);
         } else {
           await waitForTabSettle(tabId, 1500, 7500);
@@ -1373,7 +1576,8 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
           sequentialOneByOne: true,
           onlyNeededCleanMode: true,
           forceOverwrite: false,
-          fillOpenEndedWithAI: true
+          fillOpenEndedWithAI: true,
+          skipApplyGate: true
         });
 
         totalFilledFields += Number(fillPass?.filledCount || 0);

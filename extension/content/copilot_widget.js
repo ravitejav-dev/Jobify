@@ -55,7 +55,12 @@
     if (stateResp?.contextInvalidated) return;
     appState = stateResp?.state || null;
     if (stateResp && "autoApplyStatus" in stateResp) {
-      autoApplyStatus = stateResp.autoApplyStatus;
+      const incoming = stateResp.autoApplyStatus;
+      if (!incoming) {
+        if (!autoApplyStatus?.running) autoApplyStatus = null;
+      } else if ((incoming.updatedAt || 0) >= (autoApplyStatus?.updatedAt || 0)) {
+        autoApplyStatus = incoming;
+      }
     }
 
     if (pageMeta && appState) {
@@ -1498,6 +1503,47 @@
     "EXECUTE_AUTOPILOT_STEP"
   ]);
 
+  function applyAutoApplyProgressUpdate(payload) {
+    autoApplyStatus = payload ? { ...payload, _hudDismissed: false } : null;
+    if (autoApplyStatus?.running) {
+      clearTimeout(collapseTimer);
+      hiddenForTab = false;
+      drawerOpen = false;
+    } else if (
+      autoApplyStatus &&
+      !autoApplyStatus.running &&
+      (autoApplyStatus.stage === "completed" || autoApplyStatus.stage === "ready_for_review")
+    ) {
+      clearTimeout(collapseTimer);
+      const delayMs = autoApplyStatus.stage === "completed" ? 1350 : 2200;
+      collapseTimer = setTimeout(() => {
+        const hud = shadowRoot?.getElementById("jb-hud");
+        if (hud) hud.classList.add("returning");
+        setTimeout(() => {
+          if (autoApplyStatus) autoApplyStatus._hudDismissed = true;
+          drawerOpen = false;
+          if (hud) hud.classList.remove("returning");
+          renderDrawer();
+        }, 240);
+      }, delayMs);
+    }
+    if (!document.getElementById("jobify-copilot-host") && (pageMeta?.isRelevantPage || autoApplyStatus?.running)) {
+      mountWidget();
+    }
+    renderDrawer();
+  }
+
+  if (IS_TOP_FRAME && typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "local" || !changes.jobify_auto_apply_session?.newValue) return;
+      const nextVal = changes.jobify_auto_apply_session.newValue;
+      if (autoApplyStatus?.tabId && nextVal.tabId && autoApplyStatus.tabId !== nextVal.tabId) return;
+      if ((nextVal.updatedAt || 0) >= (autoApplyStatus?.updatedAt || 0)) {
+        applyAutoApplyProgressUpdate(nextVal);
+      }
+    });
+  }
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!IS_TOP_FRAME || !WIDGET_MSG_TYPES.has(msg?.type)) {
       return false;
@@ -1510,33 +1556,7 @@
         return { ok: true, result };
       }
       if (msg.type === "AUTO_APPLY_PROGRESS") {
-        autoApplyStatus = msg.payload ? { ...msg.payload, _hudDismissed: false } : null;
-        if (autoApplyStatus?.running) {
-          clearTimeout(collapseTimer);
-          hiddenForTab = false;
-          drawerOpen = false;
-        } else if (
-          autoApplyStatus &&
-          !autoApplyStatus.running &&
-          (autoApplyStatus.stage === "completed" || autoApplyStatus.stage === "ready_for_review")
-        ) {
-          clearTimeout(collapseTimer);
-          const delayMs = autoApplyStatus.stage === "completed" ? 1350 : 2200;
-          collapseTimer = setTimeout(() => {
-            const hud = shadowRoot?.getElementById("jb-hud");
-            if (hud) hud.classList.add("returning");
-            setTimeout(() => {
-              if (autoApplyStatus) autoApplyStatus._hudDismissed = true;
-              drawerOpen = false;
-              if (hud) hud.classList.remove("returning");
-              renderDrawer();
-            }, 240);
-          }, delayMs);
-        }
-        if (!document.getElementById("jobify-copilot-host") && pageMeta?.isRelevantPage) {
-          mountWidget();
-        }
-        renderDrawer();
+        applyAutoApplyProgressUpdate(msg.payload);
         return { ok: true };
       }
       if (msg.type === "GET_PAGE_CONTEXT") {
@@ -1626,7 +1646,7 @@
     await refreshStateAndAnalyze();
     attachSubmitAutoTracker();
 
-    if (pageMeta?.isRelevantPage) {
+    if (pageMeta?.isRelevantPage || autoApplyStatus?.running) {
       injectInlineAiButtons();
       if (IS_TOP_FRAME && appState?.settings?.autoShowCopilotWidget !== false) {
         drawerOpen = shouldAutoOpenPanel(pageMeta);
@@ -1648,7 +1668,7 @@
           if (
             hostEl &&
             !document.getElementById("jobify-copilot-host") &&
-            pageMeta?.isRelevantPage &&
+            (pageMeta?.isRelevantPage || autoApplyStatus?.running) &&
             appState?.settings?.autoShowCopilotWidget !== false
           ) {
             mountWidget();
@@ -1665,7 +1685,7 @@
               lastPageType = pageMeta?.pageType || "other";
               return;
             }
-            if (pageMeta?.isRelevantPage) {
+            if (pageMeta?.isRelevantPage || autoApplyStatus?.running) {
               injectInlineAiButtons();
               // Only auto-open on SPA route change if transitioning INTO an active application form and user hasn't minimized
               if (
@@ -1675,10 +1695,10 @@
                 shouldAutoOpenPanel(pageMeta)
               ) {
                 drawerOpen = true;
-              } else if (pageMeta.pageType === "job_board") {
+              } else if (pageMeta?.pageType === "job_board") {
                 drawerOpen = false;
               }
-              lastPageType = pageMeta.pageType || "other";
+              lastPageType = pageMeta?.pageType || "other";
               if (!document.getElementById("jobify-copilot-host") && appState?.settings?.autoShowCopilotWidget !== false) {
                 mountWidget();
               } else if (shadowRoot) {
@@ -1688,7 +1708,7 @@
               drawerOpen = false;
               renderDrawer();
             }
-          } else if (hydrationChecksLeft > 0 && !autoApplyStatus?.running) {
+          } else if (hydrationChecksLeft > 0) {
             hydrationChecksLeft--;
             if (!pageMeta?.isRelevantPage || (pageMeta?.description || "").length < 150 || !pageMeta?.hasCandidateForm) {
               const freshMeta = window.__JOBIFY_ADAPTERS__?.extractJobMetadata?.(document);
@@ -1701,7 +1721,7 @@
                 await refreshStateAndAnalyze();
                 injectInlineAiButtons();
                 if (appState?.settings?.autoShowCopilotWidget !== false) {
-                  if (!drawerOpen && lastPageType !== "application_form" && shouldAutoOpenPanel(pageMeta)) {
+                  if (!drawerOpen && !autoApplyStatus?.running && lastPageType !== "application_form" && shouldAutoOpenPanel(pageMeta)) {
                     drawerOpen = true;
                   }
                   lastPageType = pageMeta?.pageType || "other";

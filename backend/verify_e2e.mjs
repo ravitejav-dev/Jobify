@@ -858,6 +858,119 @@ async function main() {
       ashbyCdp.close();
     }
 
+    // 4f. STEP 2 ANTI-HANG REGRESSION TEST (Tailor Step 1 -> Apply mutates URL hash #apply -> Delayed Modal Wrapper -> Popup-Blocked window.open -> Div-only Label-identified Form -> Submit!)
+    const step2RegCdp = await openTabAndConnect("http://127.0.0.1:18765/sandbox/verify-account");
+    await step2RegCdp.eval(`
+      (() => {
+        const isFormView = location.search.includes("step2_manual_form=1");
+        if (!isFormView) {
+          document.title = "Staff AI Systems Engineer - Databricks";
+          document.body.innerHTML = \`
+            <main style="max-width:760px;margin:30px auto;font-family:sans-serif;">
+              <h1>Staff AI Systems Engineer</h1>
+              <div class="company">Databricks</div>
+              <p>Build distributed LLM inference, vector retrieval, PyTorch, Kubernetes, and evaluation pipelines in San Francisco, CA. Salary: $180,000 - $220,000.</p>
+              <button id="entry-apply-btn" data-automation-id="adventureButton" type="button">Apply</button>
+              <div id="modal-mount"></div>
+            </main>
+          \`;
+          document.getElementById("entry-apply-btn").addEventListener("click", () => {
+            // Mutate URL hash immediately (which previously caused clickApplyEntryButton to exit before modal mounted!)
+            location.hash = "#apply";
+            setTimeout(() => {
+              document.getElementById("modal-mount").innerHTML = \`
+                <div role="dialog" aria-modal="true" data-automation-id="wd-popup-frame" style="display:block;padding:20px;border:1px solid #ccc;">
+                  <h2>Start Your Application</h2>
+                  <div data-automation-id="applyManually">
+                    <button id="inner-manual-btn" type="button">Apply Manually</button>
+                  </div>
+                </div>
+              \`;
+              document.getElementById("inner-manual-btn").addEventListener("click", () => {
+                // Simulate Chrome Popup Blocker blocking window.open after 5s Step 1 Tailor!
+                const targetUrl = "http://127.0.0.1:18765/sandbox/verify-account?step2_manual_form=1";
+                try {
+                  document.documentElement.setAttribute("data-jobify-last-window-open", targetUrl);
+                } catch (_) {}
+                // Do NOT navigate via window.open (simulating blocked popup)
+              });
+            }, 450);
+          });
+        }
+      })();
+    `);
+    // Intercept ?step2_manual_form=1 load on the same tab so when executeStep2ApplyAndTransition navigates to it, we render a <main data-automation-id="myInformationPage"> <div>-based form with auto-generated IDs
+    await step2RegCdp.send("Page.enable", {});
+    await step2RegCdp.send("Page.addScriptToEvaluateOnNewDocument", {
+      source: `
+        if (location.search.includes("step2_manual_form=1")) {
+          window.addEventListener("DOMContentLoaded", () => {
+            document.title = "Apply Manually - Databricks";
+            document.body.innerHTML = \`
+              <main data-automation-id="myInformationPage" style="max-width:700px;margin:24px auto;font-family:sans-serif;">
+                <h2>My Information</h2>
+                <div class="field"><label for="input-gen-1">First Name *</label><input id="input-gen-1" type="text" required /></div>
+                <div class="field"><label for="input-gen-2">Last Name *</label><input id="input-gen-2" type="text" required /></div>
+                <div class="field"><label for="input-gen-3">Email Address *</label><input id="input-gen-3" type="email" required /></div>
+                <div class="field"><label for="input-gen-4">Phone Number *</label><input id="input-gen-4" type="tel" required /></div>
+                <button id="div-form-submit" data-jobify-submit="true" type="button">Submit Application</button>
+              </main>
+            \`;
+            document.getElementById("div-form-submit").addEventListener("click", () => {
+              window.__STEP2_REG_SUBMITTED__ = {
+                firstName: document.getElementById("input-gen-1").value,
+                lastName: document.getElementById("input-gen-2").value,
+                email: document.getElementById("input-gen-3").value,
+                phone: document.getElementById("input-gen-4").value
+              };
+              const banner = document.createElement("div");
+              banner.id = "submit-banner";
+              banner.textContent = "Thank you for applying to Databricks!";
+              document.body.appendChild(banner);
+            });
+          });
+        }
+      `
+    });
+
+    const step2RegRes = await dashCdp.eval(
+      `chrome.runtime.sendMessage({
+        type: "START_FULL_AUTO_APPLY",
+        payload: {
+          tabId: ${step2RegCdp.tabId},
+          awaitCompletion: true,
+          options: {
+            tailorResume: true,
+            autoSubmit: true,
+            jobMeta: {
+              company: "Databricks",
+              title: "Staff AI Systems Engineer",
+              location: "San Francisco, CA",
+              description: "Build distributed LLM inference, vector retrieval, PyTorch, Kubernetes, and evaluation pipelines in San Francisco, CA."
+            }
+          }
+        }
+      })`,
+      65000
+    );
+    const step2SubVals = await step2RegCdp.eval(`window.__STEP2_REG_SUBMITTED__ || null`).catch(() => null);
+    console.log("6f. ✅ Step 2 Anti-Hang Regression Verified (Tailor Step 1 -> Hash #apply + Delayed Manual Modal -> Popup-Blocked window.open Recovery -> Div/Label Form Fill & Submit):", JSON.stringify({
+      ok: step2RegRes?.ok,
+      submitted: step2RegRes?.submitted,
+      status: step2RegRes?.status,
+      step2SubVals
+    }, null, 2));
+    if (
+      !step2RegRes?.ok ||
+      !step2RegRes?.submitted ||
+      step2SubVals?.firstName !== "Raviteja" ||
+      step2SubVals?.lastName !== "Velanati" ||
+      !step2SubVals?.email?.includes("raviteja")
+    ) {
+      throw new Error(`Step 2 Anti-Hang Regression failed: ${JSON.stringify({ step2RegRes, step2SubVals })}`);
+    }
+    step2RegCdp.close();
+
     // 5. Full UI & Runtime Sanity Check Across Dashboard (all 8 views), Popup, SidePanel & Auto-Tracker
     const trackedApps = await dashCdp.eval(`chrome.runtime.sendMessage({ type: "GET_ALL_STATE" }).then(r => r.state.applications)`);
     console.log(
