@@ -716,3 +716,212 @@ Return JSON with:
     modelUsed: res.modelUsed
   };
 }
+
+export async function diagnoseFormErrorsWithGemini(
+  diagnostics = {},
+  jobMeta = {},
+  profile = {},
+  savedAnswers = [],
+  settings = {}
+) {
+  const fields = Array.isArray(diagnostics?.fields) ? diagnostics.fields.slice(0, 24) : [];
+  const pageErrors = Array.isArray(diagnostics?.pageErrors) ? diagnostics.pageErrors.slice(0, 12) : [];
+  if (fields.length === 0 && pageErrors.length === 0) {
+    return {
+      diagnosis: { analysisSummary: "No unresolved fields or validation errors detected.", repairs: [] },
+      modelUsed: "none"
+    };
+  }
+
+  const p = profile?.personal || {};
+  const eeo = profile?.workAuthAndEEO || {};
+
+  const buildDeterministicFallback = () => {
+    const repairs = [];
+    for (const f of fields) {
+      const lbl = `${f.label || ""} ${f.helperText || ""} ${f.placeholder || ""}`.toLowerCase();
+      const err = `${f.errorMessage || ""} ${pageErrors.join(" ")}`.toLowerCase();
+      const opts = Array.isArray(f.options) ? f.options.filter(Boolean) : [];
+      const cur = String(f.currentValue || "").trim();
+
+      if (f.kind === "checkbox") {
+        if (!/do\s*not\s*(contact|sell|share)|opt[- ]?out|unsubscribe/i.test(lbl)) {
+          repairs.push({ refId: f.refId, action: "check", value: "true", reason: "Required consent/acknowledgement" });
+        }
+        continue;
+      }
+
+      if (opts.length > 0 && ["select", "combobox", "radio_group", "checkbox_group", "button_group"].includes(f.kind)) {
+        let pick = opts[0];
+        if (/sponsor|visa.*future|require.*visa/i.test(lbl)) {
+          pick = opts.find((o) => /^yes\b/i.test(o)) || opts[0];
+        } else if (/authorized|legally\s+eligible|right\s+to\s+work/i.test(lbl)) {
+          pick = opts.find((o) => /^yes\b/i.test(o)) || opts[0];
+        } else if (/relocat|hybrid|onsite|in[- ]person|commute/i.test(lbl)) {
+          pick = opts.find((o) => /^yes\b|hybrid|remote|flexible|open/i.test(o)) || opts[0];
+        } else if (/clearance|export\s*control|previously\s+worked|former\s+employee|non[- ]?compete|related\s+to/i.test(lbl)) {
+          pick = opts.find((o) => /^no\b/i.test(o)) || opts[0];
+        } else if (/gender|sex\b/i.test(lbl)) {
+          pick = opts.find((o) => /\bmale\b|\bman\b/i.test(o)) || opts[0];
+        } else if (/hispanic|latino/i.test(lbl)) {
+          pick = opts.find((o) => /^no\b/i.test(o)) || opts[0];
+        } else if (/race|ethnic/i.test(lbl)) {
+          pick = opts.find((o) => /asian/i.test(o)) || opts[0];
+        } else if (/veteran/i.test(lbl)) {
+          pick = opts.find((o) => /not\s+a\s+(protected\s+)?veteran|^no\b/i.test(o)) || opts[0];
+        } else if (/disabilit/i.test(lbl)) {
+          pick = opts.find((o) => /^no\b|do\s+not\s+have/i.test(o)) || opts[0];
+        } else if (/hear\s+about|source/i.test(lbl)) {
+          pick = opts.find((o) => /linkedin|company\s+website|job\s+board/i.test(o)) || opts[0];
+        }
+        repairs.push({
+          refId: f.refId,
+          action: f.kind === "select" || f.kind === "combobox" ? "select_option" : "click_choice",
+          value: pick,
+          reason: "Matched valid option from available list"
+        });
+        continue;
+      }
+
+      if (/phone|mobile|tel/i.test(lbl)) {
+        const digitsOnly = p.phoneDigits || "7748108481";
+        const val =
+          /10\s*digit|digits?\s*only|no\s*(spaces|dashes|parentheses|symbols)/i.test(err) || cur.startsWith("+")
+            ? digitsOnly
+            : `+1${digitsOnly}`;
+        repairs.push({ refId: f.refId, action: "fill_text", value: val, reason: "Normalized phone format" });
+        continue;
+      }
+
+      if (/salary|compensation|pay|remuneration/i.test(lbl) || /digits?\s*only|numeric|valid\s*number|no\s*\$|leading\s*\$|format\s+currency/i.test(err)) {
+        const num = Number(jobMeta?.compensation?.midpoint || 165000);
+        const val = /leading\s*\$|with\s*\$|format\s+currency/i.test(err) ? `$${num.toLocaleString("en-US")}` : String(num);
+        repairs.push({ refId: f.refId, action: "fill_text", value: val, reason: "Repaired compensation format" });
+        continue;
+      }
+
+      if (f.inputType === "number" || /years?.*experience|how\s+many\s+years/i.test(lbl)) {
+        repairs.push({
+          refId: f.refId,
+          action: "fill_text",
+          value: String(p.yearsOfExperienceInt || "3"),
+          reason: "Numeric years of experience"
+        });
+        continue;
+      }
+
+      if (f.inputType === "url" || /linkedin|github|portfolio|website|url|link/i.test(lbl)) {
+        const link = /github/i.test(lbl)
+          ? p.github || "https://github.com/ravitejav-dev"
+          : /portfolio|website/i.test(lbl)
+            ? p.portfolio || p.github || "https://github.com/ravitejav-dev"
+            : p.linkedin || "https://www.linkedin.com/in/raviteja-velanati/";
+        repairs.push({ refId: f.refId, action: "fill_text", value: link, reason: "Valid HTTPS profile URL" });
+        continue;
+      }
+
+      if (!cur || f.flaggedInvalid || f.errorMessage) {
+        repairs.push({
+          refId: f.refId,
+          action: "fill_text",
+          value: `3.5+ years building production AI evaluation sandboxes, Kubernetes microservices, and Python/TypeScript data pipelines at Google AI workflows (GlobalLogic), ready to contribute immediately at ${jobMeta?.company || "your team"}.`,
+          reason: "Grounded technical response for required field"
+        });
+      }
+    }
+    return {
+      analysisSummary: pageErrors[0] || `Repaired ${repairs.length} missing or invalid form field(s).`,
+      repairs
+    };
+  };
+
+  const systemInstruction = `You are Jobify's Autonomous Form Error Analyzer & Self-Healing Agent.
+A job application form showed validation errors or failed to submit because one or more fields are missing or formatted in a way the portal validator rejected.
+Your job:
+1. Read EVERY error in pageErrors and EVERY field's errorMessage, currentValue, label, helperText, placeholder, kind, inputType, maxLength, and options.
+2. Ground all candidate facts strictly in the provided CANDIDATE PROFILE (never invent degrees, employers, or clearance).
+3. FORMAT REPAIR RULES (CRITICAL):
+   - If a field already has a currentValue AND has an errorMessage (or flaggedInvalid is true): diagnose WHY currentValue failed validation and produce a corrected value that strictly obeys the error message!
+     * "digits only" / "numbers only" / "no $ or commas" / numeric salary -> output plain integer digits e.g. "165000" (no $, commas, or ranges).
+     * "10 digits" / "no parentheses or spaces" on phone -> output "5103782758". If "E.164" or "include +1 country code" -> "+15103782758".
+     * "valid URL" / "must start with https://" -> full https:// URL.
+     * "at least N characters" or "maximum N characters" -> write an answer strictly satisfying that character count.
+     * Date format ("MM/DD/YYYY" vs "YYYY-MM-DD") -> format exact date accordingly.
+4. MISSING FIELD RULES:
+   - If options array is non-empty (select, combobox, radio_group, checkbox_group, button_group), "value" MUST match one exact verbatim string from that field's options array.
+   - For single checkbox (consent, privacy, terms, certify, acknowledge), use action "check" and value "true" (never check opt-out / "do not contact" boxes).
+   - For open-ended text/textarea questions, write a crisp, factual 1-3 sentence answer grounded in Raviteja's experience (Senior AI Solutions Engineer at GlobalLogic / Google AI client, 13 sandboxed web apps, 48-persona synthetic pipelines, Python, TypeScript, React, FastAPI, Kubernetes, GCP, Clark University M.S. CS).
+   - Do NOT fill purely optional "Additional comments / Anything else" fields if they have NO errorMessage and required is false.
+5. Return ONLY valid JSON matching the exact schema.`;
+
+  const prompt = `TARGET JOB:
+Company: ${jobMeta?.company || "Target Company"}
+Role: ${jobMeta?.title || "Software / AI Engineer"}
+Location: ${jobMeta?.location || "United States"}
+Posted Compensation: ${jobMeta?.compensation?.raw || "Not listed"}
+
+VISIBLE PAGE / FORM VALIDATION ERRORS:
+${JSON.stringify(pageErrors, null, 2)}
+
+UNRESOLVED OR FLAGGED FORM FIELDS:
+${JSON.stringify(fields, null, 2)}
+
+CANDIDATE MASTER PROFILE:
+${JSON.stringify(
+  {
+    personal: p,
+    workAuthAndEEO: eeo,
+    topExperience: (profile?.workExperience || []).slice(0, 2).map((w) => ({
+      company: w.company,
+      title: w.title,
+      period: `${w.startDateDisplay} - ${w.endDateDisplay}`,
+      highlights: (w.highlights || []).slice(0, 3)
+    })),
+    education: profile?.education?.[0] || {},
+    savedAnswers: (savedAnswers || []).slice(0, 5)
+  },
+  null,
+  2
+)}
+
+Return JSON with this exact structure:
+{
+  "analysisSummary": "Concise 1-sentence root cause of what failed validation and how you are fixing it",
+  "repairs": [
+    {
+      "refId": "exact refId from UNRESOLVED OR FLAGGED FORM FIELDS",
+      "action": "fill_text | select_option | click_choice | check",
+      "value": "exact corrected value or verbatim option string",
+      "reason": "short reason"
+    }
+  ]
+}`;
+
+  try {
+    const res = await callGemini({
+      prompt,
+      systemInstruction,
+      requestedModel: settings?.primaryModel || "gemini-3.5-flash",
+      jsonMode: true,
+      temperature: 0.15,
+      maxOutputTokens: 3000,
+      timeoutMs: 14000,
+      settings
+    });
+    const parsed = parseJsonResponse(res.text);
+    if (parsed && Array.isArray(parsed.repairs) && parsed.repairs.length > 0) {
+      return {
+        diagnosis: {
+          analysisSummary: String(parsed.analysisSummary || "AI diagnosed and repaired form errors."),
+          repairs: parsed.repairs
+        },
+        modelUsed: res.modelUsed
+      };
+    }
+  } catch (_) {}
+
+  return {
+    diagnosis: buildDeterministicFallback(),
+    modelUsed: "deterministic-doctor-fallback"
+  };
+}

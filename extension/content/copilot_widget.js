@@ -22,6 +22,8 @@
   let shadowRoot = null;
   let hostEl = null;
   let drawerOpen = false;
+  let collapsedToExtensions = false;
+  let collapseTimer = null;
   let activeTab = "autofill";
 
   async function safeSendMessage(msg) {
@@ -196,6 +198,10 @@
             }
           })
           .catch(() => {});
+        clearTimeout(collapseTimer);
+        collapsedToExtensions = true;
+        drawerOpen = false;
+        if (shadowRoot) renderDrawer();
       }, 1800);
     };
 
@@ -325,81 +331,98 @@
     shadowRoot.innerHTML = `
       <style>
         * { box-sizing: border-box; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        .jb-pill-bar {
-          position: fixed; right: 16px; bottom: 24px;
-          display: flex; align-items: center; gap: 7px;
-          z-index: 2147483646;
+        @keyframes jbPopupDropIn {
+          from { opacity: 0; transform: translateY(-10px) scale(0.97); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
         }
-        .jb-pill-quick {
-          background: linear-gradient(135deg, #059669 0%, #0284c7 100%);
-          color: #fff; border: 1px solid rgba(255,255,255,0.28);
-          border-radius: 999px; padding: 9px 13px;
-          font-size: 12px; font-weight: 800; cursor: pointer;
-          box-shadow: 0 10px 26px rgba(5, 150, 105, 0.42);
-          transition: transform 0.18s ease, box-shadow 0.18s ease;
+        @keyframes jbPulseFrame {
+          0%, 100% { border-color: rgba(16, 185, 129, 0.72); box-shadow: inset 0 0 22px rgba(16, 185, 129, 0.12); }
+          50% { border-color: rgba(56, 189, 248, 0.85); box-shadow: inset 0 0 30px rgba(56, 189, 248, 0.18); }
         }
-        .jb-pill-quick:hover { transform: translateY(-2px); box-shadow: 0 14px 30px rgba(5, 150, 105, 0.58); }
-        .jb-pill {
-          display: flex; align-items: center; gap: 8px;
-          background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-          color: #fff; border: 1px solid rgba(255,255,255,0.22);
-          border-radius: 999px; padding: 9px 15px;
-          box-shadow: 0 10px 28px rgba(79, 70, 229, 0.42);
-          cursor: pointer; user-select: none;
-          transition: transform 0.18s ease, box-shadow 0.18s ease;
+        @keyframes jbDotPulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.45; transform: scale(0.82); }
         }
-        .jb-pill:hover { transform: translateY(-2px); box-shadow: 0 14px 32px rgba(79, 70, 229, 0.55); }
-        .jb-pill-logo { font-weight: 800; font-size: 13.5px; letter-spacing: -0.2px; }
-        .jb-pill-score {
-          background: rgba(16, 185, 129, 0.25); border: 1px solid rgba(16, 185, 129, 0.65);
-          color: #d1fae5; font-size: 11.5px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
+        .jb-control-frame {
+          position: fixed; inset: 0; pointer-events: none;
+          border: 2.5px solid rgba(16, 185, 129, 0.75);
+          box-shadow: inset 0 0 24px rgba(16, 185, 129, 0.14);
+          z-index: 2147483645;
+          display: none;
+        }
+        .jb-control-frame.active {
+          display: block;
+          animation: jbPulseFrame 2.2s infinite ease-in-out;
         }
         .jb-drawer {
-          position: fixed; top: 12px; right: 12px; bottom: 12px; width: 392px;
+          position: fixed; top: 10px; right: 16px; width: 382px;
+          max-height: calc(100vh - 24px);
           background: #0f172a; color: #f8fafc;
-          border: 1px solid #334155; border-radius: 16px;
-          box-shadow: 0 24px 60px rgba(2, 6, 23, 0.72);
+          border: 1px solid #334155; border-radius: 14px;
+          box-shadow: 0 22px 54px rgba(2, 6, 23, 0.72);
           display: none; flex-direction: column; overflow: hidden;
           z-index: 2147483647;
+          transform-origin: top right;
+          transition: opacity 0.22s ease, transform 0.22s ease;
         }
-        .jb-drawer.open { display: flex; }
+        .jb-drawer.open {
+          display: flex;
+          animation: jbPopupDropIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .jb-drawer.returning, .jb-hud.returning {
+          opacity: 0 !important;
+          transform: translateY(-16px) scale(0.94) !important;
+          pointer-events: none !important;
+        }
         .jb-header {
-          padding: 13px 15px;
+          padding: 11px 13px;
           background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
           border-bottom: 1px solid #334155;
-          display: flex; align-items: center; justify-content: space-between;
+          display: flex; align-items: center; justify-content: space-between; gap: 8px;
         }
-        .jb-brand { display: flex; align-items: center; gap: 8px; }
+        .jb-brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
         .jb-brand-badge {
-          width: 28px; height: 28px; border-radius: 8px;
+          width: 26px; height: 26px; border-radius: 7px;
           background: linear-gradient(135deg, #6366f1, #a855f7);
           display: flex; align-items: center; justify-content: center;
-          font-weight: 900; font-size: 15px; color: #fff;
+          font-weight: 900; font-size: 14px; color: #fff; flex-shrink: 0;
         }
-        .jb-brand-title { font-weight: 800; font-size: 15px; color: #fff; }
-        .jb-brand-sub { font-size: 11px; color: #a5b4fc; }
-        .jb-hdr-actions { display: flex; gap: 6px; }
+        .jb-brand-title-row { display: flex; align-items: center; gap: 6px; }
+        .jb-brand-title { font-weight: 800; font-size: 14px; color: #fff; white-space: nowrap; }
+        .jb-brand-sub { font-size: 10.5px; color: #a5b4fc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .jb-pill {
+          display: inline-flex; align-items: center; cursor: pointer; user-select: none;
+        }
+        .jb-pill-score {
+          background: rgba(16, 185, 129, 0.24); border: 1px solid rgba(16, 185, 129, 0.65);
+          color: #d1fae5; font-size: 10.5px; font-weight: 700; padding: 1.5px 6px; border-radius: 999px;
+          white-space: nowrap;
+        }
+        .jb-hdr-actions { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
         .jb-icon-btn {
           background: rgba(255,255,255,0.1); color: #e2e8f0; border: none;
-          border-radius: 7px; padding: 5px 8px; font-size: 12px; cursor: pointer;
+          border-radius: 7px; padding: 5px 7px; font-size: 11.5px; font-weight: 600; cursor: pointer;
         }
         .jb-icon-btn:hover { background: rgba(255,255,255,0.2); }
+        .jb-hdr-quick {
+          background: linear-gradient(135deg, #059669, #0284c7); color: #fff; font-weight: 700;
+        }
         .jb-tabs {
           display: grid; grid-template-columns: repeat(5, 1fr);
           background: #1e293b; border-bottom: 1px solid #334155;
         }
         .jb-tab {
           background: transparent; border: none; color: #94a3b8;
-          padding: 9px 4px; font-size: 11px; font-weight: 600; cursor: pointer;
+          padding: 8px 4px; font-size: 11px; font-weight: 600; cursor: pointer;
           border-bottom: 2px solid transparent;
         }
         .jb-tab.active { color: #818cf8; border-bottom-color: #818cf8; background: rgba(99,102,241,0.08); }
-        .jb-body { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+        .jb-body { flex: 1; overflow-y: auto; max-height: calc(100vh - 135px); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
         .jb-card {
-          background: #1e293b; border: 1px solid #334155; border-radius: 11px; padding: 12px;
+          background: #1e293b; border: 1px solid #334155; border-radius: 11px; padding: 11px;
         }
-        .jb-job-title { font-size: 14px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; }
-        .jb-job-meta { font-size: 12px; color: #94a3b8; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+        .jb-job-title { font-size: 13.5px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; }
+        .jb-job-meta { font-size: 11.5px; color: #94a3b8; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
         .jb-chip {
           display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px;
           font-size: 11px; font-weight: 600;
@@ -409,8 +432,8 @@
         .jb-chip.amber { background: rgba(245,158,11,0.18); color: #fcd34d; border: 1px solid rgba(245,158,11,0.35); margin: 2px; }
         .jb-chip.red { background: rgba(239,68,68,0.18); color: #fca5a5; border: 1px solid rgba(239,68,68,0.35); }
         .jb-btn {
-          width: 100%; border: none; border-radius: 9px; padding: 10px 12px;
-          font-size: 13px; font-weight: 700; cursor: pointer;
+          width: 100%; border: none; border-radius: 9px; padding: 9px 12px;
+          font-size: 12.5px; font-weight: 700; cursor: pointer;
           display: flex; align-items: center; justify-content: center; gap: 7px;
           transition: opacity 0.15s ease, transform 0.1s ease;
         }
@@ -436,17 +459,17 @@
         .jb-copy-v { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
         .jb-score-row { display: flex; align-items: center; gap: 12px; }
         .jb-score-circle {
-          width: 60px; height: 60px; border-radius: 50%;
+          width: 56px; height: 56px; border-radius: 50%;
           background: rgba(16,185,129,0.14); border: 3px solid #10b981;
           display: flex; flex-direction: column; align-items: center; justify-content: center;
           flex-shrink: 0;
         }
-        .jb-score-num { font-size: 18px; font-weight: 800; color: #34d399; line-height: 1; }
+        .jb-score-num { font-size: 17px; font-weight: 800; color: #34d399; line-height: 1; }
         .jb-score-lbl { font-size: 9px; color: #94a3b8; margin-top: 2px; }
         .jb-toast {
-          position: absolute; bottom: 14px; left: 14px; right: 14px;
+          position: absolute; bottom: 12px; left: 12px; right: 12px;
           background: #1e293b; border: 1px solid #6366f1; color: #f8fafc;
-          padding: 9px 12px; border-radius: 9px; font-size: 12px; font-weight: 600;
+          padding: 8px 11px; border-radius: 9px; font-size: 12px; font-weight: 600;
           box-shadow: 0 8px 24px rgba(0,0,0,0.45);
           opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
         }
@@ -463,54 +486,81 @@
           color: #fff; box-shadow: 0 4px 16px rgba(5, 150, 105, 0.42);
         }
         .jb-hud {
-          position: fixed; right: 16px; bottom: 72px; width: 320px;
-          background: rgba(15, 23, 42, 0.96); color: #f8fafc;
-          border: 1px solid #10b981; border-radius: 12px;
-          padding: 10px 12px; box-shadow: 0 14px 34px rgba(2, 6, 23, 0.65);
-          display: none; flex-direction: column; gap: 5px;
-          z-index: 2147483646;
+          position: fixed; top: 10px; right: 16px; width: 368px;
+          background: rgba(15, 23, 42, 0.97); color: #f8fafc;
+          border: 1.5px solid #10b981; border-radius: 13px;
+          padding: 11px 13px; box-shadow: 0 18px 42px rgba(2, 6, 23, 0.72);
+          display: none; flex-direction: column; gap: 6px;
+          z-index: 2147483647;
+          transform-origin: top right;
+          transition: opacity 0.24s ease, transform 0.24s ease;
         }
-        .jb-hud.visible { display: flex; }
-        .jb-hud-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-        .jb-hud-title { font-size: 12px; font-weight: 800; color: #6ee7b7; }
-        .jb-hud-detail { font-size: 11px; color: #cbd5e1; line-height: 1.35; }
+        .jb-hud.visible {
+          display: flex;
+          animation: jbPopupDropIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .jb-hud-badge-row {
+          display: flex; align-items: center; justify-content: space-between; gap: 8px;
+        }
+        .jb-hud-agent-pill {
+          display: inline-flex; align-items: center; gap: 6px;
+          font-size: 10px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;
+          color: #6ee7b7; background: rgba(16, 185, 129, 0.15);
+          border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 999px; padding: 2px 8px;
+        }
+        .jb-hud-dot {
+          width: 7px; height: 7px; border-radius: 50%; background: #10b981;
+          animation: jbDotPulse 1.1s infinite ease-in-out;
+        }
+        .jb-hud-title { font-size: 12.5px; font-weight: 800; color: #f8fafc; line-height: 1.3; }
+        .jb-hud-detail { font-size: 11.5px; color: #cbd5e1; line-height: 1.38; }
+        .jb-hud-actions { display: flex; align-items: center; gap: 5px; }
         .jb-hud-stop {
           background: #ef4444; color: #fff; border: none; border-radius: 6px;
           padding: 3px 8px; font-size: 10.5px; font-weight: 700; cursor: pointer; flex-shrink: 0;
         }
+        .jb-hud-dismiss {
+          background: rgba(255,255,255,0.12); color: #e2e8f0; border: none; border-radius: 6px;
+          padding: 3px 7px; font-size: 10.5px; font-weight: 700; cursor: pointer; display: none;
+        }
       </style>
 
-      <div class="jb-hud" id="jb-hud">
-        <div class="jb-hud-top">
-          <span class="jb-hud-title" id="jb-hud-title">🚀 Full Auto-Apply Running...</span>
-          <button class="jb-hud-stop" id="jb-hud-stop">⏹ Stop</button>
-        </div>
-        <div class="jb-hud-detail" id="jb-hud-detail">Initializing...</div>
-      </div>
+      <div class="jb-control-frame" id="jb-control-frame"></div>
 
-      <div class="jb-pill-bar">
-        <button class="jb-pill-quick" id="jb-pill-tailor-apply" title="Tailor Resume & Auto-Apply End-to-End">
-          🚀 Tailor &amp; Apply
-        </button>
-        <div class="jb-pill" id="jb-pill" title="Open Jobify Copilot">
-          <span class="jb-pill-logo">⚡ Jobify</span>
-          <span class="jb-pill-score" id="jb-pill-score">${score}% Match</span>
+      <div class="jb-hud" id="jb-hud">
+        <div class="jb-hud-badge-row">
+          <span class="jb-hud-agent-pill" id="jb-hud-badge">
+            <span class="jb-hud-dot" id="jb-hud-dot"></span>
+            <span id="jb-hud-badge-text">AI Agent In Control</span>
+          </span>
+          <div class="jb-hud-actions">
+            <button class="jb-hud-stop" id="jb-hud-stop">⏹ Stop</button>
+            <button class="jb-hud-dismiss" id="jb-hud-dismiss" title="Return to Extensions">✕</button>
+          </div>
         </div>
+        <div class="jb-hud-title" id="jb-hud-title">🚀 Full Auto-Apply Running...</div>
+        <div class="jb-hud-detail" id="jb-hud-detail">Initializing...</div>
       </div>
 
       <div class="jb-drawer" id="jb-drawer">
         <div class="jb-header">
           <div class="jb-brand">
             <div class="jb-brand-badge">J</div>
-            <div>
-              <div class="jb-brand-title">Jobify Copilot</div>
-              <div class="jb-brand-sub">Simplify+ AI Suite • Raviteja Velanati</div>
+            <div style="min-width:0;">
+              <div class="jb-brand-title-row">
+                <span class="jb-brand-title">Jobify Popup</span>
+                <div class="jb-pill" id="jb-pill" title="Job Match Score">
+                  <span class="jb-pill-score" id="jb-pill-score">${score}% Match</span>
+                </div>
+              </div>
+              <div class="jb-brand-sub">AI Auto-Apply &amp; Error Healer • Raviteja</div>
             </div>
           </div>
           <div class="jb-hdr-actions">
-            <button class="jb-icon-btn" id="jb-reload-ext" title="Reload Extension after git pull">↻</button>
-            <button class="jb-icon-btn" id="jb-open-dash" title="Open Full Jobify Dashboard">Dashboard ↗</button>
-            <button class="jb-icon-btn" id="jb-close-drawer" title="Minimize">✕</button>
+            <button class="jb-icon-btn jb-hdr-quick" id="jb-pill-tailor-apply" title="Take Control & Full Auto-Apply">🚀 Auto</button>
+            <button class="jb-icon-btn" id="jb-reload-ext" title="Reload Extension">↻</button>
+            <button class="jb-icon-btn" id="jb-open-dash" title="Open Full Jobify Hub">Hub ↗</button>
+            <button class="jb-icon-btn" id="jb-close-drawer" title="Close back to Extensions">✕</button>
           </div>
         </div>
 
@@ -528,12 +578,16 @@
     `;
 
     shadowRoot.getElementById("jb-pill").addEventListener("click", () => {
+      clearTimeout(collapseTimer);
+      collapsedToExtensions = false;
       drawerOpen = true;
       renderDrawer();
     });
     shadowRoot.getElementById("jb-pill-tailor-apply").addEventListener("click", async (e) => {
       e.stopPropagation();
       await refreshStateAndAnalyze();
+      clearTimeout(collapseTimer);
+      collapsedToExtensions = false;
       drawerOpen = false;
       renderDrawer();
       await safeSendMessage({
@@ -550,12 +604,32 @@
     shadowRoot.getElementById("jb-hud-stop").addEventListener("click", async () => {
       await safeSendMessage({ type: "STOP_FULL_AUTO_APPLY" });
       if (autoApplyStatus) autoApplyStatus.running = false;
-      renderAutoApplyHud();
+      collapsedToExtensions = false;
+      drawerOpen = true;
+      renderDrawer();
       showToast("⏹ Stopped Full Auto-Apply.", "warn");
     });
+    shadowRoot.getElementById("jb-hud-dismiss").addEventListener("click", () => {
+      clearTimeout(collapseTimer);
+      const hud = shadowRoot.getElementById("jb-hud");
+      hud.classList.add("returning");
+      setTimeout(() => {
+        collapsedToExtensions = true;
+        drawerOpen = false;
+        hud.classList.remove("returning");
+        renderDrawer();
+      }, 220);
+    });
     shadowRoot.getElementById("jb-close-drawer").addEventListener("click", () => {
-      drawerOpen = false;
-      shadowRoot.getElementById("jb-drawer").classList.remove("open");
+      clearTimeout(collapseTimer);
+      const drawer = shadowRoot.getElementById("jb-drawer");
+      drawer.classList.add("returning");
+      setTimeout(() => {
+        collapsedToExtensions = true;
+        drawerOpen = false;
+        drawer.classList.remove("returning");
+        renderDrawer();
+      }, 220);
     });
     shadowRoot.getElementById("jb-reload-ext").addEventListener("click", () => {
       showToast("↻ Reloading Jobify Extension...", "info");
@@ -579,31 +653,62 @@
   function renderAutoApplyHud() {
     if (!shadowRoot) return;
     const hud = shadowRoot.getElementById("jb-hud");
+    const frame = shadowRoot.getElementById("jb-control-frame");
+    const badgeTextEl = shadowRoot.getElementById("jb-hud-badge-text");
     const titleEl = shadowRoot.getElementById("jb-hud-title");
     const detailEl = shadowRoot.getElementById("jb-hud-detail");
     const stopBtn = shadowRoot.getElementById("jb-hud-stop");
+    const dismissBtn = shadowRoot.getElementById("jb-hud-dismiss");
     if (!hud) return;
+
+    if (frame) {
+      frame.classList.toggle("active", Boolean(autoApplyStatus?.running));
+    }
+
+    if (collapsedToExtensions && !autoApplyStatus?.running) {
+      hud.classList.remove("visible");
+      return;
+    }
 
     const isPausedOrAttention =
       autoApplyStatus &&
       !autoApplyStatus.running &&
       (autoApplyStatus.stage === "needs_review" ||
         autoApplyStatus.stage === "paused_captcha" ||
-        autoApplyStatus.stage === "paused_otp");
+        autoApplyStatus.stage === "paused_otp" ||
+        Boolean(autoApplyStatus.error));
 
-    const isRecentDone =
+    const isBriefCompletion =
       autoApplyStatus &&
       !autoApplyStatus.running &&
-      (autoApplyStatus.completed || autoApplyStatus.error || isPausedOrAttention) &&
-      Date.now() - (autoApplyStatus.updatedAt || 0) < (isPausedOrAttention ? 22000 : 12000);
+      (autoApplyStatus.stage === "completed" || autoApplyStatus.stage === "ready_for_review") &&
+      !collapsedToExtensions &&
+      Date.now() - (autoApplyStatus.updatedAt || 0) < 3500;
 
-    if (autoApplyStatus?.running || isRecentDone) {
+    if (autoApplyStatus?.running || isBriefCompletion || (isPausedOrAttention && !collapsedToExtensions)) {
       hud.classList.add("visible");
+      if (badgeTextEl) {
+        badgeTextEl.textContent =
+          autoApplyStatus.stage === "healing_validation"
+            ? "AI Error Doctor Active"
+            : autoApplyStatus.running
+              ? "AI Agent In Control"
+              : autoApplyStatus.stage === "completed"
+                ? "Done • Returning to Extensions"
+                : "Action Needed";
+      }
       titleEl.textContent = autoApplyStatus.stepLabel || "🚀 Full Auto-Apply";
       detailEl.textContent = autoApplyStatus.detail || "";
       stopBtn.style.display = autoApplyStatus.running ? "inline-block" : "none";
+      if (dismissBtn) {
+        dismissBtn.style.display = !autoApplyStatus.running ? "inline-block" : "none";
+      }
       hud.style.borderColor =
-        autoApplyStatus.error || isPausedOrAttention ? "#f59e0b" : "#10b981";
+        autoApplyStatus.stage === "healing_validation"
+          ? "#38bdf8"
+          : autoApplyStatus.error || isPausedOrAttention
+            ? "#f59e0b"
+            : "#10b981";
     } else {
       hud.classList.remove("visible");
     }
@@ -617,7 +722,7 @@
     }
     renderAutoApplyHud();
     const drawer = shadowRoot.getElementById("jb-drawer");
-    if (drawerOpen) {
+    if (drawerOpen && !collapsedToExtensions && !autoApplyStatus?.running) {
       drawer.classList.add("open");
       renderTabContent();
     } else {
@@ -726,10 +831,14 @@
         if (autoApplyStatus?.running) {
           await safeSendMessage({ type: "STOP_FULL_AUTO_APPLY" });
           autoApplyStatus.running = false;
+          collapsedToExtensions = false;
+          drawerOpen = true;
           renderDrawer();
           showToast("⏹ Stopped Full Auto-Apply.", "warn");
           return;
         }
+        clearTimeout(collapseTimer);
+        collapsedToExtensions = false;
         drawerOpen = false;
         renderDrawer();
         await safeSendMessage({
@@ -745,6 +854,8 @@
       });
 
       body.querySelector("#jb-btn-fast-auto").addEventListener("click", async () => {
+        clearTimeout(collapseTimer);
+        collapsedToExtensions = false;
         drawerOpen = false;
         renderDrawer();
         await safeSendMessage({
@@ -892,6 +1003,8 @@
         </div>
       `;
       body.querySelector("#jb-kw-tailor").addEventListener("click", async () => {
+        clearTimeout(collapseTimer);
+        collapsedToExtensions = false;
         drawerOpen = false;
         renderDrawer();
         await safeSendMessage({
@@ -971,6 +1084,8 @@
 
       body.querySelector("#jb-run-tailor").addEventListener("click", async () => {
         const chosenModel = body.querySelector("#jb-ai-model").value;
+        clearTimeout(collapseTimer);
+        collapsedToExtensions = false;
         drawerOpen = false;
         renderDrawer();
         await safeSendMessage({
@@ -1248,11 +1363,33 @@
       }
       if (msg.type === "AUTO_APPLY_PROGRESS") {
         autoApplyStatus = msg.payload || null;
+        if (autoApplyStatus?.running) {
+          clearTimeout(collapseTimer);
+          collapsedToExtensions = false;
+          drawerOpen = false;
+        } else if (
+          autoApplyStatus &&
+          !autoApplyStatus.running &&
+          (autoApplyStatus.stage === "completed" || autoApplyStatus.stage === "ready_for_review")
+        ) {
+          clearTimeout(collapseTimer);
+          const delayMs = autoApplyStatus.stage === "completed" ? 1350 : 2200;
+          collapseTimer = setTimeout(() => {
+            const hud = shadowRoot?.getElementById("jb-hud");
+            if (hud) hud.classList.add("returning");
+            setTimeout(() => {
+              collapsedToExtensions = true;
+              drawerOpen = false;
+              if (hud) hud.classList.remove("returning");
+              renderDrawer();
+            }, 260);
+          }, delayMs);
+        }
         if (!document.getElementById("jobify-copilot-host") && pageMeta?.isRelevantPage) {
           mountWidget();
         }
         renderAutoApplyHud();
-        if (drawerOpen && activeTab === "autofill") renderTabContent();
+        renderDrawer();
         return { ok: true };
       }
       if (msg.type === "GET_PAGE_CONTEXT") {
@@ -1261,11 +1398,14 @@
       }
       if (msg.type === "TOGGLE_COPILOT_DRAWER") {
         await refreshStateAndAnalyze();
+        clearTimeout(collapseTimer);
+        const nextOpen = msg.payload?.open ?? !drawerOpen;
+        collapsedToExtensions = !nextOpen;
+        drawerOpen = nextOpen;
         if (!document.getElementById("jobify-copilot-host")) mountWidget();
-        drawerOpen = msg.payload?.open ?? !drawerOpen;
         if (msg.payload?.tab) activeTab = msg.payload.tab;
         renderDrawer();
-        return { ok: true, drawerOpen };
+        return { ok: true, drawerOpen, collapsedToExtensions };
       }
       if (msg.type === "TRIGGER_LOCAL_AUTOFILL") {
         await refreshStateAndAnalyze();
@@ -1317,7 +1457,7 @@
     return true;
   });
 
-  // Boot after brief hydration settle (capped at 1.2s so slow analytics pixels never block widget mount)
+  // Boot after brief hydration settle: Auto-popup top-right when opening a job link, return to Extensions when done!
   (async () => {
     if (/^https?:/i.test(location.protocol)) {
       if (document.readyState !== "complete") {
@@ -1334,12 +1474,24 @@
     if (pageMeta?.isRelevantPage) {
       injectInlineAiButtons();
       if (IS_TOP_FRAME && appState?.settings?.autoShowCopilotWidget !== false) {
+        const alreadyDone = Boolean(window.__JOBIFY_ADAPTERS__?.detectSubmissionConfirmation?.(document));
+        if (alreadyDone) {
+          collapsedToExtensions = true;
+          drawerOpen = false;
+        } else if (autoApplyStatus?.running) {
+          collapsedToExtensions = false;
+          drawerOpen = false;
+        } else {
+          collapsedToExtensions = false;
+          drawerOpen = true;
+        }
         mountWidget();
       }
     }
 
     if (IS_TOP_FRAME) {
       let lastHref = location.href;
+      let hydrationChecksLeft = 8;
       const pollTimer = setInterval(async () => {
         try {
           if (typeof chrome === "undefined" || !chrome.runtime?.id) {
@@ -1356,13 +1508,49 @@
           }
           if (location.href !== lastHref) {
             lastHref = location.href;
+            hydrationChecksLeft = 8;
             await refreshStateAndAnalyze();
+            const isConfirmedNow = Boolean(window.__JOBIFY_ADAPTERS__?.detectSubmissionConfirmation?.(document));
+            if (isConfirmedNow && !autoApplyStatus?.running) {
+              collapsedToExtensions = true;
+              drawerOpen = false;
+              if (shadowRoot) renderDrawer();
+              return;
+            }
             if (pageMeta?.isRelevantPage) {
               injectInlineAiButtons();
+              if (!autoApplyStatus?.running && appState?.settings?.autoShowCopilotWidget !== false) {
+                collapsedToExtensions = false;
+                drawerOpen = true;
+              }
               if (!document.getElementById("jobify-copilot-host") && appState?.settings?.autoShowCopilotWidget !== false) {
                 mountWidget();
               } else if (shadowRoot) {
                 renderDrawer();
+              }
+            } else if (shadowRoot && !autoApplyStatus?.running) {
+              collapsedToExtensions = true;
+              drawerOpen = false;
+              renderDrawer();
+            }
+          } else if (hydrationChecksLeft > 0 && !autoApplyStatus?.running) {
+            hydrationChecksLeft--;
+            if (!pageMeta?.isRelevantPage || (pageMeta?.description || "").length < 150) {
+              const freshMeta = window.__JOBIFY_ADAPTERS__?.extractJobMetadata?.(document);
+              if (
+                freshMeta?.isRelevantPage &&
+                (!pageMeta?.isRelevantPage || (freshMeta.description || "").length > (pageMeta?.description || "").length + 80)
+              ) {
+                await refreshStateAndAnalyze();
+                injectInlineAiButtons();
+                if (appState?.settings?.autoShowCopilotWidget !== false && !collapsedToExtensions) {
+                  drawerOpen = true;
+                  if (!document.getElementById("jobify-copilot-host")) {
+                    mountWidget();
+                  } else if (shadowRoot && !shadowRoot.activeElement) {
+                    renderDrawer();
+                  }
+                }
               }
             }
           }

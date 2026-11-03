@@ -2123,6 +2123,7 @@
       const required = isFieldRequired(el, ctx);
       const hasErrorState =
         el.getAttribute("aria-invalid") === "true" ||
+        Boolean(getControlValidationErrorText(el, null, true)) ||
         Array.from(
           el
             .closest(
@@ -2159,6 +2160,194 @@
     return results;
   }
 
+  function isCustomOptionSelected(el) {
+    if (!el) return false;
+    if (
+      el.getAttribute("aria-checked") === "true" ||
+      el.getAttribute("aria-pressed") === "true" ||
+      el.getAttribute("aria-selected") === "true" ||
+      el.getAttribute("data-state") === "checked" ||
+      el.getAttribute("data-state") === "on" ||
+      el.getAttribute("data-selected") === "true"
+    ) {
+      return true;
+    }
+    const cls = typeof el.className === "string" ? el.className : "";
+    return /\b(active|selected|is-selected|checked)\b|_active_/i.test(cls);
+  }
+
+  function scanCustomInteractiveGroups(doc = document) {
+    const ariaCheckboxes = Array.from(doc.querySelectorAll("[role='checkbox'], [role='switch']")).filter((el) => {
+      if (el.tagName === "INPUT" || el.disabled || el.getAttribute("aria-disabled") === "true") return false;
+      if (isTrapOrSystemInput(el) || !isElementVisible(el)) return false;
+      if (el.closest(COOKIE_CONSENT_SELECTOR) || el.closest("#jobify-copilot-host") || isHeaderOrNavButton(el)) return false;
+      // Skip multi-select dropdown option items inside listboxes
+      if (el.closest("[role='listbox'], [role='menu'], .select__menu")) return false;
+      return true;
+    });
+
+    const ariaRadioGroups = [];
+    const seenRadioContainers = new WeakSet();
+    for (const rg of Array.from(doc.querySelectorAll("[role='radiogroup']"))) {
+      if (!isElementVisible(rg) || rg.closest(COOKIE_CONSENT_SELECTOR) || rg.closest("#jobify-copilot-host")) continue;
+      const radios = Array.from(rg.querySelectorAll("[role='radio']")).filter(
+        (r) => r.tagName !== "INPUT" && isElementVisible(r) && !r.disabled && r.getAttribute("aria-disabled") !== "true"
+      );
+      if (radios.length < 2) continue;
+      seenRadioContainers.add(rg);
+      const wrap =
+        rg.closest(
+          ".ashby-application-form-field-entry, [class*='fieldEntry'], [data-automation-id*='formField'], [data-jobify-field], .field, .form-group, fieldset"
+        ) || rg;
+      const ctx = getFieldContext(rg);
+      const lblEl = wrap.querySelector("label, legend, .ashby-application-form-question-title, [class*='question' i], [class*='label' i]");
+      const label =
+        (
+          rg.getAttribute("aria-label") ||
+          (rg.getAttribute("aria-labelledby") && doc.getElementById(rg.getAttribute("aria-labelledby"))?.innerText) ||
+          lblEl?.innerText ||
+          ctx.primaryLabel ||
+          "Choice Question"
+        )
+          .replace(/\s+/g, " ")
+          .trim();
+      const required =
+        rg.getAttribute("aria-required") === "true" ||
+        hasCssRequiredMarker(wrap) ||
+        (lblEl ? hasCssRequiredMarker(lblEl) || /\*/.test(lblEl.innerText || "") : false) ||
+        /\*/.test(label);
+
+      ariaRadioGroups.push({
+        kind: "aria_radio_group",
+        container: rg,
+        ctx: { ...ctx, primaryLabel: label, fullLabel: `${label} ${ctx.fullLabel || ""}`.trim() },
+        label,
+        required,
+        options: radios.map((r) => ({
+          el: r,
+          text: (r.innerText || r.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim(),
+          selected: isCustomOptionSelected(r)
+        }))
+      });
+    }
+
+    const buttonChoiceGroups = [];
+    const candidateContainers = new Set(
+      Array.from(
+        doc.querySelectorAll(
+          ".ashby-application-form-field-entry, [class*='fieldEntry'], [data-automation-id*='formField'], [data-jobify-field], [data-jobify-choice-group], .application-question, fieldset, [role='group'], .field, .form-group"
+        )
+      )
+    );
+
+    const UTILITY_BTN_RE =
+      /^(submit|next|continue|save|back|previous|cancel|upload|attach|browse|remove|delete|clear|reset|add(\s|$)|sign\s*(in|up|out)|log\s*(in|out)|apply|autofill|show\s*(more|less)|read\s*more|toggle\s*flyout)/i;
+
+    for (const entry of candidateContainers) {
+      if (seenRadioContainers.has(entry) || entry.querySelector("[role='radiogroup']")) continue;
+      if (!isElementVisible(entry) || entry.closest(COOKIE_CONSENT_SELECTOR) || entry.closest("#jobify-copilot-host")) continue;
+      if (isHeaderOrNavButton(entry)) continue;
+
+      const explicitAshbyBtns = Array.from(
+        entry.querySelectorAll("button[class*='yesno'], button[class*='_option_'], button[data-choice-option]")
+      ).filter((b) => isElementVisible(b) && !b.disabled);
+
+      let choiceBtns = explicitAshbyBtns;
+      if (choiceBtns.length < 2) {
+        // Check for clean Yes/No or custom choice button groups (only if container doesn't hold text/select/file inputs)
+        if (entry.querySelector("input:not([type='hidden']), select, textarea, [role='combobox']")) continue;
+        const rawBtns = Array.from(entry.querySelectorAll("button:not([type='submit'])")).filter((b) => {
+          if (!isElementVisible(b) || b.disabled || b.closest(".jb-inline-ai-wrap")) return false;
+          const t = (b.innerText || "").replace(/\s+/g, " ").trim();
+          if (!t || t.length > 42 || UTILITY_BTN_RE.test(t) || /jobify/i.test(t)) return false;
+          return true;
+        });
+        const isYesNoPair =
+          rawBtns.length === 2 &&
+          rawBtns.every((b) => /^(yes|no|i\s+agree|i\s+do\s+not\s+agree|true|false)$/i.test((b.innerText || "").trim()));
+        const isExplicitGroup =
+          (entry.getAttribute("role") === "group" || entry.hasAttribute("data-jobify-choice-group")) &&
+          rawBtns.length >= 2 &&
+          rawBtns.length <= 6;
+        if (isYesNoPair || isExplicitGroup) {
+          choiceBtns = rawBtns;
+        }
+      }
+
+      if (choiceBtns.length < 2) continue;
+
+      const lblEl = entry.querySelector("label, legend, .ashby-application-form-question-title, [class*='question' i], [class*='label' i]");
+      const label = (lblEl?.innerText || entry.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
+      if (!label) continue;
+      const required =
+        entry.getAttribute("aria-required") === "true" ||
+        hasCssRequiredMarker(entry) ||
+        (lblEl ? hasCssRequiredMarker(lblEl) || /\*/.test(lblEl.innerText || "") : false) ||
+        /\*/.test(label);
+
+      buttonChoiceGroups.push({
+        kind: "button_group",
+        container: entry,
+        ctx: { primaryLabel: label, helperText: "", fullLabel: label },
+        label,
+        required,
+        options: choiceBtns.map((b) => ({
+          el: b,
+          text: (b.innerText || b.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim(),
+          selected: isCustomOptionSelected(b)
+        }))
+      });
+    }
+
+    return { ariaCheckboxes, ariaRadioGroups, buttonChoiceGroups };
+  }
+
+  async function fillCustomInteractiveControls(
+    profile,
+    jobMeta = null,
+    { forceOverwrite = false, fillOpenEndedWithAI = true, onlyNeededCleanMode = false } = {}
+  ) {
+    let filled = 0;
+    const { ariaCheckboxes, ariaRadioGroups, buttonChoiceGroups } = scanCustomInteractiveGroups(document);
+
+    // 1. Custom ARIA Checkboxes & Switches
+    for (const cb of ariaCheckboxes) {
+      if (!forceOverwrite && isCustomOptionSelected(cb)) continue;
+      const ctx = getFieldContext(cb);
+      const optTxt = `${getChoiceOptionLabel(cb)} ${ctx.fullLabel}`;
+      const req = isFieldRequired(cb, ctx);
+      if (!NEGATIVE_CHECKBOX_REGEX.test(optTxt) && (CONSENT_CHECKBOX_REGEX.test(optTxt) || req)) {
+        dispatchRealClick(cb);
+        highlightFilledElement(cb);
+        filled++;
+      }
+    }
+
+    // 2. Custom ARIA Radio Groups & Choice Button Groups
+    for (const grp of [...ariaRadioGroups, ...buttonChoiceGroups]) {
+      if (!forceOverwrite && grp.options.some((o) => o.selected)) continue;
+      let desired = resolveDesiredValueForField(grp.ctx, profile, grp.container, jobMeta);
+      if (desired?.skip) continue;
+      if (!desired && (grp.required || !onlyNeededCleanMode) && fillOpenEndedWithAI) {
+        desired = await askAiToPickOption(
+          grp.label,
+          grp.options.map((o) => o.text),
+          jobMeta
+        );
+      }
+      if (!desired || desired.skip) continue;
+      const wrappers = grp.options.map((o) => ({ el: o.el, innerText: o.text }));
+      const matchWrap = findMatchingOptionElement(wrappers, desired);
+      if (matchWrap?.el) {
+        dispatchRealClick(matchWrap.el);
+        highlightFilledElement(matchWrap.el);
+        filled++;
+      }
+    }
+
+    return filled;
+  }
+
   // Extract a complete structured manifest of all available fields on the current page BEFORE filling
   function extractFormFieldsInventory(profile = { personal: {}, workAuthAndEEO: {} }, jobMeta = null) {
     const meta = jobMeta || extractJobMetadata(document);
@@ -2167,38 +2356,31 @@
     const seenRadioGroups = new Set();
     const seenCheckboxGroups = new Set();
 
-    // Include Ashby & React custom Yes/No pill groups in inventory
-    const ashbyEntries = new Set(
-      Array.from(document.querySelectorAll("button[class*='yesno'], button[class*='_option_']"))
-        .map((b) =>
-          b.closest(".ashby-application-form-field-entry, [class*='fieldEntry'], .field, fieldset, [role='group']")
-        )
-        .filter(Boolean)
-    );
-    ashbyEntries.forEach((entry) => {
-      const buttons = Array.from(entry.querySelectorAll("button[class*='yesno'], button[class*='_option_']")).filter(
-        (b) => /^(yes|no)$/i.test((b.innerText || "").trim())
-      );
-      if (buttons.length >= 2) {
-        const lblEl = entry.querySelector("label, legend, .ashby-application-form-question-title");
-        const lbl = (lblEl?.innerText || "Yes/No Question").trim();
-        const req = hasCssRequiredMarker(entry) || (lblEl ? hasCssRequiredMarker(lblEl) || /\*/.test(lbl) : false);
-        const filled = buttons.some(
-          (b) =>
-            String(b.className).includes("_active_") ||
-            b.classList?.contains("active") ||
-            b.getAttribute("aria-pressed") === "true"
-        );
-        fields.push({
-          index: fields.length + 1,
-          kind: "yes_no_group",
-          label: lbl,
-          required: req,
-          isCoverLetter: false,
-          currentlyFilled: filled
-        });
-      }
-    });
+    // Include custom ARIA checkboxes, ARIA radio groups, Ashby Yes/No & generic button choice groups
+    const customGroups = scanCustomInteractiveGroups(document);
+    for (const cb of customGroups.ariaCheckboxes) {
+      const ctx = getFieldContext(cb);
+      const lbl = (getChoiceOptionLabel(cb) || ctx.primaryLabel || "Consent Checkbox").slice(0, 90);
+      const req = isFieldRequired(cb, ctx) || (CONSENT_CHECKBOX_REGEX.test(`${lbl} ${ctx.fullLabel}`) && !NEGATIVE_CHECKBOX_REGEX.test(lbl));
+      fields.push({
+        index: fields.length + 1,
+        kind: "aria_checkbox",
+        label: lbl,
+        required: req,
+        isCoverLetter: false,
+        currentlyFilled: isCustomOptionSelected(cb)
+      });
+    }
+    for (const grp of [...customGroups.ariaRadioGroups, ...customGroups.buttonChoiceGroups]) {
+      fields.push({
+        index: fields.length + 1,
+        kind: grp.kind,
+        label: grp.label,
+        required: grp.required,
+        isCoverLetter: false,
+        currentlyFilled: grp.options.some((o) => o.selected)
+      });
+    }
 
     const allEls = Array.from(
       document.querySelectorAll("input, select, textarea, [role='combobox'], button[aria-haspopup='listbox']")
@@ -2338,7 +2520,13 @@
     const inputs = Array.from(document.querySelectorAll("input, select, textarea")).filter((el) =>
       el.type === "file" ? isActionableFileInput(el) : isVisibleAndEditable(el)
     );
-    return inputs.length;
+    const custom = scanCustomInteractiveGroups(document);
+    return (
+      inputs.length +
+      custom.ariaCheckboxes.length +
+      custom.ariaRadioGroups.length +
+      custom.buttonChoiceGroups.length
+    );
   }
 
   // Detect open "Start Your Application" / Apply-Method Choice Modal (e.g. Workday Apply Manually vs LinkedIn / Last Application)
@@ -2817,6 +3005,101 @@
     return false;
   }
 
+  function isVisualErrorTextNode(node) {
+    if (!node || !isElementVisible(node)) return false;
+    if (node.closest(COOKIE_CONSENT_SELECTOR) || node.closest("#jobify-copilot-host")) return false;
+    if (node.matches("button, a, [role='button'], label, legend, input, select, textarea")) return false;
+    if (node.closest("button, a, [role='button'], label, legend, nav, header, footer")) return false;
+    if (node.querySelector("input, select, textarea, button")) return false;
+    if (node.children && node.children.length > 3) return false;
+
+    const txt = (node.innerText || node.textContent || "").replace(/\s+/g, " ").trim();
+    if (!txt || txt.length < 4 || txt.length > 240) return false;
+    if (/^\s*(\*|required\s*\*?|\(required\)|optional)\s*$/i.test(txt)) return false;
+    if (/thank\s+you|application\s+(submitted|received)|successfully/i.test(txt)) return false;
+
+    const cs = window.getComputedStyle(node);
+    const rgbMatch = String(cs.color || "").match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+    if (!rgbMatch) return false;
+    const r = Number(rgbMatch[1]);
+    const g = Number(rgbMatch[2]);
+    const b = Number(rgbMatch[3]);
+    const isRedTone = r >= 165 && g <= 95 && b <= 105 && r - g >= 75;
+    if (!isRedTone) return false;
+
+    // Red text inside a form or matching validation phrasing is a genuine validation error
+    if (
+      /required|please\s+|must\s+|invalid|cannot\s+be|can'?t\s+be|enter\s+|select\s+|choose\s+|provide\s+|only\b|digits?\b|numbers?\b|format|minimum|maximum|at\s+least|missing|valid\b|error|agree|confirm|check\b|upload|attach/i.test(
+        txt
+      ) ||
+      Boolean(
+        node.closest(
+          "form, [data-automation-id='applyFlowPage'], [class*='application' i], .field, .form-group, [data-jobify-field], fieldset"
+        )
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  function getControlValidationErrorText(el, customWrap = null, includeHtml5Validity = false) {
+    if (!el) return "";
+    // 1. aria-errormessage / aria-describedby linked error nodes
+    const refIds = `${el.getAttribute?.("aria-errormessage") || ""} ${el.getAttribute?.("aria-describedby") || ""}`
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    for (const id of refIds) {
+      const refNode = document.getElementById(id);
+      if (refNode && isElementVisible(refNode)) {
+        const t = (refNode.innerText || refNode.textContent || "").replace(/\s+/g, " ").trim();
+        if (
+          t &&
+          (refNode.matches("[role='alert'], .field-error, [id$='-error'], [class*='error' i]") ||
+            isVisualErrorTextNode(refNode) ||
+            /required|invalid|please\s+|must\s+|only\b|digits?\b|numbers?\b|cannot\s+be/i.test(t))
+        ) {
+          return t.slice(0, 220);
+        }
+      }
+    }
+
+    // 2. Field wrapper explicit error classes OR visual red Tailwind / CSS-in-JS error nodes
+    const wrap =
+      customWrap ||
+      el.closest?.(
+        ".field, .form-group, .application-question, .ashby-application-form-field-entry, [class*='fieldEntry'], [data-automation-id*='formField'], [data-jobify-field], .row, fieldset, [role='radiogroup'], [role='group']"
+      ) ||
+      el.parentElement;
+
+    if (wrap) {
+      const explicitErrs = Array.from(
+        wrap.querySelectorAll(
+          "[data-automation-id='errorMessage'], .field-error, .field-error-msg, .lv-error, .ashby-application-form-field-error, [class*='fieldError' i], [class*='errorMessage' i], [class*='error-message' i], [id$='-error'], [role='alert']"
+        )
+      ).filter((n) => isElementVisible(n) && (n.innerText || n.textContent || "").trim().length > 0);
+      if (explicitErrs.length > 0) {
+        return (explicitErrs[0].innerText || explicitErrs[0].textContent || "").replace(/\s+/g, " ").trim().slice(0, 220);
+      }
+
+      const redNodes = Array.from(wrap.querySelectorAll("p, span, div, small, em")).filter(isVisualErrorTextNode);
+      if (redNodes.length > 0) {
+        return (redNodes[0].innerText || redNodes[0].textContent || "").replace(/\s+/g, " ").trim().slice(0, 220);
+      }
+    }
+
+    // 3. HTML5 native constraint validation message (post-submit / heal phase)
+    if (includeHtml5Validity && typeof el.validity === "object" && el.validity && !el.validity.valid && el.validationMessage) {
+      return String(el.validationMessage).trim().slice(0, 220);
+    }
+
+    if (el.getAttribute?.("aria-invalid") === "true") {
+      return "Required or invalid value";
+    }
+    return "";
+  }
+
   function detectFormValidationErrors(doc = document) {
     const messages = [];
     const seen = new Set();
@@ -2828,16 +3111,21 @@
       messages.push(clean);
     };
 
-    // 1. Explicit aria-invalid="true" controls
+    // 1. Explicit aria-invalid="true" controls (including custom ARIA checkboxes/radios)
     const ariaInvalidEls = Array.from(doc.querySelectorAll("[aria-invalid='true']")).filter((el) => {
       if (isTrapOrSystemInput(el) || el.disabled) return false;
       if (el.type === "file") return isActionableFileInput(el);
       if (isComboboxInput(el)) return !isInHiddenAncestor(el);
+      if (el.getAttribute("role") === "checkbox" || el.getAttribute("role") === "switch" || el.getAttribute("role") === "radiogroup") {
+        return isElementVisible(el);
+      }
       return isVisibleAndEditable(el);
     });
     for (const el of ariaInvalidEls) {
+      const specificErr = getControlValidationErrorText(el);
       const ctx = getFieldContext(el);
-      pushMsg(`Invalid/missing field: ${(ctx.primaryLabel || el.name || el.id || "Required field").split("|")[0].trim()}`);
+      const lbl = (ctx.primaryLabel || el.name || el.id || "Required field").split("|")[0].trim();
+      pushMsg(specificErr && specificErr !== "Required or invalid value" ? `${lbl}: ${specificErr}` : `Invalid/missing field: ${lbl}`);
     }
 
     // 2. Visible field error / banner elements
@@ -2850,14 +3138,14 @@
     for (const node of errorNodes) {
       const txt = (node.innerText || node.textContent || "").replace(/\s+/g, " ").trim();
       if (!txt || txt.length > 260) continue;
-      if (
-        /thank\s+you|application\s+(submitted|received)|successfully/i.test(txt)
-      ) {
+      if (/thank\s+you|application\s+(submitted|received)|successfully/i.test(txt)) {
         continue;
       }
       if (
-        node.matches("[data-automation-id='errorMessage'], .field-error, .field-error-msg, .lv-error, .ashby-application-form-field-error, [id$='-error']") ||
-        /required|please\s+(enter|select|provide|fill|upload|attach|check|complete|confirm|choose)|cannot\s+be\s+(blank|empty)|must\s+(be|select|provide|agree|accept)|invalid|missing|this\s+field|make\s+a\s+selection|value\s+is\s+required|fix\s+the\s+errors?/i.test(
+        node.matches(
+          "[data-automation-id='errorMessage'], .field-error, .field-error-msg, .lv-error, .ashby-application-form-field-error, [id$='-error']"
+        ) ||
+        /required|please\s+(enter|select|provide|fill|upload|attach|check|complete|confirm|choose|specify)|cannot\s+be\s+(blank|empty)|must\s+(be|select|provide|agree|accept|contain)|invalid|missing|this\s+field|make\s+a\s+selection|value\s+is\s+required|fix\s+the\s+errors?|digits?\s*only|numbers?\s*only/i.test(
           txt
         )
       ) {
@@ -2865,10 +3153,26 @@
       }
     }
 
+    // 3. CSS-in-JS / Tailwind red validation paragraphs & spans inside forms/application containers (no .field-error class needed!)
+    const formScopes = Array.from(
+      doc.querySelectorAll(
+        "form, [data-automation-id='applyFlowPage'], [class*='ashby-application-form'], #application_form, #grnhse_app, .application-form, [class*='applicationForm' i], [data-jobify-form]"
+      )
+    );
+    const scopeRoots = formScopes.length > 0 ? formScopes : [doc.body].filter(Boolean);
+    for (const root of scopeRoots) {
+      const candidates = root.querySelectorAll("p, span, div, small, em");
+      for (const node of candidates) {
+        if (isVisualErrorTextNode(node)) {
+          pushMsg(node.innerText || node.textContent || "");
+        }
+      }
+    }
+
     return {
       hasErrors: messages.length > 0,
       count: messages.length,
-      messages: messages.slice(0, 8)
+      messages: messages.slice(0, 10)
     };
   }
 
@@ -3019,6 +3323,22 @@
       };
     }
 
+    // Hydrate below-the-fold lazy-mounted sections on long SPA portals before inventory scan
+    if (sequentialOneByOne && /^https?:/i.test(location.protocol)) {
+      try {
+        const docEl = document.scrollingElement || document.documentElement;
+        if (docEl && docEl.scrollHeight > window.innerHeight * 1.4) {
+          const origTop = window.scrollY;
+          window.scrollTo({ top: Math.min(docEl.scrollHeight, origTop + window.innerHeight * 0.9), behavior: "instant" });
+          await sleep(80);
+          window.scrollTo({ top: docEl.scrollHeight, behavior: "instant" });
+          await sleep(80);
+          window.scrollTo({ top: origTop, behavior: "instant" });
+          await sleep(50);
+        }
+      } catch (_) {}
+    }
+
     // Extract structured field inventory BEFORE filling so we know exact fields & cover letter requirement
     const preInventory = extractFormFieldsInventory(profile, meta);
     if (typeof onProgress === "function" && preInventory.totalFields > 0) {
@@ -3083,11 +3403,15 @@
       }
     }
 
-    // 4. Ashby Custom Yes/No Pill Button Groups
-    const ashbyBtnsFilled = fillAshbyYesNoGroups(profile, meta);
-    if (ashbyBtnsFilled > 0) {
-      filledCount += ashbyBtnsFilled;
-      await reportStep(`Yes/No Questions (${ashbyBtnsFilled})`);
+    // 4. Custom ARIA Checkboxes, ARIA Radio Groups, Ashby Yes/No & Generic Choice Pill Groups
+    const customControlsFilled = await fillCustomInteractiveControls(profile, meta, {
+      forceOverwrite,
+      fillOpenEndedWithAI,
+      onlyNeededCleanMode
+    });
+    if (customControlsFilled > 0) {
+      filledCount += customControlsFilled;
+      await reportStep(`Interactive Choice & Consent Controls (${customControlsFilled})`);
     }
 
     // 5. React-Select & Custom ARIA Comboboxes (2 passes so conditional dropdowns like EEOC Race mount & get filled)
@@ -3368,6 +3692,415 @@
     };
   }
 
+  // Collect full live diagnostics of page errors, red/invalid fields, and empty controls for Gemini AI Form Doctor
+  function collectLiveFormDiagnostics(profile = {}, jobMeta = null, doc = document) {
+    const meta = jobMeta || extractJobMetadata(doc);
+    const pageErrScan = detectFormValidationErrors(doc);
+    const pageErrors = pageErrScan.messages || [];
+    const fields = [];
+    let refSeq = 1;
+
+    const assignRef = (el) => {
+      if (!el) return null;
+      const id = `jb_ref_${refSeq++}`;
+      try {
+        el.setAttribute("data-jobify-ref", id);
+      } catch (_) {}
+      return id;
+    };
+
+    const customGroups = scanCustomInteractiveGroups(doc);
+
+    // 1. Custom ARIA Checkboxes / Switches
+    for (const cb of customGroups.ariaCheckboxes) {
+      const checked = isCustomOptionSelected(cb);
+      const ctx = getFieldContext(cb);
+      const label = (getChoiceOptionLabel(cb) || ctx.primaryLabel || "Consent Checkbox").slice(0, 140);
+      const errTxt = getControlValidationErrorText(cb);
+      const req = isFieldRequired(cb, ctx) || CONSENT_CHECKBOX_REGEX.test(`${label} ${ctx.fullLabel}`);
+      if ((!checked && (req || Boolean(errTxt))) || Boolean(errTxt)) {
+        if (NEGATIVE_CHECKBOX_REGEX.test(`${label} ${ctx.fullLabel}`) && !errTxt) continue;
+        fields.push({
+          refId: assignRef(cb),
+          label,
+          helperText: (ctx.helperText || "").slice(0, 100),
+          kind: "checkbox",
+          inputType: "aria-checkbox",
+          required: req || Boolean(errTxt),
+          flaggedInvalid: Boolean(errTxt) || cb.getAttribute("aria-invalid") === "true",
+          currentValue: checked ? "true" : "",
+          errorMessage: errTxt,
+          placeholder: "",
+          options: ["true", "false"]
+        });
+      }
+    }
+
+    // 2. Custom ARIA Radio Groups & Custom Button Choice Groups
+    for (const grp of [...customGroups.ariaRadioGroups, ...customGroups.buttonChoiceGroups]) {
+      const selectedOpt = grp.options.find((o) => o.selected);
+      const errTxt = getControlValidationErrorText(grp.container, grp.container);
+      const flagged = Boolean(errTxt) || grp.container.getAttribute("aria-invalid") === "true";
+      if (!selectedOpt || flagged) {
+        fields.push({
+          refId: assignRef(grp.container),
+          label: grp.label || "Choice Question",
+          helperText: (grp.ctx?.helperText || "").slice(0, 100),
+          kind: grp.kind === "aria_radio_group" ? "radio_group" : "button_group",
+          inputType: grp.kind,
+          required: grp.required || flagged,
+          flaggedInvalid: flagged,
+          currentValue: selectedOpt ? selectedOpt.text : "",
+          errorMessage: errTxt,
+          placeholder: "",
+          options: grp.options.map((o) => o.text).filter(Boolean).slice(0, 20)
+        });
+      }
+    }
+
+    // 3. Comboboxes
+    const comboboxes = Array.from(
+      doc.querySelectorAll("input[role='combobox'], button[aria-haspopup='listbox'], [role='combobox']")
+    ).filter((c) => {
+      if (isTrapOrSystemInput(c) || isInHiddenAncestor(c) || c.disabled) return false;
+      if (c.tagName !== "INPUT" && c.querySelector?.("input[role='combobox']")) return false;
+      const r = c.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    });
+    for (const combo of comboboxes) {
+      const ctx = getFieldContext(combo);
+      const hasSel = hasComboboxSelection(combo);
+      const errTxt = getControlValidationErrorText(combo);
+      const flagged = Boolean(errTxt) || combo.getAttribute("aria-invalid") === "true";
+      const req = isFieldRequired(combo, ctx);
+      if (!hasSel || flagged) {
+        const shell =
+          combo.closest(".select-shell, .select__container") ||
+          combo.closest(".select__control")?.parentElement ||
+          combo.parentElement;
+        const staticOpts = collectComboboxOptions(combo, shell)
+          .map((o) => (o.innerText || o.textContent || "").trim())
+          .filter(Boolean)
+          .slice(0, 20);
+        fields.push({
+          refId: assignRef(combo),
+          label: (ctx.primaryLabel || combo.id || "Dropdown").split("|")[0].trim(),
+          helperText: (ctx.helperText || "").slice(0, 100),
+          kind: "combobox",
+          inputType: "combobox",
+          required: req || flagged,
+          flaggedInvalid: flagged,
+          currentValue: hasSel ? (combo.value || combo.innerText || "selected").trim().slice(0, 80) : "",
+          errorMessage: errTxt,
+          placeholder: combo.getAttribute("placeholder") || "",
+          options: staticOpts
+        });
+      }
+    }
+
+    // 4. Native <input>, <select>, <textarea>
+    const seenRadioNames = new Set();
+    const seenCbGroups = new Set();
+    const allControls = Array.from(doc.querySelectorAll("input, select, textarea"));
+
+    for (const el of allControls) {
+      if (isTrapOrSystemInput(el) || el.disabled) continue;
+      if (el.type === "password" || el.type === "hidden" || el.type === "submit" || el.type === "button") continue;
+      if (isComboboxInput(el)) continue;
+
+      if (el.type === "file") {
+        if (!isActionableFileInput(el)) continue;
+        const ctx = getFieldContext(el);
+        const hasFile = Boolean(el.files && el.files.length > 0);
+        const errTxt = getControlValidationErrorText(el);
+        const req = isFieldRequired(el, ctx);
+        if (!hasFile && (req || errTxt)) {
+          fields.push({
+            refId: assignRef(el),
+            label: (ctx.primaryLabel || ctx.fullLabel || "Resume Upload").split("|")[0].trim(),
+            helperText: "",
+            kind: "file",
+            inputType: /cover\s*letter/i.test(ctx.fullLabel) ? "cover_letter_file" : "resume_file",
+            required: true,
+            flaggedInvalid: Boolean(errTxt),
+            currentValue: "",
+            errorMessage: errTxt,
+            placeholder: "",
+            options: []
+          });
+        }
+        continue;
+      }
+
+      if (!isVisibleAndEditable(el)) continue;
+      if (
+        el.getAttribute("maxlength") === "1" ||
+        el.dataset?.otpBox === "true" ||
+        el.hasAttribute("data-jobify-otp") ||
+        el.autocomplete === "one-time-code"
+      ) {
+        continue;
+      }
+
+      const ctx = getFieldContext(el);
+      const req = isFieldRequired(el, ctx);
+      const errTxt = getControlValidationErrorText(el, null, true);
+      const flagged =
+        Boolean(errTxt) ||
+        el.getAttribute("aria-invalid") === "true" ||
+        Boolean(typeof el.validity === "object" && el.validity && !el.validity.valid);
+
+      if (el.type === "radio") {
+        const gk = el.name || ctx.primaryLabel;
+        if (seenRadioNames.has(gk)) continue;
+        seenRadioNames.add(gk);
+        const radios = el.name
+          ? Array.from(doc.querySelectorAll(`input[type='radio'][name="${CSS.escape(el.name)}"]`))
+          : [el];
+        const checkedRadio = radios.find((r) => r.checked);
+        if (!checkedRadio || flagged) {
+          fields.push({
+            refId: assignRef(el),
+            label: (ctx.primaryLabel || gk || "Radio Choice").split("|")[0].trim(),
+            helperText: (ctx.helperText || "").slice(0, 100),
+            kind: "radio_group",
+            inputType: "radio",
+            required: req || flagged,
+            flaggedInvalid: flagged,
+            currentValue: checkedRadio ? getChoiceOptionLabel(checkedRadio) || checkedRadio.value : "",
+            errorMessage: errTxt,
+            placeholder: "",
+            options: radios.map((r) => getChoiceOptionLabel(r) || r.value).filter(Boolean).slice(0, 20)
+          });
+        }
+        continue;
+      }
+
+      if (el.type === "checkbox") {
+        const cbGroup = resolveCheckboxGroup(el, doc);
+        if (cbGroup) {
+          if (seenCbGroups.has(cbGroup.groupKey)) continue;
+          seenCbGroups.add(cbGroup.groupKey);
+          const groupChecked = cbGroup.checkboxes.find((c) => c.checked);
+          const grpErr = getControlValidationErrorText(el, cbGroup.checkboxes[0]?.closest("fieldset, .field, .form-group"));
+          const grpReq = isFieldRequired(el, cbGroup.groupCtx) || Boolean(grpErr) || flagged;
+          if (!groupChecked || grpErr || flagged) {
+            fields.push({
+              refId: assignRef(cbGroup.checkboxes[0] || el),
+              label: (cbGroup.groupCtx.primaryLabel || "Multi-Select").split("|")[0].trim(),
+              helperText: "",
+              kind: "checkbox_group",
+              inputType: "checkbox",
+              required: grpReq,
+              flaggedInvalid: Boolean(grpErr) || flagged,
+              currentValue: groupChecked ? getChoiceOptionLabel(groupChecked) : "",
+              errorMessage: grpErr || errTxt,
+              placeholder: "",
+              options: cbGroup.checkboxes.map((c) => getChoiceOptionLabel(c) || c.value).filter(Boolean).slice(0, 20)
+            });
+          }
+          continue;
+        }
+        const optTxt = `${getChoiceOptionLabel(el)} ${ctx.fullLabel}`;
+        if (!el.checked && !NEGATIVE_CHECKBOX_REGEX.test(optTxt) && (flagged || CONSENT_CHECKBOX_REGEX.test(optTxt) || req)) {
+          fields.push({
+            refId: assignRef(el),
+            label: (getChoiceOptionLabel(el) || ctx.primaryLabel || "Checkbox").slice(0, 130),
+            helperText: "",
+            kind: "checkbox",
+            inputType: "checkbox",
+            required: true,
+            flaggedInvalid: flagged,
+            currentValue: "",
+            errorMessage: errTxt,
+            placeholder: "",
+            options: ["true", "false"]
+          });
+        }
+        continue;
+      }
+
+      if (el.tagName === "SELECT") {
+        const hasVal = Boolean(el.value && el.selectedIndex > 0);
+        if (!hasVal || flagged) {
+          const validOpts = Array.from(el.options || [])
+            .filter((o) => o.value !== "" && !o.disabled)
+            .map((o) => (o.text || o.innerText || o.value || "").trim())
+            .filter(Boolean);
+          fields.push({
+            refId: assignRef(el),
+            label: (ctx.primaryLabel || el.name || el.id || "Select Dropdown").split("|")[0].trim(),
+            helperText: (ctx.helperText || "").slice(0, 100),
+            kind: "select",
+            inputType: "select",
+            required: req || flagged,
+            flaggedInvalid: flagged,
+            currentValue: hasVal ? (el.options[el.selectedIndex]?.text || el.value) : "",
+            errorMessage: errTxt,
+            placeholder: "",
+            options: validOpts.slice(0, 24)
+          });
+        }
+        continue;
+      }
+
+      const curVal = (el.value || "").trim();
+      if (!flagged && curVal.length > 0) continue;
+      if (!flagged && !req && isOptionalUnneededExtraField(el, ctx, req)) continue;
+      if (!flagged && !req && /\bemployee\s*id\b|employeeid/i.test(`${ctx.primaryLabel} ${el.id || ""}`)) continue;
+
+      fields.push({
+        refId: assignRef(el),
+        label: (ctx.primaryLabel || el.placeholder || el.name || el.id || "Application Field").split("|")[0].trim(),
+        helperText: (ctx.helperText || "").slice(0, 120),
+        kind: el.tagName === "TEXTAREA" ? "textarea" : "input",
+        inputType: (el.type || "text").toLowerCase(),
+        required: req || flagged,
+        flaggedInvalid: flagged,
+        currentValue: curVal.slice(0, 180),
+        errorMessage: errTxt,
+        placeholder: el.placeholder || "",
+        maxLength: el.maxLength > 0 ? el.maxLength : null,
+        options: []
+      });
+    }
+
+    return {
+      pageErrors,
+      fields
+    };
+  }
+
+  // Execute structured repair plan generated by Gemini AI Form Doctor directly on live DOM controls
+  async function applyAiFormRepairs(repairs = [], diagnosticsFields = [], meta = {}, extraPayloads = {}) {
+    let applied = 0;
+    const fieldMap = new Map((diagnosticsFields || []).map((f) => [f.refId, f]));
+
+    for (const rep of repairs) {
+      if (!rep?.refId) continue;
+      const el = document.querySelector(`[data-jobify-ref="${CSS.escape(rep.refId)}"]`);
+      if (!el) continue;
+      const info = fieldMap.get(rep.refId) || {};
+      const valStr = String(rep.value ?? "").trim();
+
+      try {
+        el.scrollIntoView({ block: "nearest" });
+      } catch (_) {}
+
+      if (info.kind === "file" || el.type === "file") {
+        const isCl = info.inputType === "cover_letter_file";
+        const payload = isCl ? extraPayloads.coverLetterPdfPayload : extraPayloads.resumePdfPayload;
+        if (payload?.base64) {
+          const fname = isCl ? payload.fileName : payload.fileName || formatCompanyResumeFileName(meta?.company);
+          if (await attachBase64PdfToInput(el, payload.base64, fname)) applied++;
+        }
+        continue;
+      }
+
+      if (info.kind === "checkbox" || rep.action === "check") {
+        if (valStr.toLowerCase() === "false") continue;
+        if (el.tagName === "INPUT" && el.type === "checkbox") {
+          if (!el.checked && clickCheckboxOrRadioReliably(el)) {
+            highlightFilledElement(el);
+            applied++;
+          }
+        } else if (!isCustomOptionSelected(el)) {
+          dispatchRealClick(el);
+          highlightFilledElement(el);
+          applied++;
+        }
+        continue;
+      }
+
+      if (info.kind === "select" || el.tagName === "SELECT") {
+        if (valStr && selectBestOption(el, [valStr])) {
+          applied++;
+        } else {
+          const validOpts = Array.from(el.options || []).filter((o) => o.value !== "" && !o.disabled);
+          if (validOpts.length > 0 && setNativeValue(el, validOpts[0].value)) applied++;
+        }
+        continue;
+      }
+
+      if (info.kind === "combobox" || isComboboxInput(el)) {
+        const ctx = getFieldContext(el);
+        if (await fillComboboxControl(el, valStr ? [valStr] : null, ctx, meta, true)) {
+          applied++;
+        }
+        continue;
+      }
+
+      if (info.kind === "radio_group") {
+        if (el.tagName === "INPUT" && el.type === "radio") {
+          const radios = el.name
+            ? Array.from(document.querySelectorAll(`input[type='radio'][name="${CSS.escape(el.name)}"]`))
+            : [el];
+          const wrappers = radios.map((r) => ({ radio: r, innerText: getChoiceOptionLabel(r) || r.value }));
+          const chosen = (valStr && findMatchingOptionElement(wrappers, [valStr])) || wrappers[0];
+          if (chosen?.radio && clickCheckboxOrRadioReliably(chosen.radio)) {
+            highlightFilledElement(chosen.radio);
+            applied++;
+          }
+        } else {
+          const ariaRadios = Array.from(el.querySelectorAll("[role='radio']")).filter(isElementVisible);
+          const wrappers = ariaRadios.map((r) => ({
+            el: r,
+            innerText: (r.innerText || r.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim()
+          }));
+          const chosen = (valStr && findMatchingOptionElement(wrappers, [valStr])) || wrappers[0];
+          if (chosen?.el) {
+            dispatchRealClick(chosen.el);
+            highlightFilledElement(chosen.el);
+            applied++;
+          }
+        }
+        continue;
+      }
+
+      if (info.kind === "checkbox_group") {
+        const cbGroup = resolveCheckboxGroup(el, document);
+        if (cbGroup?.checkboxes?.length) {
+          const wrappers = cbGroup.checkboxes.map((cb) => ({ cb, innerText: getChoiceOptionLabel(cb) || cb.value }));
+          const chosen = (valStr && findMatchingOptionElement(wrappers, [valStr])) || wrappers[0];
+          if (chosen?.cb && !chosen.cb.checked && clickCheckboxOrRadioReliably(chosen.cb)) {
+            highlightFilledElement(chosen.cb);
+            applied++;
+          }
+        }
+        continue;
+      }
+
+      if (info.kind === "button_group") {
+        const btns = Array.from(el.querySelectorAll("button, [role='button']")).filter((b) => isElementVisible(b) && !b.disabled);
+        const wrappers = btns.map((b) => ({
+          btn: b,
+          innerText: (b.innerText || b.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim()
+        }));
+        const chosen = (valStr && findMatchingOptionElement(wrappers, [valStr])) || wrappers[0];
+        if (chosen?.btn) {
+          dispatchRealClick(chosen.btn);
+          highlightFilledElement(chosen.btn);
+          applied++;
+        }
+        continue;
+      }
+
+      // Default: text input / textarea (overwrites invalid formatted values as well as filling empty fields!)
+      if (valStr) {
+        if (setNativeValue(el, valStr)) {
+          try {
+            el.dataset.jobifyAiRepaired = "1";
+            el.dispatchEvent(new Event("blur", { bubbles: true }));
+          } catch (_) {}
+          applied++;
+        }
+      }
+      await sleep(35);
+    }
+
+    return applied;
+  }
+
   // Self-healing pass invoked when clicking Next or Submit leaves validation errors or stays stuck on the form
   async function healFormValidationErrors(options = {}) {
     let stateResp = null;
@@ -3383,7 +4116,7 @@
     const p = profile.personal || {};
     const meta = options.topJobMeta || extractJobMetadata(document);
 
-    // 1. Run non-restrictive autofill pass (fills unmarked-required open questions, dropdowns & radios too)
+    // 1. Run non-restrictive autofill pass first (catches unmarked open questions, custom controls & dropdowns)
     const baseFill = await runFrameAutofill({
       ...options,
       onlyNeededCleanMode: false,
@@ -3391,27 +4124,70 @@
       includeAllUnresolvedOpenEnded: true
     });
     let healedCount = baseFill?.filledCount || 0;
+    let aiRepairsApplied = 0;
+    let analysisSummary = "";
+    const repairedRefs = new Set();
 
-    // 2. Targeted repair of any remaining [aria-invalid="true"], :invalid, or error-wrapped controls
+    await sleep(120);
+
+    // 2. Collect live form diagnostics (including CSS-in-JS / Tailwind red errors & rejected values!)
+    const diagnostics = collectLiveFormDiagnostics(profile, meta, document);
+
+    // Prepare Resume / Cover Letter payloads in case a file input was flagged
+    let resumePdfPayload = null;
+    if (diagnostics.fields.some((f) => f.kind === "file")) {
+      try {
+        const selectedResumeId = options.resumeChoice || state.settings?.defaultResumeVariant || "one_page";
+        const pdfResp = await chrome.runtime.sendMessage({
+          type: "GET_RESUME_PDF_BYTES",
+          payload: { variantOrId: selectedResumeId, company: meta?.company || "" }
+        });
+        if (pdfResp?.ok) resumePdfPayload = pdfResp;
+      } catch (_) {}
+    }
+
+    // 3. Invoke Gemini AI Form Error Doctor whenever any field is invalid/empty or page errors remain!
+    if (diagnostics.fields.length > 0 || diagnostics.pageErrors.length > 0) {
+      let doctorResp = null;
+      try {
+        if (typeof chrome !== "undefined" && chrome.runtime?.id) {
+          doctorResp = await Promise.race([
+            chrome.runtime.sendMessage({
+              type: "DIAGNOSE_FORM_ERRORS",
+              payload: {
+                diagnostics,
+                jobMeta: meta
+              }
+            }),
+            sleep(15000).then(() => null)
+          ]);
+        }
+      } catch (_) {}
+
+      if (doctorResp?.ok && Array.isArray(doctorResp.diagnosis?.repairs) && doctorResp.diagnosis.repairs.length > 0) {
+        analysisSummary = doctorResp.diagnosis.analysisSummary || "";
+        for (const rep of doctorResp.diagnosis.repairs) {
+          const rid = rep?.refId || rep?.ref;
+          if (rid) repairedRefs.add(String(rid));
+        }
+        aiRepairsApplied = await applyAiFormRepairs(doctorResp.diagnosis.repairs, diagnostics.fields, meta, {
+          resumePdfPayload,
+          coverLetterPdfPayload: options.coverLetterPdfPayload || null
+        });
+        healedCount += aiRepairsApplied;
+      }
+    }
+
+    await sleep(100);
+
+    // 4. Deterministic safety net for any remaining invalid/required controls not covered above
     const isControlFlaggedInvalid = (el) => {
       if (!el) return false;
       if (el.getAttribute("aria-invalid") === "true") return true;
       try {
-        if (typeof el.matches === "function" && el.matches(":invalid")) return true;
+        if (typeof el.validity === "object" && el.validity && !el.validity.valid) return true;
       } catch (_) {}
-      const wrap = el.closest(
-        ".field, .form-group, .application-question, .ashby-application-form-field-entry, [class*='fieldEntry'], [data-automation-id*='formField'], fieldset"
-      );
-      if (
-        Array.from(
-          wrap?.querySelectorAll(
-            "[data-automation-id='errorMessage'], .field-error, .field-error-msg, .lv-error, .ashby-application-form-field-error, [class*='fieldError' i], [class*='errorMessage' i], [id$='-error']"
-          ) || []
-        ).some((n) => isElementVisible(n) && (n.innerText || n.textContent || "").trim().length > 0)
-      ) {
-        return true;
-      }
-      return false;
+      return Boolean(getControlValidationErrorText(el, null, true));
     };
 
     const allControls = Array.from(document.querySelectorAll("input, select, textarea"));
@@ -3419,51 +4195,23 @@
       if (isTrapOrSystemInput(el) || el.disabled) continue;
       if (el.type === "file" || el.type === "password") continue;
       if (!isVisibleAndEditable(el)) continue;
+      if (repairedRefs.has(el.getAttribute("data-jobify-ref")) || el.dataset?.jobifyAiRepaired === "1") continue;
 
       const flagged = isControlFlaggedInvalid(el);
+      if (!flagged && !isFieldRequired(el)) continue;
 
       if (el.type === "checkbox") {
         const cbGroup = resolveCheckboxGroup(el, document);
         if (cbGroup) {
-          if (!cbGroup.checkboxes.some((c) => c.checked) && (flagged || isFieldRequired(el, cbGroup.groupCtx))) {
+          if (!cbGroup.checkboxes.some((c) => c.checked)) {
             const firstCb = cbGroup.checkboxes[0];
             if (firstCb && clickCheckboxOrRadioReliably(firstCb)) healedCount++;
           }
           continue;
         }
         const optTxt = `${getChoiceOptionLabel(el)} ${getFieldLabelText(el)}`;
-        if (!el.checked && !NEGATIVE_CHECKBOX_REGEX.test(optTxt) && (flagged || CONSENT_CHECKBOX_REGEX.test(optTxt) || isFieldRequired(el))) {
+        if (!el.checked && !NEGATIVE_CHECKBOX_REGEX.test(optTxt)) {
           if (clickCheckboxOrRadioReliably(el)) healedCount++;
-        }
-        continue;
-      }
-
-      if (el.type === "radio") {
-        const radios = el.name
-          ? Array.from(document.querySelectorAll(`input[type='radio'][name="${CSS.escape(el.name)}"]`))
-          : [el];
-        if (!radios.some((r) => r.checked) && (flagged || isFieldRequired(el))) {
-          const wrappers = radios.map((r) => ({ radio: r, innerText: getChoiceOptionLabel(r) || r.value }));
-          const ctx = getFieldContext(el);
-          const aiPick = await askAiToPickOption(ctx.primaryLabel || "Select option", wrappers.map((w) => w.innerText), meta);
-          const chosen = (aiPick && findMatchingOptionElement(wrappers, aiPick)) || wrappers[0];
-          if (chosen?.radio && clickCheckboxOrRadioReliably(chosen.radio)) healedCount++;
-        }
-        continue;
-      }
-
-      if (el.tagName === "SELECT") {
-        if ((!el.value || el.selectedIndex <= 0) && (flagged || isFieldRequired(el))) {
-          const validOpts = Array.from(el.options || []).filter((o) => o.value !== "" && !o.disabled);
-          if (validOpts.length > 0) {
-            const ctx = getFieldContext(el);
-            const aiPick = await askAiToPickOption(ctx.primaryLabel || "Select option", validOpts.map((o) => o.text), meta);
-            if (!(aiPick && selectBestOption(el, aiPick))) {
-              if (setNativeValue(el, validOpts[0].value)) healedCount++;
-            } else {
-              healedCount++;
-            }
-          }
         }
         continue;
       }
@@ -3472,65 +4220,34 @@
 
       const curVal = (el.value || "").trim();
       if (flagged && curVal) {
-        // Format repair for phone / URL / numeric validation mismatches
         const ctx = getFieldContext(el);
+        const errLow = getControlValidationErrorText(el, null, true).toLowerCase();
         if (el.type === "tel" || /phone/i.test(ctx.fullLabel)) {
-          const altPhone = curVal.startsWith("+") ? p.phoneDigits || "5103782758" : `+1${p.phoneDigits || "5103782758"}`;
-          if (setNativeValue(el, altPhone)) healedCount++;
-        } else if (el.type === "url" && !/^https?:\/\//i.test(curVal)) {
+          const digits = p.phoneDigits || "7748108481";
+          const altPhone =
+            /10\s*digit|digits?\s*only|no\s*(spaces|dashes|parentheses)/i.test(errLow) || curVal.startsWith("+")
+              ? digits
+              : `+1${digits}`;
+          if (altPhone !== curVal && setNativeValue(el, altPhone)) healedCount++;
+        } else if (/leading\s*\$|with\s*\$|format\s+currency/i.test(errLow)) {
+          const midNum = Number(meta?.compensation?.midpoint || 165000);
+          const fmtUsd = `$${midNum.toLocaleString("en-US")}`;
+          if (fmtUsd !== curVal && setNativeValue(el, fmtUsd)) healedCount++;
+        } else if (/digits?\s*only|numbers?\s*only|numeric|no\s*\$|valid\s*number/i.test(errLow)) {
+          const cleanDigits = String(meta?.compensation?.midpoint || "165000");
+          if (cleanDigits !== curVal && setNativeValue(el, cleanDigits)) healedCount++;
+        } else if ((el.type === "url" || /url|http/i.test(errLow)) && !/^https?:\/\//i.test(curVal)) {
           if (setNativeValue(el, `https://${curVal}`)) healedCount++;
-        } else if (el.type === "number" && /[^\d.]/.test(curVal)) {
-          const digits = curVal.replace(/[^\d.]/g, "") || "3";
-          if (setNativeValue(el, digits)) healedCount++;
         }
-      } else if (!curVal && (flagged || isFieldRequired(el))) {
-        const ctx = getFieldContext(el);
-        let fallbackVal = null;
-        if (el.type === "url" || /url|link|website|portfolio|github|linkedin/i.test(ctx.fullLabel)) {
-          fallbackVal = p.linkedin || p.github || p.portfolio;
-        } else if (el.type === "number") {
-          fallbackVal = p.yearsOfExperienceInt || "3";
-        } else if (el.type === "date") {
-          fallbackVal = new Date().toISOString().slice(0, 10);
-        } else {
-          try {
-            const resp = await Promise.race([
-              chrome.runtime.sendMessage({
-                type: "ANSWER_APPLICATION_QUESTION",
-                payload: {
-                  questionCtx: {
-                    label: ctx.primaryLabel || el.placeholder || el.name || "Application Question",
-                    fieldType: el.tagName.toLowerCase(),
-                    maxLength: el.maxLength > 0 ? el.maxLength : 220
-                  },
-                  jobMeta: meta,
-                  forceAi: true,
-                  saveToVault: false
-                }
-              }),
-              sleep(9000).then(() => null)
-            ]);
-            if (resp?.ok && resp.answer) fallbackVal = resp.answer;
-          } catch (_) {}
-          if (!fallbackVal) {
-            fallbackVal = "Yes — authorized to work in the United States with 3.5+ years of production software and AI engineering experience.";
-          }
-        }
-        if (fallbackVal && setNativeValue(el, fallbackVal)) {
-          healedCount++;
-        }
+      } else if (!curVal && flagged && el.tagName !== "SELECT" && el.type !== "radio") {
+        const fallbackVal =
+          el.type === "url"
+            ? p.linkedin || p.github || "https://github.com/ravitejav-dev"
+            : el.type === "number"
+              ? String(p.yearsOfExperienceInt || "3")
+              : "Yes — authorized to work in the United States with 3.5+ years of production AI and software engineering experience.";
+        if (setNativeValue(el, fallbackVal)) healedCount++;
       }
-    }
-
-    // 3. Also repair any empty flagged comboboxes
-    const invalidCombos = Array.from(
-      document.querySelectorAll("input[role='combobox'], button[aria-haspopup='listbox'], [role='combobox']")
-    ).filter((c) => !isTrapOrSystemInput(c) && !isInHiddenAncestor(c) && !hasComboboxSelection(c) && (isControlFlaggedInvalid(c) || isFieldRequired(c)));
-    for (const combo of invalidCombos) {
-      const ctx = getFieldContext(combo);
-      const resolved = resolveDesiredValueForField(ctx, profile, combo, meta);
-      const ok = await fillComboboxControl(combo, resolved, ctx, meta, true);
-      if (ok) healedCount++;
     }
 
     const postErrors = detectFormValidationErrors(document);
@@ -3546,6 +4263,9 @@
 
     return {
       healedCount,
+      aiRepairsApplied,
+      analysisSummary,
+      diagnosedErrors: diagnostics.pageErrors,
       remainingErrors: postErrors,
       hardBlocker
     };
@@ -3620,6 +4340,7 @@
     getFieldLabelText,
     findOpenEndedFields,
     extractFormFieldsInventory,
+    collectLiveFormDiagnostics,
     attachBase64PdfToInput,
     autofillPortalAuth,
     performAutonomousAuth,

@@ -1461,6 +1461,207 @@ TRICKY_SUBMIT_SANDBOX_HTML = """<!DOCTYPE html>
 </html>
 """
 
+AI_ERROR_HEAL_SANDBOX_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Staff AI Platform Engineer at Mistral AI</title>
+  <style>
+    body { font-family: Inter, system-ui, sans-serif; max-width: 780px; margin: 32px auto; padding: 0 20px; color: #0f172a; background: #f8fafc; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; margin-bottom: 18px; }
+    .field-box { margin-bottom: 16px; }
+    label { display: block; font-size: 13.5px; font-weight: 600; margin-bottom: 6px; color: #1e293b; }
+    input[type="text"], input[type="email"], input[type="tel"], textarea {
+      width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;
+    }
+    .aria-radio-btn, .aria-chk-btn {
+      padding: 8px 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; cursor: pointer; font-weight: 600; margin-right: 8px;
+    }
+    .aria-radio-btn[aria-checked="true"], .aria-chk-btn[aria-checked="true"] {
+      background: #4f46e5; color: #fff; border-color: #4f46e5;
+    }
+    .submit-primary {
+      background: #0f172a; color: #fff; border: none; border-radius: 8px; padding: 12px 24px; font-size: 15px; font-weight: 700; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="company-name" style="font-weight:700;color:#4f46e5;">Mistral AI</div>
+    <h1>Staff AI Platform Engineer</h1>
+    <div class="location" style="color:#64748b;margin-bottom:10px;">San Francisco, CA</div>
+    <p>
+      Mistral AI is hiring a Staff AI Platform Engineer to architect distributed LLM serving, automated evaluation pipelines,
+      high-throughput Python &amp; FastAPI microservices, Kubernetes GPU orchestration, and production telemetry on GCP and AWS.
+      Compensation Range: $180,000 - $210,000 USD base salary plus equity.
+    </p>
+  </div>
+
+  <div class="card" id="mh-form-root">
+    <h2>Apply for this Role</h2>
+
+    <div class="field-box">
+      <label for="mh_name">Full Name *</label>
+      <input id="mh_name" type="text" required />
+    </div>
+
+    <div class="field-box">
+      <label for="mh_email">Email Address *</label>
+      <input id="mh_email" type="email" required />
+    </div>
+
+    <div class="field-box">
+      <label for="mh_resume">Resume/CV *</label>
+      <input id="mh_resume" type="file" accept=".pdf" required />
+    </div>
+
+    <!-- Trap 1: Rejects formatted phone (774) 810-8481 with pure CSS-in-JS red text (NO .error class, NO aria-invalid!) -->
+    <div class="field-box">
+      <label for="mh_phone">Mobile Phone *</label>
+      <input id="mh_phone" type="tel" required />
+      <p id="mh_phone_err" style="display:none;color:rgb(220, 38, 38);font-size:12px;margin:5px 0 0;">
+        Phone number must be 10 digits only with no spaces, parentheses, or dashes (e.g. 7748108481)
+      </p>
+    </div>
+
+    <!-- Trap 2: Rejects plain numeric 195000 with pure CSS-in-JS red text requiring leading $ and comma ($195,000) -->
+    <div class="field-box">
+      <label for="mh_salary">Expected Base Salary (USD) *</label>
+      <input id="mh_salary" type="text" required />
+      <p id="mh_salary_err" style="display:none;color:rgb(220, 38, 38);font-size:12px;margin:5px 0 0;">
+        Please format currency with a leading $ and comma (for example: $195,000)
+      </p>
+    </div>
+
+    <!-- Trap 3: Custom ARIA radiogroup (button[role='radio'], zero native <input type='radio'>) -->
+    <div class="field-box">
+      <div role="radiogroup" aria-label="Are you legally authorized to work in the United States? *">
+        <div style="font-size:13.5px;font-weight:600;margin-bottom:6px;color:#1e293b;">
+          Are you legally authorized to work in the United States? *
+        </div>
+        <button type="button" role="radio" class="aria-radio-btn" id="mh_auth_yes" aria-checked="false">Yes</button>
+        <button type="button" role="radio" class="aria-radio-btn" id="mh_auth_no" aria-checked="false">No</button>
+      </div>
+      <p id="mh_auth_err" style="display:none;color:rgb(220, 38, 38);font-size:12px;margin:5px 0 0;">
+        Please select your US work authorization status
+      </p>
+    </div>
+
+    <!-- Trap 4: Unmarked field labeled Optional in placeholder that reveals a required error ONLY on Submit #1 -->
+    <div class="field-box">
+      <label for="mh_unmarked_pod">Preferred Engineering Pod</label>
+      <input id="mh_unmarked_pod" type="text" placeholder="Optional note unless applying to Platform" />
+      <p id="mh_pod_err" style="display:none;color:rgb(220, 38, 38);font-size:12px;margin:5px 0 0;">
+        Please specify which Mistral AI engineering pod you want to join and why (minimum 30 characters)
+      </p>
+    </div>
+
+    <!-- Trap 5: Custom ARIA checkbox (button[role='checkbox'], zero native <input type='checkbox'>) -->
+    <div class="field-box">
+      <button type="button" role="checkbox" class="aria-chk-btn" id="mh_consent_chk" aria-checked="false">
+        I acknowledge Mistral AI's candidate data privacy policy *
+      </button>
+      <p id="mh_consent_err" style="display:none;color:rgb(220, 38, 38);font-size:12px;margin:5px 0 0;">
+        You must acknowledge the candidate privacy policy before submitting
+      </p>
+    </div>
+
+    <button type="button" class="submit-primary" id="mh_submit_btn">Submit Application</button>
+  </div>
+
+  <div class="card" id="mh-success-card" style="display:none;background:#dcfce7;border-color:#22c55e;color:#14532d;">
+    <h2>Application Submitted — Thank you for applying to Mistral AI!</h2>
+    <p>Your application for Staff AI Platform Engineer has been received.</p>
+  </div>
+
+  <script>
+    window.__AI_HEAL_AUDIT__ = {
+      submitClicks: 0,
+      firstSubmitErrors: [],
+      firstSubmitValues: null,
+      submitted: false,
+      finalValues: null
+    };
+
+    const authYes = document.getElementById("mh_auth_yes");
+    const authNo = document.getElementById("mh_auth_no");
+    const consentChk = document.getElementById("mh_consent_chk");
+
+    authYes.addEventListener("click", () => {
+      authYes.setAttribute("aria-checked", "true");
+      authNo.setAttribute("aria-checked", "false");
+    });
+    authNo.addEventListener("click", () => {
+      authNo.setAttribute("aria-checked", "true");
+      authYes.setAttribute("aria-checked", "false");
+    });
+    consentChk.addEventListener("click", () => {
+      const next = consentChk.getAttribute("aria-checked") !== "true";
+      consentChk.setAttribute("aria-checked", next ? "true" : "false");
+    });
+
+    document.getElementById("mh_submit_btn").addEventListener("click", () => {
+      window.__AI_HEAL_AUDIT__.submitClicks += 1;
+      const phoneVal = document.getElementById("mh_phone").value.trim();
+      const salaryVal = document.getElementById("mh_salary").value.trim();
+      const podVal = document.getElementById("mh_unmarked_pod").value.trim();
+      const isAuthYes = authYes.getAttribute("aria-checked") === "true";
+      const isConsent = consentChk.getAttribute("aria-checked") === "true";
+
+      if (window.__AI_HEAL_AUDIT__.submitClicks === 1) {
+        window.__AI_HEAL_AUDIT__.firstSubmitValues = {
+          phone: phoneVal,
+          salary: salaryVal,
+          pod: podVal,
+          authYes: isAuthYes,
+          consentChecked: isConsent
+        };
+      }
+
+      const errs = [];
+      const phoneOk = /^\\d{10}$/.test(phoneVal);
+      document.getElementById("mh_phone_err").style.display = phoneOk ? "none" : "block";
+      if (!phoneOk) errs.push("phone_format");
+
+      const salaryOk = /^\\$\\d{2,3},\\d{3}$/.test(salaryVal);
+      document.getElementById("mh_salary_err").style.display = salaryOk ? "none" : "block";
+      if (!salaryOk) errs.push("salary_format");
+
+      document.getElementById("mh_auth_err").style.display = isAuthYes ? "none" : "block";
+      if (!isAuthYes) errs.push("missing_auth_radio");
+
+      const podOk = podVal.length >= 30;
+      document.getElementById("mh_pod_err").style.display = podOk ? "none" : "block";
+      if (!podOk) errs.push("unmarked_pod");
+
+      document.getElementById("mh_consent_err").style.display = isConsent ? "none" : "block";
+      if (!isConsent) errs.push("missing_consent_checkbox");
+
+      if (window.__AI_HEAL_AUDIT__.submitClicks === 1) {
+        window.__AI_HEAL_AUDIT__.firstSubmitErrors = errs.slice();
+      }
+
+      if (errs.length > 0) return;
+
+      window.__AI_HEAL_AUDIT__.submitted = true;
+      window.__AI_HEAL_AUDIT__.finalValues = {
+        fullName: document.getElementById("mh_name").value.trim(),
+        email: document.getElementById("mh_email").value.trim(),
+        resumeName: document.getElementById("mh_resume").files[0]?.name || null,
+        phone: phoneVal,
+        salary: salaryVal,
+        pod: podVal,
+        authYes: isAuthYes,
+        consentChecked: isConsent
+      };
+      document.getElementById("mh-form-root").style.display = "none";
+      document.getElementById("mh-success-card").style.display = "block";
+    });
+  </script>
+</body>
+</html>
+"""
+
 
 class JobifyHandler(BaseHTTPRequestHandler):
     def _send_cors(self):
@@ -1518,6 +1719,8 @@ class JobifyHandler(BaseHTTPRequestHandler):
             return self._send_html(AUTO_APPLY_SANDBOX_HTML)
         if path == "/sandbox/tricky-submit":
             return self._send_html(TRICKY_SUBMIT_SANDBOX_HTML)
+        if path == "/sandbox/ai-error-heal":
+            return self._send_html(AI_ERROR_HEAL_SANDBOX_HTML)
         if path == "/api/sandbox-otp":
             return self._send_json(200, {"ok": True, **SANDBOX_OTP_STORE})
         return self._send_json(
@@ -1531,6 +1734,7 @@ class JobifyHandler(BaseHTTPRequestHandler):
                     f"http://127.0.0.1:{PORT}/sandbox/lever",
                     f"http://127.0.0.1:{PORT}/sandbox/auto-apply",
                     f"http://127.0.0.1:{PORT}/sandbox/tricky-submit",
+                    f"http://127.0.0.1:{PORT}/sandbox/ai-error-heal",
                 ],
             },
         )

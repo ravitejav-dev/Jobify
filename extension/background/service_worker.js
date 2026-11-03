@@ -20,7 +20,8 @@ import {
   tailorResumeWithGemini,
   generateCoverLetterWithGemini,
   answerApplicationQuestionWithGemini,
-  generateNetworkOutreachWithGemini
+  generateNetworkOutreachWithGemini,
+  diagnoseFormErrorsWithGemini
 } from "../shared/gemini_client.js";
 import {
   generateTailoredResumePdf,
@@ -753,17 +754,21 @@ async function executeAdapterAcrossTab(tabId, method, args = []) {
 }
 
 async function executeMultiFrameValidationHeal(tabId, opts = {}) {
-  if (!tabId) return { healedCount: 0, remainingErrors: [] };
+  if (!tabId) return { healedCount: 0, aiRepairsApplied: 0, analysisSummary: "", remainingErrors: [] };
   await ensureTabScripts(tabId);
   const frameResults = await executeAdapterAcrossTab(tabId, "healFormValidationErrors", [opts]);
 
   let healedCount = 0;
+  let aiRepairsApplied = 0;
+  const summaries = [];
   const remainingErrors = [];
   let hardBlocker = { blocked: false, reason: null };
   for (const entry of frameResults || []) {
     const r = entry?.result;
     if (!r) continue;
     healedCount += Number(r.healedCount || 0);
+    aiRepairsApplied += Number(r.aiRepairsApplied || 0);
+    if (r.analysisSummary) summaries.push(r.analysisSummary);
     if (Array.isArray(r.remainingErrors?.messages)) {
       remainingErrors.push(...r.remainingErrors.messages);
     }
@@ -771,7 +776,35 @@ async function executeMultiFrameValidationHeal(tabId, opts = {}) {
       hardBlocker = r.hardBlocker;
     }
   }
-  return { healedCount, remainingErrors, hardBlocker };
+  return {
+    healedCount,
+    aiRepairsApplied,
+    analysisSummary: summaries[0] || "",
+    remainingErrors,
+    hardBlocker
+  };
+}
+
+async function waitForActionableJobScreen(tabId, topJobMeta = null, maxWaitMs = 6000) {
+  const start = Date.now();
+  let last = await inspectTabFrames(tabId, topJobMeta);
+  while (Date.now() - start < maxWaitMs) {
+    if (
+      last.isSubmittedConfirmation ||
+      last.hasCandidateForm ||
+      last.hasApplyChoiceModal ||
+      last.hasApplyButton ||
+      last.isStandaloneAuthWall ||
+      last.otpChallenge?.detected ||
+      (last.inventory?.totalFields || 0) > 0
+    ) {
+      return last;
+    }
+    await sleep(480);
+    await ensureTabScripts(tabId);
+    last = await inspectTabFrames(tabId, topJobMeta);
+  }
+  return last;
 }
 
 async function inspectTabFrames(tabId, topJobMeta = null) {
@@ -972,6 +1005,9 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
 
   try {
     let state = await getAllState();
+    try {
+      await chrome.tabs.update(tabId, { active: true });
+    } catch (_) {}
     await ensureTabScripts(tabId);
 
     await broadcastAutoApplyProgress(tabId, {
@@ -979,11 +1015,11 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
       completed: false,
       error: null,
       stage: "extracting_job",
-      stepLabel: "🔍 Step 1: Pulling Job Details & Requirements",
-      detail: "Scanning job description, posted salary & application requirements..."
+      stepLabel: "🤖 Taking Control — Pulling Job Details & Requirements",
+      detail: "Scanning job description, posted salary & application portal controls..."
     });
 
-    const initialScreen = await inspectTabFrames(tabId, options.jobMeta || null);
+    const initialScreen = await waitForActionableJobScreen(tabId, options.jobMeta || null, 6500);
     const jobMeta =
       initialScreen.jobMeta?.description?.length >= (options.jobMeta?.description?.length || 0)
         ? initialScreen.jobMeta
@@ -1034,7 +1070,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
     if (autoApplyAbortFlag) throw new Error("Stopped by user.");
 
     // Step 2: Click "Apply Now" / Workday "Apply" -> "Apply Manually" modal if on the job posting gate
-    const preApplyCheck = await inspectTabFrames(tabId, jobMeta);
+    const preApplyCheck = await waitForActionableJobScreen(tabId, jobMeta, 4500);
     let applyGateClicks = 0;
     if (
       preApplyCheck.hasApplyChoiceModal ||
@@ -1064,6 +1100,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         await waitForTabSettle(tabId, 700, 8500);
       }
       await ensureTabScripts(tabId);
+      await waitForActionableJobScreen(tabId, jobMeta, 5500);
     }
 
     // Step 3..6: Autonomous Modal/Apply Gate + Multi-Stage Auth + Email OTP/Link + Clean 1-by-1 Fill + Next + Self-Healing Auto-Submit Loop
@@ -1102,12 +1139,14 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
           resumeUsed: tailoredResume?.fileName || formatCompanyResumeFileName(jobMeta.company),
           notes: `Full Auto-Apply submitted (${totalFilledFields} fields filled cleanly).`
         });
+        chrome.action.setBadgeText({ text: "✓", tabId }).catch(() => {});
+        chrome.action.setBadgeBackgroundColor({ color: "#10b981", tabId }).catch(() => {});
         await broadcastAutoApplyProgress(tabId, {
           running: false,
           completed: true,
           stage: "completed",
           stepLabel: "✅ Application Submitted!",
-          detail: `Logged ${jobMeta.company || "Role"} as Applied (${totalFilledFields} fields filled cleanly).`
+          detail: `Logged ${jobMeta.company || "Role"} as Applied — returning to Extensions.`
         });
         return {
           ok: true,
@@ -1303,18 +1342,25 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
           !afterNext.otpChallenge?.detected &&
           !afterNext.isStandaloneAuthWall &&
           (afterNext.stepSignature === screen.stepSignature || afterNext.hasValidationErrors || nextAct.hadHtml5Invalid) &&
-          nextHealAttempts < 3
+          nextHealAttempts < 4
         ) {
           nextHealAttempts++;
           await broadcastAutoApplyProgress(tabId, {
             stage: "healing_validation",
-            stepLabel: `🩹 Healing Step Validation (${nextHealAttempts}/3)`,
+            stepLabel: `🧠 AI Analyzing Wizard Error (${nextHealAttempts}/4)`,
             detail:
               afterNext.validationErrors?.[0] ||
-              "Filling unmarked required fields to advance wizard step..."
+              "Scanning form errors & missing fields with Gemini AI to advance step..."
           });
           const healRes = await executeMultiFrameValidationHeal(tabId, buildHealOptions(state));
           totalFilledFields += Number(healRes.healedCount || 0);
+          if (healRes.analysisSummary) {
+            await broadcastAutoApplyProgress(tabId, {
+              stage: "healing_validation",
+              stepLabel: `🔧 AI Repaired ${healRes.healedCount || 1} Field(s) — Retrying Step`,
+              detail: healRes.analysisSummary
+            });
+          }
           skipNextCleanFillOnce = true;
         } else {
           nextHealAttempts = 0;
@@ -1356,12 +1402,15 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
             notes: `Full Auto-Apply submitted (${totalFilledFields} fields filled cleanly).`
           });
 
+          chrome.action.setBadgeText({ text: "✓", tabId }).catch(() => {});
+          chrome.action.setBadgeBackgroundColor({ color: "#10b981", tabId }).catch(() => {});
+
           await broadcastAutoApplyProgress(tabId, {
             running: false,
             completed: true,
             stage: "completed",
             stepLabel: "✅ Application Submitted!",
-            detail: `Logged ${jobMeta.company || "Role"} as Applied (${totalFilledFields} fields filled cleanly).`
+            detail: `Logged ${jobMeta.company || "Role"} as Applied — returning to Extensions.`
           });
 
           return {
@@ -1374,7 +1423,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
           };
         }
 
-        // Submit did NOT confirm yet — check for CAPTCHA or self-heal form validation up to 3 rounds!
+        // Submit did NOT confirm yet — check for CAPTCHA or run AI Error Diagnosis & Self-Heal up to 4 rounds!
         if (postSubmit.hardBlocker?.blocked) {
           await upsertApplication({
             company: jobMeta.company || "Target Company",
@@ -1405,7 +1454,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
           };
         }
 
-        if (submitHealAttempts < 3) {
+        if (submitHealAttempts < 4) {
           submitHealAttempts++;
           if (
             !tailoredCoverLetter &&
@@ -1419,20 +1468,27 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
 
           await broadcastAutoApplyProgress(tabId, {
             stage: "healing_validation",
-            stepLabel: `🩹 Self-Healing Validation & Retrying Submit (${submitHealAttempts}/3)`,
+            stepLabel: `🧠 AI Analyzing Form Error (${submitHealAttempts}/4)`,
             detail:
               postSubmit.validationErrors?.[0] ||
-              "Filling unmarked required fields & consent checkboxes before re-submitting..."
+              "Diagnosing missing/rejected fields with Gemini AI & repairing automatically..."
           });
 
           const healRes = await executeMultiFrameValidationHeal(tabId, buildHealOptions(state));
           totalFilledFields += Number(healRes.healedCount || 0);
+          if (healRes.analysisSummary) {
+            await broadcastAutoApplyProgress(tabId, {
+              stage: "healing_validation",
+              stepLabel: `🔧 AI Fixed ${healRes.healedCount || 1} Field(s) — Re-Submitting`,
+              detail: healRes.analysisSummary
+            });
+          }
           skipNextCleanFillOnce = true;
-          await sleep(250);
+          await sleep(280);
           continue;
         }
 
-        // Honest fallback after 3 full self-heal + re-submit attempts: never falsely claim Applied
+        // Honest fallback after 4 full AI diagnosis + re-submit attempts: never falsely claim Applied
         const blockerMsg =
           postSubmit.validationErrors?.[0] ||
           "Form stayed open after submit — scrolled to remaining required field.";
@@ -1455,12 +1511,12 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
       }
 
       // If Submit button exists in DOM but is still disabled because of an unmarked required field, heal & unlock it!
-      if (allowFinalSubmit && hasDisabledSubmit && submitHealAttempts < 2) {
+      if (allowFinalSubmit && hasDisabledSubmit && submitHealAttempts < 3) {
         submitHealAttempts++;
         await broadcastAutoApplyProgress(tabId, {
           stage: "healing_validation",
-          stepLabel: `🔓 Unlocking Disabled Submit Button (${submitHealAttempts}/2)`,
-          detail: "Completing remaining unmarked fields to enable Submit..."
+          stepLabel: `🔓 AI Unlocking Disabled Submit (${submitHealAttempts}/3)`,
+          detail: "Analyzing & fulfilling remaining unmarked fields to enable Submit..."
         });
         const healRes = await executeMultiFrameValidationHeal(tabId, buildHealOptions(state));
         totalFilledFields += Number(healRes.healedCount || 0);
@@ -1591,7 +1647,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     switch (type) {
       case "GET_ALL_STATE": {
-        return { ok: true, state, autoApplyStatus: currentAutoApplyStatus };
+        const scopedStatus =
+          sender?.tab?.id && currentAutoApplyStatus?.tabId && sender.tab.id !== currentAutoApplyStatus.tabId
+            ? null
+            : currentAutoApplyStatus;
+        return { ok: true, state, autoApplyStatus: scopedStatus };
       }
 
       case "UPDATE_PROFILE": {
@@ -1727,6 +1787,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           modelUsed: aiAns.modelUsed,
           fellBack: aiAns.fellBack
         };
+      }
+
+      case "DIAGNOSE_FORM_ERRORS": {
+        const res = await diagnoseFormErrorsWithGemini(
+          payload.diagnostics || {},
+          payload.jobMeta || {},
+          state.profile,
+          state.savedAnswers || [],
+          state.settings
+        );
+        return { ok: true, ...res };
       }
 
       case "GENERATE_NETWORK_OUTREACH": {

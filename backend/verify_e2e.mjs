@@ -665,6 +665,110 @@ async function main() {
     }
     trickyCdp.close();
 
+    // 4e. Autonomous AI Form Error Doctor + Top-Right Extension Popup Lifecycle (/sandbox/ai-error-heal)
+    const aiHealCdp = await openTabAndConnect("http://127.0.0.1:18765/sandbox/ai-error-heal");
+    let initialPopupState = null;
+    for (let i = 0; i < 25; i++) {
+      initialPopupState = await aiHealCdp
+        .eval(`(() => {
+          const sr = document.getElementById("jobify-copilot-host")?.shadowRoot;
+          if (!sr) return null;
+          const drawer = sr.getElementById("jb-drawer");
+          if (!drawer || !drawer.classList.contains("open")) return null;
+          const rect = drawer.getBoundingClientRect();
+          return {
+            drawerOpenOnLoad: drawer.classList.contains("open") && getComputedStyle(drawer).display !== "none",
+            hasBottomRightPillBar: Boolean(sr.querySelector(".jb-pill-bar")),
+            topPx: Math.round(rect.top),
+            rightGapPx: Math.round(window.innerWidth - rect.right),
+            hasFastAutoBtn: Boolean(sr.getElementById("jb-btn-fast-auto"))
+          };
+        })()`)
+        .catch(() => null);
+      if (initialPopupState?.drawerOpenOnLoad) break;
+      await sleep(250);
+    }
+
+    if (
+      !initialPopupState?.drawerOpenOnLoad ||
+      initialPopupState.hasBottomRightPillBar !== false ||
+      initialPopupState.topPx > 26 ||
+      initialPopupState.rightGapPx > 40
+    ) {
+      throw new Error(`Top-right auto-popup on job link open failed: ${JSON.stringify(initialPopupState)}`);
+    }
+
+    // Trigger Auto-Apply directly from the top-right popup (zero manual pill click needed!)
+    await aiHealCdp.eval(`
+      document.getElementById("jobify-copilot-host").shadowRoot.getElementById("jb-btn-fast-auto").click()
+    `);
+
+    let sawTakeControlHud = false;
+    let aiHealAudit = null;
+    for (let waitIdx = 0; waitIdx < 50; waitIdx++) {
+      await sleep(450);
+      const stepSnap = await aiHealCdp
+        .eval(`(() => {
+          const sr = document.getElementById("jobify-copilot-host")?.shadowRoot;
+          const hud = sr?.getElementById("jb-hud");
+          const frame = sr?.getElementById("jb-control-frame");
+          const hudVisible = Boolean(hud && getComputedStyle(hud).display !== "none");
+          const frameActive = Boolean(frame && frame.classList.contains("active"));
+          return { hudVisible, frameActive, audit: window.__AI_HEAL_AUDIT__ };
+        })()`)
+        .catch(() => null);
+      if (stepSnap?.hudVisible || stepSnap?.frameActive) sawTakeControlHud = true;
+      if (stepSnap?.audit?.submitted) {
+        aiHealAudit = stepSnap.audit;
+        break;
+      }
+    }
+
+    // Wait ~2.1s for the popup to animate upward and collapse completely back to Chrome's Extensions bar
+    await sleep(2150);
+    const postDonePopupState = await aiHealCdp.eval(`(() => {
+      const sr = document.getElementById("jobify-copilot-host")?.shadowRoot;
+      const drawer = sr?.getElementById("jb-drawer");
+      const hud = sr?.getElementById("jb-hud");
+      const frame = sr?.getElementById("jb-control-frame");
+      return {
+        drawerDisplay: drawer ? getComputedStyle(drawer).display : "none",
+        hudDisplay: hud ? getComputedStyle(hud).display : "none",
+        frameDisplay: frame ? getComputedStyle(frame).display : "none",
+        hasAnyBottomRightUi: Boolean(sr?.querySelector(".jb-pill-bar"))
+      };
+    })()`);
+
+    console.log("6e. ✅ Autonomous AI Error Doctor + Top-Right Popup → Return-to-Extensions Lifecycle Verified:", JSON.stringify({
+      initialPopupState,
+      sawTakeControlHud,
+      aiHealAudit,
+      postDonePopupState
+    }, null, 2));
+
+    if (
+      !sawTakeControlHud ||
+      !aiHealAudit?.submitted ||
+      aiHealAudit.submitClicks < 2 ||
+      !aiHealAudit.firstSubmitErrors?.includes("phone_format") ||
+      !aiHealAudit.firstSubmitErrors?.includes("salary_format") ||
+      !aiHealAudit.firstSubmitErrors?.includes("unmarked_pod") ||
+      aiHealAudit.finalValues?.fullName !== "Raviteja Velanati" ||
+      aiHealAudit.finalValues?.resumeName !== "Raviteja_velanati_Mistral_AI.pdf" ||
+      aiHealAudit.finalValues?.phone !== "7748108481" ||
+      !/^\$\d{2,3},\d{3}$/.test(aiHealAudit.finalValues?.salary || "") ||
+      !(aiHealAudit.finalValues?.pod?.length >= 30) ||
+      aiHealAudit.finalValues?.authYes !== true ||
+      aiHealAudit.finalValues?.consentChecked !== true ||
+      postDonePopupState.drawerDisplay !== "none" ||
+      postDonePopupState.hudDisplay !== "none" ||
+      postDonePopupState.frameDisplay !== "none" ||
+      postDonePopupState.hasAnyBottomRightUi !== false
+    ) {
+      throw new Error(`AI Error Doctor or Return-to-Extensions assertion failed: ${JSON.stringify({ sawTakeControlHud, aiHealAudit, postDonePopupState })}`);
+    }
+    aiHealCdp.close();
+
     const dashCdp = await openTabAndConnect(`chrome-extension://${extId}/dashboard/dashboard.html`);
     await dashCdp.send("Runtime.enable", {});
 
@@ -710,10 +814,11 @@ async function main() {
         .join(", ")})`
     );
     if (
-      trackedApps.length < 4 ||
+      trackedApps.length < 5 ||
       !trackedApps.some((a) => a.company === "OpenAI" && a.status === "Applied" && a.resumeUsed === "Raviteja_velanati_OpenAI.pdf") ||
       !trackedApps.some((a) => a.company === "NVIDIA" && a.status === "Applied" && a.resumeUsed === "Raviteja_velanati_NVIDIA.pdf") ||
       !trackedApps.some((a) => a.company === "Perplexity AI" && a.status === "Applied" && a.resumeUsed === "Raviteja_velanati_Perplexity_AI.pdf") ||
+      !trackedApps.some((a) => a.company === "Mistral AI" && a.status === "Applied" && a.resumeUsed === "Raviteja_velanati_Mistral_AI.pdf") ||
       !trackedApps.some((a) => a.company === "Scale AI" && a.status === "Applied" && a.resumeUsed === "Raviteja_velanati_Scale_AI.pdf")
     ) {
       throw new Error(`Auto-tracker failed to log all submitted applications or company resume filenames: ${JSON.stringify(trackedApps)}`);
