@@ -68,6 +68,57 @@ def tex_escape(text: str) -> str:
     return "".join(out).replace("\x00ARROW\x00", r"$\rightarrow$")
 
 
+METRIC_BOLD_PATTERN = re.compile(
+    r"("
+    r"Ranked\s+(?:#1\s+of\s+11|first\s+among\s+11)\s+(?:engineers|developers)"
+    r"|#1\s+of\s+11\s+(?:engineers|developers)"
+    r"|13\s+(?:containerized\s+)?full-stack\s+sandbox(?:ed)?\s+(?:web\s+)?applications"
+    r"|48\s+(?:multi-modal\s+)?(?:user\s+)?personas"
+    r"|48\s+test\s+accounts"
+    r"|9\s+cloud\s+(?:services|APIs)"
+    r"|100%\s+(?:[a-z-]+\s+){0,2}(?:accuracy|integrity|pass\s+rates)"
+    r"|1,800\+?\s+(?:[a-z-]+\s+)?recordings"
+    r"|40,000\+?\s+(?:[a-z-]+\s+)?clips"
+    r"|8\s+languages"
+    r"|10x(?:\s+throughput\s+speedup|\s+throughput\s+acceleration|\s+speedup)?"
+    r"|10\s+days"
+    r"|2,000\+?\s+(?:ingestion\s+and\s+extraction\s+|ingestion\s+|data\s+)?batches"
+    r"|460\+?\s+(?:evaluation\s+|production\s+|multi-stage\s+deduplication\s+)?workflows"
+    r"|19\s+(?:custom\s+)?(?:React\s+and\s+TypeScript\s+|TypeScript\s+and\s+React\s+)?(?:Side-by-Side\s+(?:\(SxS\)\s+)?)?(?:evaluation\s+|multi-model\s+evaluation\s+|rating\s+)?(?:plugins|applications|interfaces)"
+    r"|~?60%"
+    r"|70%"
+    r"|40\+?\s+edge\s+cases"
+    r"|60\+?\s+FPS"
+    r"|30\+?\s+(?:critical\s+)?integration\s+defects"
+    r"|(?:10,000\+?|10K\+?)\s+(?:daily\s+)?test\s+cases(?:\s+daily)?"
+    r"|12\+?\s+model\s+iterations"
+    r"|95%\+?(?:\s+of\s+silent\s+(?:edge-case\s+)?failures)?"
+    r"|95\s+percent\s+of\s+silent\s+failures"
+    r"|40%"
+    r"|8\+?\s+(?:engineering\s+)?teams"
+    r"|30\+?\s+(?:modular\s+|schema\s+and\s+API\s+contract\s+verification\s+)?plugins"
+    r"|3\.5\+?\s+years"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def tex_escape_with_bold_metrics(text: str) -> str:
+    if not text:
+        return ""
+    parts = []
+    last_idx = 0
+    s = str(text)
+    for m in METRIC_BOLD_PATTERN.finditer(s):
+        if m.start() > last_idx:
+            parts.append(tex_escape(s[last_idx : m.start()]))
+        parts.append(rf"\textbf{{{tex_escape(m.group(0))}}}")
+        last_idx = m.end()
+    if last_idx < len(s):
+        parts.append(tex_escape(s[last_idx:]))
+    return "".join(parts)
+
+
 def build_resume_latex(tailored: dict, profile: dict) -> str:
     p = profile.get("personal", {})
     name = tex_escape(p.get("fullName", "Raviteja Velanati"))
@@ -77,7 +128,9 @@ def build_resume_latex(tailored: dict, profile: dict) -> str:
     phone = tex_escape(p.get("phone", "(774) 810-8481"))
     li = tex_escape(re.sub(r"^https?://(www\.)?", "", p.get("linkedin", "linkedin.com/in/raviteja-velanati")).rstrip("/"))
     gh = tex_escape(re.sub(r"^https?://(www\.)?", "", p.get("github", "github.com/ravitejav-dev")).rstrip("/"))
-    summary = tex_escape(tailored.get("summary") or profile.get("summaryShort") or profile.get("summary", ""))
+    summary = tex_escape_with_bold_metrics(
+        tailored.get("summary") or profile.get("summaryShort") or profile.get("summary", "")
+    )
 
     skills_cats = tailored.get("skillsCategories") or profile.get("skillsCategories") or {}
     skill_lines = []
@@ -93,24 +146,24 @@ def build_resume_latex(tailored: dict, profile: dict) -> str:
         title = tex_escape(exp.get("title", ""))
         loc = tex_escape(exp.get("location", ""))
         period = tex_escape(exp.get("period", ""))
-        bullets = "\n".join([rf"  \item {tex_escape(b)}" for b in (exp.get("bullets") or [])])
+        bullets = "\n".join([rf"  \item {tex_escape_with_bold_metrics(b)}" for b in (exp.get("bullets") or [])])
         exp_blocks.append(
-            rf"\noindent\textbf{{{comp}}} --- \textit{{{title}}} \hfill {{\footnotesize {loc} $|$ {period}}}\par"
+            rf"\noindent\textbf{{{comp}}} --- \textbf{{{title}}} \hfill {{\footnotesize {loc} $|$ {period}}}\par"
             "\n"
             r"\begin{itemize}"
             "\n"
             f"{bullets}\n"
             r"\end{itemize}"
         )
-    exp_tex = "\n\\vspace{2pt}\n".join(exp_blocks)
+    exp_tex = "\n\\vspace{1.8pt}\n".join(exp_blocks)
 
     proj_list = (tailored.get("projects") or profile.get("projects") or [])[:2]
     proj_blocks = []
     for pr in proj_list:
         pname = tex_escape(pr.get("name", ""))
         pstack = tex_escape(pr.get("stack", ""))
-        stack_suffix = f" ({pstack})" if pstack else ""
-        pbullets = "\n".join([rf"  \item {tex_escape(b)}" for b in (pr.get("bullets") or [])])
+        stack_suffix = rf" {{\footnotesize ({pstack})}}" if pstack else ""
+        pbullets = "\n".join([rf"  \item {tex_escape_with_bold_metrics(b)}" for b in (pr.get("bullets") or [])])
         proj_blocks.append(
             rf"\noindent\textbf{{{pname}}}{stack_suffix}\par"
             "\n"
@@ -119,7 +172,7 @@ def build_resume_latex(tailored: dict, profile: dict) -> str:
             f"{pbullets}\n"
             r"\end{itemize}"
         )
-    proj_tex = "\n\\vspace{1.5pt}\n".join(proj_blocks)
+    proj_tex = "\n\\vspace{1.4pt}\n".join(proj_blocks)
 
     edu_lines = []
     for ed in profile.get("education", []):
@@ -131,40 +184,57 @@ def build_resume_latex(tailored: dict, profile: dict) -> str:
         edu_lines.append(rf"\noindent\textbf{{{sch}}} --- {deg}, {fos} (GPA {gpa}) \hfill {{\footnotesize {yrs}}}\par")
     edu_tex = "\n".join(edu_lines)
 
+    certs_raw = [
+        "Google Gemini for Developers",
+        "Microsoft Azure AI Essentials",
+        "Pair Programming with AI",
+        "Walmart USA -- Advanced Software Engineering",
+        "Datacom -- Software Development",
+    ]
+    certs_tex = r" $\bullet$ ".join(certs_raw)
+
     title_line_tex = rf"{{\normalsize \textbf{{{target_title}}}}} \\[1.5pt]" + "\n  " if target_title else ""
 
     return rf"""\documentclass[10pt,letterpaper]{{article}}
 \pdfobjcompresslevel=0
-\usepackage[left=0.38in,right=0.38in,top=0.30in,bottom=0.30in]{{geometry}}
+\usepackage[T1]{{fontenc}}
+\usepackage{{helvet}}
+\renewcommand{{\familydefault}}{{\sfdefault}}
+\usepackage[left=0.36in,right=0.36in,top=0.28in,bottom=0.28in]{{geometry}}
+\usepackage{{xcolor}}
 \usepackage{{enumitem}}
 \usepackage[hidelinks]{{hyperref}}
+\definecolor{{hdrblue}}{{RGB}}{{20, 52, 104}}
 \pagestyle{{empty}}
 \setlength{{\parindent}}{{0pt}}
-\setlist[itemize]{{leftmargin=1.15em,itemsep=0.7pt,topsep=1.2pt,parsep=0pt,partopsep=0pt}}
-\newcommand{{\secHdr}}[1]{{\vspace{{3.5pt}}\textbf{{\small \uppercase{{#1}}}}\vspace{{1pt}}\hrule\vspace{{2.5pt}}}}
+\setlist[itemize]{{label=\textbullet,leftmargin=1.15em,itemsep=0.55pt,topsep=1.0pt,parsep=0pt,partopsep=0pt}}
+\newcommand{{\secHdr}}[1]{{\vspace{{3.2pt}}\textcolor{{hdrblue}}{{\textbf{{\small \uppercase{{#1}}}}}}\vspace{{1pt}}{{\color{{hdrblue}}\hrule height 0.55pt}}\vspace{{2.2pt}}}}
 
 \begin{{document}}
-\fontsize{{8.7pt}}{{10.2pt}}\selectfont
+\fontsize{{8.45pt}}{{9.95pt}}\selectfont
 \begin{{center}}
   {{\Large \textbf{{{name}}}}} \\[1.5pt]
   {title_line_tex}{{\footnotesize {city_state} $|$ {mail} $|$ {phone} $|$ {li} $|$ {gh}}}
 \end{{center}}
-\vspace{{-6pt}}
+\vspace{{-6.5pt}}
 
-\secHdr{{Summary}}
+\secHdr{{Professional Summary}}
 {summary}\par
 
-\secHdr{{Skills}}
+\secHdr{{Technical Skills}}
 {skills_tex}\par
 
-\secHdr{{Experience}}
+\secHdr{{Professional Experience}}
 {exp_tex}
 
-\secHdr{{Projects}}
+\secHdr{{Selected Projects}}
 {proj_tex}
 
 \secHdr{{Education}}
 {edu_tex}
+
+\secHdr{{Certifications}}
+{{\footnotesize {certs_tex}}}\par
 \end{{document}}
 """
 

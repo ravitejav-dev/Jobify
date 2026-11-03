@@ -4,65 +4,125 @@ export const TECH_KEYWORD_DICTIONARY = [
   // Languages
   { canonical: "Python", aliases: ["python", "python3"] },
   { canonical: "TypeScript", aliases: ["typescript", "ts"] },
-  { canonical: "JavaScript", aliases: ["javascript", "es6"] },
+  { canonical: "JavaScript", aliases: ["javascript", "es6", "ecmascript"] },
   { canonical: "C++", aliases: ["c++", "cpp"] },
   { canonical: "C#", aliases: ["c#", "csharp", ".net"] },
   { canonical: "Go", aliases: ["golang", " go "] },
   { canonical: "Rust", aliases: ["rust"] },
   { canonical: "Java", aliases: ["java"] },
-  { canonical: "SQL", aliases: ["sql", "postgresql", "postgres", "mysql"] },
-  { canonical: "Bash/Shell", aliases: ["bash", "shell scripting", "linux"] },
-  // Frontend & Backend Frameworks
+  { canonical: "SQL", aliases: ["sql", "postgresql", "postgres", "mysql", "sqlite"] },
+  { canonical: "Bash & Shell", aliases: ["bash", "shell scripting", "linux", "unix"] },
+  { canonical: "HTML5 & CSS3", aliases: ["html5", "css3", "html", "css"] },
+  // Frontend & Web Systems
   { canonical: "React", aliases: ["react", "react.js", "reactjs"] },
   { canonical: "Next.js", aliases: ["next.js", "nextjs"] },
   { canonical: "Angular", aliases: ["angular"] },
-  { canonical: "Node.js", aliases: ["node.js", "nodejs"] },
+  { canonical: "Vue.js", aliases: ["vue", "vue.js", "vuejs"] },
+  { canonical: "Tailwind CSS", aliases: ["tailwind", "tailwindcss"] },
+  { canonical: "WebSockets", aliases: ["websocket", "websockets", "real-time streaming", "sse"] },
+  // Backend, APIs & Distributed Systems
+  { canonical: "Node.js", aliases: ["node.js", "nodejs", "express.js"] },
   { canonical: "FastAPI", aliases: ["fastapi"] },
   { canonical: "Django", aliases: ["django"] },
   { canonical: "Flask", aliases: ["flask"] },
+  { canonical: ".NET Core", aliases: [".net core", "asp.net"] },
+  { canonical: "Spring Boot", aliases: ["spring boot", "spring"] },
   { canonical: "GraphQL", aliases: ["graphql"] },
   { canonical: "gRPC", aliases: ["grpc", "protobuf", "protocol buffers"] },
-  { canonical: "REST APIs", aliases: ["rest api", "restful", "api design"] },
-  { canonical: "Microservices", aliases: ["microservices", "distributed systems"] },
-  // AI, LLM & Agents
-  { canonical: "LLM", aliases: ["llm", "llms", "large language model", "foundation model"] },
+  { canonical: "REST APIs", aliases: ["rest api", "restful", "api design", "rest endpoints"] },
+  { canonical: "Microservices", aliases: ["microservices", "service-oriented"] },
+  { canonical: "Distributed Systems", aliases: ["distributed systems", "distributed computing", "scalable systems", "high-throughput"] },
+  { canonical: "System Design", aliases: ["system design", "architecture design", "fault-tolerant", "high availability"] },
+  { canonical: "AsyncIO & Concurrency", aliases: ["asyncio", "asynchronous", "concurrency", "multithreading", "multiprocessing"] },
+  { canonical: "Event-Driven Architecture", aliases: ["event-driven", "message queue", "pub/sub", "pubsub", "celery", "rabbitmq"] },
+  { canonical: "Low-Latency Systems", aliases: ["low latency", "low-latency", "latency optimization", "high performance"] },
+  // AI, LLMs & Agentic Orchestration
+  { canonical: "LLM", aliases: ["llm", "llms", "large language model", "foundation model", "frontier model"] },
   { canonical: "Generative AI", aliases: ["generative ai", "genai", "gen ai"] },
-  { canonical: "RAG", aliases: ["rag", "retrieval-augmented", "retrieval augmented"] },
-  { canonical: "Agentic AI", aliases: ["agentic", "ai agents", "autonomous agents", "multi-agent"] },
+  { canonical: "RAG", aliases: ["rag", "retrieval-augmented", "retrieval augmented", "hybrid search", "semantic search"] },
+  { canonical: "Agentic AI", aliases: ["agentic", "ai agents", "autonomous agents", "multi-agent", "agent workflows"] },
   { canonical: "LangGraph", aliases: ["langgraph"] },
   { canonical: "LangChain", aliases: ["langchain"] },
   { canonical: "LlamaIndex", aliases: ["llamaindex"] },
-  { canonical: "AutoGen", aliases: ["autogen"] },
+  { canonical: "AutoGen", aliases: ["autogen", "crewai"] },
   { canonical: "MCP", aliases: ["model context protocol", " mcp "] },
-  { canonical: "Prompt Engineering", aliases: ["prompt engineering", "chain-of-thought", "few-shot"] },
-  { canonical: "LLM Evaluation", aliases: ["llm evaluation", "evals", "model evaluation", "benchmarking", "promptfoo"] },
-  { canonical: "AI Safety & Red Teaming", aliases: ["ai safety", "red teaming", "adversarial", "guardrails", "trust & safety", "trust and safety", "prompt injection"] },
-  { canonical: "RLHF / Post-Training", aliases: ["rlhf", "sft", "dpo", "fine-tuning", "fine tuning", "post-training", "human-in-the-loop", "hitl"] },
-  { canonical: "Synthetic Data", aliases: ["synthetic data", "data generation"] },
+  { canonical: "Tool Use & Function Calling", aliases: ["tool use", "function calling", "tool-calling", "tool calling", "structured outputs"] },
+  { canonical: "Context Engineering", aliases: ["context engineering", "context window", "memory management", "long-context"] },
+  { canonical: "Prompt Engineering", aliases: ["prompt engineering", "chain-of-thought", "few-shot", "system prompts"] },
+  { canonical: "Model Routing", aliases: ["model routing", "llm gateway", "fallback handling", "inference routing"] },
+  // LLM Evaluation, Safety & Post-Training
+  { canonical: "LLM Evaluation", aliases: ["llm evaluation", "evals", "model evaluation", "benchmarking", "promptfoo", "llm-as-a-judge"] },
+  { canonical: "AI Safety & Red Teaming", aliases: ["ai safety", "red teaming", "red-teaming", "adversarial", "guardrails", "trust & safety", "trust and safety", "prompt injection", "responsible ai"] },
+  { canonical: "RLHF & Post-Training", aliases: ["rlhf", "sft", "dpo", "fine-tuning", "fine tuning", "post-training", "preference tuning"] },
+  { canonical: "Human-in-the-Loop (HITL)", aliases: ["human-in-the-loop", "hitl", "human rating", "annotation", "data labeling", "side-by-side"] },
+  { canonical: "Synthetic Data", aliases: ["synthetic data", "data generation", "data seeding", "persona simulation"] },
+  { canonical: "Trajectory Analysis", aliases: ["trajectory", "reasoning traces", "execution traces", "multi-turn evaluation"] },
+  // ML, Deep Learning & Inference
   { canonical: "PyTorch", aliases: ["pytorch", "torch"] },
   { canonical: "TensorFlow", aliases: ["tensorflow"] },
-  { canonical: "vLLM / Inference", aliases: ["vllm", "tensorrt", "triton", "model serving", "llm serving"] },
-  { canonical: "Ray", aliases: ["ray"] },
-  { canonical: "MLflow", aliases: ["mlflow", "weights & biases", "wandb"] },
-  { canonical: "Vector Databases", aliases: ["vector database", "vector search", "embeddings", "pinecone", "weaviate", "pgvector", "milvus", "faiss"] },
-  // Data, Cloud & Infra
-  { canonical: "GCP", aliases: ["gcp", "google cloud", "vertex ai"] },
+  { canonical: "Hugging Face", aliases: ["hugging face", "huggingface", "transformers"] },
+  { canonical: "vLLM & Inference Serving", aliases: ["vllm", "tensorrt", "triton", "model serving", "llm serving", "inference optimization"] },
+  { canonical: "Ray", aliases: ["ray", "anyscale"] },
+  { canonical: "CUDA & GPU Optimization", aliases: ["cuda", "gpu", "nccl"] },
+  { canonical: "MLflow", aliases: ["mlflow", "weights & biases", "wandb", "experiment tracking"] },
+  { canonical: "Multimodal AI", aliases: ["multimodal", "multi-modal", "video processing", "vision-language", "audio processing", "ocr"] },
+  // Data, Storage & Vector DBs
+  { canonical: "Vector Databases", aliases: ["vector database", "vector search", "embeddings", "pinecone", "weaviate", "pgvector", "milvus", "faiss", "qdrant", "chromadb"] },
+  { canonical: "PostgreSQL", aliases: ["postgresql", "postgres", "supabase", "relational database"] },
+  { canonical: "Redis", aliases: ["redis", "caching", "in-memory cache"] },
+  { canonical: "MongoDB", aliases: ["mongodb", "nosql", "dynamodb"] },
   { canonical: "BigQuery", aliases: ["bigquery"] },
+  { canonical: "Snowflake", aliases: ["snowflake"] },
+  { canonical: "Apache Spark", aliases: ["spark", "pyspark", "databricks"] },
+  { canonical: "Kafka", aliases: ["kafka", "streaming", "kinesis"] },
+  { canonical: "Airflow", aliases: ["airflow", "orchestration", "dagster", "prefect", "temporal"] },
+  { canonical: "Neo4j", aliases: ["neo4j", "knowledge graph", "graph database"] },
+  { canonical: "Data Pipelines & ETL", aliases: ["data pipeline", "data pipelines", "etl", "elt", "data ingestion", "batch processing"] },
+  // Cloud, DevOps, Testing & Observability
+  { canonical: "GCP", aliases: ["gcp", "google cloud", "vertex ai", "cloud storage", "gcs"] },
   { canonical: "AWS", aliases: ["aws", "amazon web services", "ec2", "s3", "ecs", "lambda", "bedrock", "sagemaker"] },
   { canonical: "Azure", aliases: ["azure", "azure openai"] },
-  { canonical: "Docker", aliases: ["docker", "containerization", "containers"] },
-  { canonical: "Kubernetes", aliases: ["kubernetes", "k8s", "gke", "eks"] },
+  { canonical: "Docker", aliases: ["docker", "containerization", "containers", "containerized"] },
+  { canonical: "Kubernetes", aliases: ["kubernetes", "k8s", "gke", "eks", "helm"] },
   { canonical: "Terraform", aliases: ["terraform", "infrastructure as code", "iac"] },
-  { canonical: "CI/CD", aliases: ["ci/cd", "github actions", "jenkins", "gitlab ci"] },
-  { canonical: "Apache Spark", aliases: ["spark", "pyspark", "databricks"] },
-  { canonical: "Kafka", aliases: ["kafka", "streaming"] },
-  { canonical: "Airflow", aliases: ["airflow", "orchestration"] },
-  { canonical: "Snowflake", aliases: ["snowflake"] },
-  { canonical: "Redis", aliases: ["redis", "caching"] },
-  { canonical: "Neo4j", aliases: ["neo4j", "knowledge graph", "graph database"] },
-  { canonical: "Playwright", aliases: ["playwright", "browser automation", "puppeteer", "selenium"] },
-  { canonical: "Observability / Telemetry", aliases: ["observability", "telemetry", "opentelemetry", "prometheus", "grafana", "datadog", "tracing"] }
+  { canonical: "CI & CD", aliases: ["ci/cd", "ci & cd", "continuous integration", "continuous delivery", "github actions", "jenkins", "gitlab ci"] },
+  { canonical: "Playwright", aliases: ["playwright", "browser automation", "puppeteer", "selenium", "end-to-end testing", "e2e testing"] },
+  { canonical: "Observability & Telemetry", aliases: ["observability", "telemetry", "opentelemetry", "prometheus", "grafana", "datadog", "distributed tracing", "monitoring"] }
 ];
+
+export function detectJobArchetype(jobMeta = {}) {
+  const combined = `${jobMeta.title || ""} ${jobMeta.description || ""}`.toLowerCase();
+  const scores = {
+    eval_safety_rlhf: 0,
+    frontier_ai_agents: 0,
+    fullstack_product_ai: 0,
+    backend_distributed_infra: 0,
+    data_ml_pipelines: 0
+  };
+  if (/eval|evaluation|benchmark|red[- ]?team|safety|alignment|rlhf|post-training|human-in-the-loop|hitl|synthetic data|trust\s*&\s*safety|quality/i.test(combined)) {
+    scores.eval_safety_rlhf += 4;
+  }
+  if (/agent|agentic|langgraph|langchain|mcp|tool[- ]?use|function calling|rag|llm|genai|generative ai|prompt|autonomous/i.test(combined)) {
+    scores.frontier_ai_agents += 3;
+  }
+  if (/full[- ]?stack|frontend|react|next\.js|angular|ui|ux|typescript|product engineer|web application/i.test(combined)) {
+    scores.fullstack_product_ai += 3;
+  }
+  if (/distributed systems|backend|platform|infrastructure|kubernetes|docker|microservices|grpc|c\+\+|go|golang|low[- ]?latency|scalability|reliability|sre|devops/i.test(combined)) {
+    scores.backend_distributed_infra += 3;
+  }
+  if (/data pipeline|etl|spark|pyspark|bigquery|snowflake|kafka|airflow|data engineer|mlops|ml infrastructure|pytorch|vllm|inference/i.test(combined)) {
+    scores.data_ml_pipelines += 3;
+  }
+  const titleLow = (jobMeta.title || "").toLowerCase();
+  if (/eval|safety|rlhf|alignment|quality|trust/i.test(titleLow)) scores.eval_safety_rlhf += 5;
+  else if (/agent|llm|ai|genai|ml|machine learning/i.test(titleLow)) scores.frontier_ai_agents += 4;
+  else if (/full[- ]?stack|frontend|ui|product/i.test(titleLow)) scores.fullstack_product_ai += 5;
+  else if (/data|analytics|pipeline/i.test(titleLow)) scores.data_ml_pipelines += 5;
+  else if (/backend|platform|infrastructure|systems|software engineer/i.test(titleLow)) scores.backend_distributed_infra += 4;
+
+  return Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0];
+}
 
 function buildResumeCorpus(profile, customResumeObj = null) {
   if (customResumeObj) {
@@ -111,7 +171,9 @@ export function analyzeJobKeywords(jobDescription, profile, customResumeObj = nu
       }
     }
     if (jdHits > 0) {
-      const inResume = item.aliases.some((alias) => matchesAlias(resumeLower, alias));
+      const inResume =
+        matchesAlias(resumeLower, item.canonical.toLowerCase()) ||
+        item.aliases.some((alias) => matchesAlias(resumeLower, alias));
       if (inResume) {
         matched.push({ keyword: item.canonical, mentions: jdHits });
       } else {

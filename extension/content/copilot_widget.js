@@ -298,7 +298,8 @@
         options: {
           resumeChoice: selectedResume,
           fillOpenEndedWithAI,
-          topJobMeta: pageMeta
+          topJobMeta: pageMeta,
+          skipApplyGate: true
         }
       }
     });

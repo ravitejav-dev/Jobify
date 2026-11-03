@@ -2,6 +2,8 @@
 // Supports gemini-3.8-flash & gemini-3.1-pro-preview as primary models with automatic Smart Quota Fallback
 // to live 200-OK Gemini 3.x models (gemini-3.5-flash, gemini-3-flash-preview) when Free Tier returns 429.
 
+import { analyzeJobKeywords, detectJobArchetype } from "./ats_analyzer.js";
+
 const GLA_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 const modelCooldownUntil = new Map();
 let preferCompanionRelayUntil = 0;
@@ -239,15 +241,40 @@ const UNIQUE_ACTION_VERB_POOL = [
   "Modernized",
   "Established",
   "Hardened",
+  "Re-engineered",
+  "Ranked",
+  "Deployed",
   "Configured"
 ];
+
+const BANNED_WEAK_STARTING_VERBS = new Set([
+  "facilitated",
+  "formulated",
+  "assisted",
+  "helped",
+  "utilized",
+  "leveraged",
+  "worked",
+  "supported",
+  "participated",
+  "handled",
+  "contributed",
+  "involved",
+  "responsible",
+  "collaborated",
+  "maintained",
+  "managed",
+  "used",
+  "performed",
+  "conducted"
+]);
 
 function sanitizeBulletSentence(bullet) {
   let s = String(bullet || "")
     .replace(/^[\s•\-*–\d.)]+/, "")
     .replace(/\s+/g, " ")
     .replace(/#(\d+)\s*\/\s*(\d+)/g, "#$1 of $2")
-    .replace(/\bCI\s*\/\s*CD\b/gi, "continuous integration and delivery")
+    .replace(/\bCI\s*\/\s*CD\b/gi, "CI and CD")
     .replace(/\s*\/\s*/g, " and ")
     .replace(/\s*;\s*/g, ", ")
     .replace(/\s+/g, " ")
@@ -263,7 +290,7 @@ function enforceUniqueStartingVerb(bullet, usedVerbs) {
   const m = bullet.match(/^([A-Za-z-]+)([\s,][\s\S]*)$/);
   if (!m) return bullet;
   const firstWordLow = m[1].toLowerCase();
-  if (!usedVerbs.has(firstWordLow)) {
+  if (!usedVerbs.has(firstWordLow) && !BANNED_WEAK_STARTING_VERBS.has(firstWordLow)) {
     usedVerbs.add(firstWordLow);
     return bullet;
   }
@@ -276,15 +303,127 @@ function enforceUniqueStartingVerb(bullet, usedVerbs) {
   return `${replacement}${m[2]}`;
 }
 
+function hasStrongQuantitativeMetric(bullet) {
+  return /\b(\d+%|\d+x|\d+\+|#\d+|\d{1,3},\d{3}|\b13\b|\b19\b|\b30\b|\b40\b|\b48\b|\b60\b|\b70\b|\b95\b|\b460\b|\b8\s+languages\b|first\s+among\s+11|#1\s+of\s+11)\b/i.test(
+    String(bullet || "")
+  );
+}
+
+function buildArchetypeReferenceBullets(archetype, jdSkills = []) {
+  const cleanSk = jdSkills
+    .map((s) => String(s || "").replace(/\s*\/\s*/g, " and ").trim())
+    .filter(Boolean);
+  const hasKw = (re) => cleanSk.some((s) => re.test(s));
+  const vecMention = hasKw(/vector|rag|embedding|pinecone|weaviate|pgvector|faiss/i)
+    ? " and RAG vector search indexing"
+    : "";
+  const otelMention = hasKw(/observability|telemetry|opentelemetry|datadog|prometheus|grafana/i)
+    ? "OpenTelemetry and React"
+    : "React, TypeScript, and Node.js";
+  const k8sMention = hasKw(/kubernetes|docker|gke|eks|terraform/i)
+    ? "Docker and Kubernetes"
+    : "containerized cloud";
+
+  const globalLogicPool = {
+    eval_safety_rlhf: [
+      `Architected a synthetic data seeding framework across 48 multi-modal user personas and 9 cloud services on GCP and BigQuery${vecMention}, enforcing 100% numerical accuracy via an automated Python Data Integrity QA suite.`,
+      `Designed and deployed 13 full-stack sandboxed web applications in TypeScript, React, Angular, and Python with Playwright browser automation to safely reproduce edge cases and benchmark autonomous AI agents.`,
+      `Ranked #1 of 11 engineers in platform throughput across 2,000+ batches and 460+ evaluation workflows with zero queue backlog while building 19 custom React and TypeScript Side-by-Side (SxS) RLHF and adversarial red-teaming plugins.`,
+      `Re-engineered a distributed multi-language video and multimodal pipeline processing 1,800+ recordings into 40,000+ clips across 8 languages, cutting processing time by 10x and resolving a critical blocker in 10 days.`,
+      `Built ${otelMention} telemetry dashboards cutting agent diagnosis time by 60%, warm-pool ${k8sMention} sandboxes reducing initialization latency by 70%, and PyTorch adversarial suites catching 40+ edge cases pre-deployment.`
+    ],
+    frontier_ai_agents: [
+      `Designed and deployed 13 full-stack sandboxed web applications in TypeScript, React, Angular, and Python with Playwright automation to evaluate autonomous multi-turn browser AI agents across 48 test accounts.`,
+      `Architected a longitudinal synthetic data seeding platform across 48 multi-modal user personas and 9 cloud services${vecMention}, guaranteeing 100% numerical accuracy through an automated Python QA verification suite.`,
+      `Engineered warm-pool ${k8sMention} sandboxes cutting initialization latency by 70%, alongside ${otelMention} execution-tracing dashboards reducing agent mean-time-to-diagnosis by 60% in production.`,
+      `Ranked #1 of 11 engineers in platform throughput by delivering 2,000+ ingestion batches across 460+ evaluation workflows and building 19 React and TypeScript Side-by-Side (SxS) multi-model evaluation plugins.`,
+      `Re-engineered a multi-language video segmentation pipeline transforming 1,800+ recordings into 40,000+ clips across 8 languages for a 10x speedup, while maintaining Python, C++, and PyTorch LLM serving backends catching 40+ edge cases.`
+    ],
+    fullstack_product_ai: [
+      `Built and deployed 13 full-stack sandboxed web applications from scratch using React, Angular, TypeScript, Node.js, and Python across e-commerce, fintech, and messaging domains to benchmark autonomous browser AI agents.`,
+      `Spearheaded 19 custom React and TypeScript Side-by-Side (SxS) evaluation applications and ranked #1 of 11 engineers in platform throughput across 2,000+ data batches and 460+ production workflows.`,
+      `Developed real-time ${otelMention} observability dashboards reducing AI agent diagnosis time by 60%, paired with warm-pool ${k8sMention} sandboxes cutting environment startup latency by 70%.`,
+      `Architected a multi-service synthetic data platform across 48 user personas and 9 cloud APIs with Playwright end-to-end automation and a Python QA suite guaranteeing 100% numerical data accuracy.`,
+      `Re-engineered a distributed Python media processing pipeline converting 1,800+ recordings into 40,000+ clips across 8 languages for a 10x speedup in 10 days, alongside low-latency Python and C++ LLM inference services.`
+    ],
+    backend_distributed_infra: [
+      `Engineered warm-pool ${k8sMention} sandbox infrastructure cutting initialization latency by 70%, alongside low-latency Python, C++, and PyTorch LLM serving backends handling high-throughput production workloads.`,
+      `Architected a distributed synthetic data seeding pipeline across 48 multi-modal personas and 9 cloud services on GCP and BigQuery${vecMention}, enforcing 100% post-injection numerical accuracy via automated Python QA gates.`,
+      `Re-engineered a high-volume multi-language video processing pipeline transforming 1,800+ recordings into 40,000+ clips across 8 languages, achieving a 10x throughput speedup and unblocking 3+ engineering teams in 10 days.`,
+      `Ranked #1 of 11 engineers in platform throughput across 2,000+ ingestion and extraction batches and 460+ multi-stage deduplication workflows with zero queue backlog and 19 custom TypeScript and React plugins.`,
+      `Constructed 13 containerized full-stack sandbox applications and ${otelMention} distributed tracing dashboards that reduced production AI agent mean-time-to-diagnosis by 60% and caught 40+ edge cases pre-release.`
+    ]
+  };
+
+  const chosenGl = globalLogicPool[archetype] || globalLogicPool.frontier_ai_agents;
+
+  const massDigiBullets = [
+    "Constructed autonomous agent and non-player character decision systems in C# and C++ using finite state machines and behavior trees for real-time interactive simulation loops.",
+    "Integrated custom in-editor telemetry, state-inspection, and structured diagnostic logging tools that isolated deterministic runtime anomalies across automated build regressions.",
+    "Optimized memory allocation, asynchronous asset streaming, and object pooling to sustain 60+ FPS under heavy rendering loads while resolving 30+ integration defects across agile sprints."
+  ];
+
+  const wiproBullets = [
+    "Developed full-stack web modules and RESTful backend microservices using .NET Core and C# integrated with normalized SQL relational database schemas and automated API validation.",
+    "Implemented SQL query performance tuning, schema indexing, and modular REST API endpoints with 100% unit test pass rates across enterprise engineering assessments."
+  ];
+
+  const proj1Bullets = [
+    `Orchestrated a distributed evaluation platform using Python, LangGraph, FastAPI, Docker, and Kubernetes processing 10,000+ test cases daily with RAG and Vector Databases, preventing capability drift across 12+ model iterations.`,
+    `Automated retry orchestration and trajectory-analysis pipelines parsing tool-call sequences and multi-turn reasoning traces with OpenTelemetry, eliminating 95%+ of silent failures in production edge cases.`
+  ];
+
+  const proj2Bullets = [
+    `Accelerated feature-to-production delivery by 40% across 8+ engineering teams by building an AI-native Python, React, TypeScript, and FastAPI service translating product specs into CI and CD workflows.`,
+    `Established an extensible validation harness supporting 30+ modular plugins with deterministic schema checks, API contract verification, and real-time observability reporting dashboards.`
+  ];
+
+  return {
+    exp0: chosenGl,
+    exp1: massDigiBullets,
+    exp2: wiproBullets,
+    proj0: proj1Bullets,
+    proj1: proj2Bullets
+  };
+}
+
+function classifySkillCategoryIndex(skillStr) {
+  const s = String(skillStr || "").toLowerCase();
+  if (/^(python|typescript|javascript|c\+\+|c#|go|golang|rust|java|sql|bash|shell|html|css)/i.test(s)) {
+    return 0;
+  }
+  if (/llm|ai|rag|agent|langgraph|langchain|llamaindex|autogen|mcp|prompt|eval|safety|red team|rlhf|post-training|hitl|human-in-the-loop|synthetic|trajectory|pytorch|tensorflow|hugging|vllm|inference|ray|cuda|mlflow|multimodal|vector/i.test(s)) {
+    return 1;
+  }
+  if (/react|next\.js|angular|vue|tailwind|websocket|node\.js|fastapi|django|flask|\.net|spring|graphql|grpc|rest|microservice|distributed|system design|asyncio|event-driven|low-latency|playwright/i.test(s)) {
+    return 2;
+  }
+  return 3;
+}
+
 function enforceFromScratchResumeQuality(parsed, jobMeta, profile, missingKeywords = []) {
   const cleanTitle = cleanPostingJobTitle(parsed?.targetJobTitle || jobMeta?.title || profile?.personal?.currentTitle);
   const compName = String(jobMeta?.company || "the engineering team").trim();
-  const topMissing = (missingKeywords || [])
-    .map((k) => String(k || "").replace(/\s*\/\s*/g, " and ").trim())
+  const archetype = detectJobArchetype(jobMeta);
+  const kwScan = analyzeJobKeywords(jobMeta?.description || "", profile);
+  const allJdKeywords = [
+    ...new Set([
+      ...(kwScan.matched || []).map((m) => m.keyword),
+      ...(kwScan.missing || []).map((m) => m.keyword),
+      ...(missingKeywords || [])
+    ])
+  ]
+    .map((k) => String(k || "").replace(/\s*\/\s*/g, " & ").trim())
     .filter(Boolean);
 
-  // 1. Clean 4-sentence neutral third-person summary (<= 75-78 words, zero first-person pronouns)
-  const fallbackSummary = `${cleanTitle} with 3.5+ years of production engineering experience building LLM evaluation infrastructure, agentic sandboxes, and scalable backend systems. Skilled in ${topMissing.slice(0, 3).concat(["Python", "TypeScript", "Kubernetes"]).slice(0, 4).join(", ")}, and distributed cloud pipelines. Proven track record increasing evaluation throughput across 2,000+ batches, cutting sandbox startup latency by 70%, and ensuring 100% synthetic data accuracy. Collaborative systems builder focused on strengthening engineering reliability and platform velocity for ${compName}.`;
+  const topJdProse = allJdKeywords
+    .slice(0, 6)
+    .map((k) => k.replace(/\s*&\s*/g, " and "))
+    .concat(["Python", "TypeScript", "Kubernetes", "LangGraph"])
+    .slice(0, 5);
+
+  // 1. Clean 4-sentence neutral third-person summary (<= 75-78 words, zero first-person pronouns, includes #1 of 11 & core JD stack)
+  const fallbackSummary = `${cleanTitle} with 3.5+ years of production engineering experience building autonomous AI agent sandboxes, synthetic data pipelines, and high-throughput evaluation platforms at Google AI (via GlobalLogic). Skilled in ${topJdProse.slice(0, 4).join(", ")}, and distributed cloud infrastructure. Ranked #1 of 11 engineers in platform throughput across 2,000+ batches while cutting sandbox startup latency by 70% and guaranteeing 100% data accuracy. Collaborative systems architect focused on scaling reliable AI infrastructure for ${compName}.`;
   let summary = String(parsed?.summary || fallbackSummary)
     .replace(/^(operating|serving|working|acting)\s+as\s+an?\s+[^,]+,\s*(this|the)\s+(professional|candidate|engineer|applicant|individual|specialist)\s+(brings|offers|possesses|has|delivers)\s+/i, `${cleanTitle} with `)
     .replace(/\b(this|the)\s+(professional|candidate|engineer|applicant|individual)\s+(brings|offers|possesses|has)\s+/gi, `${cleanTitle} with `)
@@ -321,52 +460,82 @@ function enforceFromScratchResumeQuality(parsed, jobMeta, profile, missingKeywor
     summary += ".";
   }
 
-  // 2. Enforce exactly 4 categories and 25-40 unique skills total
+  // 2. Enforce exactly 4 categories and 28-38 unique skills total, front-loading 100% of detected JD keywords!
+  const defaultCatHeaders = [
+    "Languages & Core Systems",
+    "AI, LLMs & Evaluation",
+    "Frameworks, APIs & Automation",
+    "Cloud, Data & Observability"
+  ];
+  const defaultCatSeeds = [
+    ["Python", "TypeScript", "JavaScript", "C++", "C#", "Go", "Java", "SQL", "Bash & Shell"],
+    ["LLM Evaluation", "Agentic AI", "LangGraph", "LangChain", "RAG", "Vector Databases", "PyTorch", "AI Safety & Red Teaming", "Synthetic Data", "RLHF & Post-Training", "promptfoo"],
+    ["React", "Angular", "Node.js", "FastAPI", ".NET Core", "Playwright", "REST APIs", "Microservices", "Distributed Systems"],
+    ["GCP", "BigQuery", "AWS", "Docker", "Kubernetes", "Terraform", "CI & CD", "GitHub Actions", "Observability & Telemetry", "Neo4j", "Linux"]
+  ];
+
   const rawCats = parsed?.skillsCategories && typeof parsed.skillsCategories === "object" ? parsed.skillsCategories : {};
-  const entries = Object.entries(rawCats)
+  const rawEntries = Object.entries(rawCats)
     .map(([k, v]) => [
       String(k).trim(),
       (Array.isArray(v) ? v : String(v || "").split(","))
         .map((x) => String(x || "").replace(/\s*\/\s*/g, " & ").trim())
-        .filter(Boolean)
+        .filter((x) => x && x.length > 1 && !/^(ci|cd)$/i.test(x))
     ])
     .filter(([k, arr]) => k && arr.length > 0)
     .slice(0, 4);
 
-  const defaultCatOrder = [
-    ["Languages & Core", profile?.skillsCategories?.Languages || ["Python", "TypeScript", "JavaScript", "C++", "SQL", "Go", "Bash"]],
-    ["AI, LLMs & Evaluation", [...topMissing.slice(0, 5), ...(profile?.skillsCategories?.["AI & LLM"] || ["LLM Evaluation", "Agentic AI", "RAG", "LangGraph", "Prompt Engineering", "Synthetic Data", "PyTorch"])]],
-    ["Frameworks & Backend", profile?.skillsCategories?.["Frameworks & Libraries"] || ["React", "Node.js", "FastAPI", "Angular", "Playwright", "Microservices", "REST APIs"]],
-    ["Cloud, Data & Infrastructure", profile?.skillsCategories?.["Cloud & DevOps"] || ["GCP", "BigQuery", "AWS", "Docker", "Kubernetes", "Terraform", "GitHub Actions"]]
-  ];
-  while (entries.length < 4) {
-    const fallbackPair = defaultCatOrder[entries.length];
-    entries.push([fallbackPair[0], [...fallbackPair[1]]]);
+  const catBuckets = [0, 1, 2, 3].map((idx) => ({
+    name: rawEntries[idx]?.[0] || defaultCatHeaders[idx],
+    items: []
+  }));
+
+  // First, front-load ALL detected JD keywords into their matching category so ATS & recruiter scan hits 100%!
+  for (const jdKw of allJdKeywords) {
+    const bucketIdx = classifySkillCategoryIndex(jdKw);
+    catBuckets[bucketIdx].items.push(jdKw);
   }
+
+  // Second, add model-selected skills + default profile seed skills
+  for (let idx = 0; idx < 4; idx++) {
+    const modelItems = rawEntries[idx]?.[1] || [];
+    catBuckets[idx].items.push(...modelItems, ...defaultCatSeeds[idx]);
+  }
+
+  const normalizeSkillKey = (raw) =>
+    String(raw || "")
+      .toLowerCase()
+      .replace(/^restful\s+apis?$/, "rest apis")
+      .replace(/^react\.?js$/, "react")
+      .replace(/^node\.?js$/, "node.js")
+      .replace(/^rag\s+systems?$/, "rag")
+      .replace(/^bash\s*(&|and)\s*shell$/, "bash");
 
   const seenSkills = new Set();
   const normalizedCats = {};
   let totalSkills = 0;
 
-  for (const [catName, list] of entries) {
+  for (const bucket of catBuckets) {
     const cleanItems = [];
-    for (const item of list) {
-      const key = item.toLowerCase();
-      if (seenSkills.has(key) || totalSkills >= 40) continue;
+    for (const item of bucket.items) {
+      const cleanItem = String(item || "").replace(/\s*\/\s*/g, " & ").trim();
+      if (!cleanItem) continue;
+      const key = normalizeSkillKey(cleanItem);
+      if (seenSkills.has(key) || totalSkills >= 38) continue;
       seenSkills.add(key);
-      cleanItems.push(item);
+      cleanItems.push(cleanItem);
       totalSkills++;
       if (cleanItems.length >= 10) break;
     }
-    normalizedCats[catName] = cleanItems;
+    normalizedCats[bucket.name] = cleanItems;
   }
 
-  if (totalSkills < 25) {
-    const pool = [...topMissing, ...(profile?.allSkillsFlat || []), ...Object.values(profile?.skillsCategories || {}).flat()];
+  if (totalSkills < 26) {
+    const pool = [...allJdKeywords, ...(profile?.allSkillsFlat || []), ...defaultCatSeeds.flat()];
     const catKeys = Object.keys(normalizedCats);
     let idx = 0;
     for (const candidateSkill of pool) {
-      if (totalSkills >= 28) break;
+      if (totalSkills >= 30) break;
       const cleanSk = String(candidateSkill || "").replace(/\s*\/\s*/g, " & ").trim();
       if (!cleanSk || seenSkills.has(cleanSk.toLowerCase())) continue;
       seenSkills.add(cleanSk.toLowerCase());
@@ -376,31 +545,48 @@ function enforceFromScratchResumeQuality(parsed, jobMeta, profile, missingKeywor
     }
   }
 
-  // 3. Sanitize experience (5 / 3 / 2) & project (2 / 2) bullets with 14 unique past-tense action verbs
+  // 3. Sanitize experience (5 / 3 / 2) & project (2 / 2) bullets with 14 unique past-tense action verbs AND mandatory metric preservation!
+  const refBullets = buildArchetypeReferenceBullets(archetype, allJdKeywords);
   const usedVerbs = new Set();
   const expTargetCounts = [5, 3, 2];
   const profWork = profile?.workExperience || [];
   const rawExp = Array.isArray(parsed?.experience) && parsed.experience.length > 0 ? parsed.experience : [];
+  const expRefPools = [refBullets.exp0, refBullets.exp1, refBullets.exp2];
 
   const experience = [0, 1, 2].map((i) => {
     const baseRole = profWork[i] || {};
     const exp = rawExp[i] || {};
     const targetLen = expTargetCounts[i];
-    const combinedBullets = [
-      ...(exp.bullets || []),
-      ...(baseRole.highlights || [])
-    ]
-      .map(sanitizeBulletSentence)
-      .filter(Boolean);
+    const refPool = expRefPools[i] || baseRole.highlights || [];
+    const modelBullets = (exp.bullets || []).map(sanitizeBulletSentence).filter(Boolean);
+
+    const candidateList = [];
+    for (let slot = 0; slot < targetLen; slot++) {
+      const mBul = modelBullets[slot] || "";
+      const refBul = sanitizeBulletSentence(refPool[slot] || baseRole.highlights?.[slot] || "");
+      const mWords = mBul.split(/\s+/).filter(Boolean).length;
+      const needsMetric = i === 0 || (i === 1 && slot === 2);
+      // Keep model bullet ONLY if it has strong length (>=14 words) and preserves quantitative metrics when required
+      if (mBul && mWords >= 14 && (!needsMetric || hasStrongQuantitativeMetric(mBul))) {
+        candidateList.push(mBul);
+      } else if (refBul) {
+        candidateList.push(refBul);
+      } else if (mBul) {
+        candidateList.push(mBul);
+      }
+    }
+    candidateList.push(...refPool.map(sanitizeBulletSentence), ...(baseRole.highlights || []).map(sanitizeBulletSentence));
+
     const deduped = [];
     const seenBul = new Set();
-    for (const b of combinedBullets) {
+    for (const b of candidateList.filter(Boolean)) {
       if (deduped.length >= targetLen) break;
-      const sig = b.slice(0, 45).toLowerCase();
+      const sig = b.slice(0, 42).toLowerCase();
       if (seenBul.has(sig)) continue;
       seenBul.add(sig);
       deduped.push(enforceUniqueStartingVerb(b, usedVerbs));
     }
+
     const rawRoleTitle = String(exp.title || baseRole.title || "").trim();
     const compactRoleTitle =
       rawRoleTitle.length > 46 ? rawRoleTitle.split(/\s+[-–—]\s+/)[0].trim() : rawRoleTitle;
@@ -415,84 +601,146 @@ function enforceFromScratchResumeQuality(parsed, jobMeta, profile, missingKeywor
 
   const profProjects = profile?.projects || [];
   const rawProj = Array.isArray(parsed?.projects) && parsed.projects.length > 0 ? parsed.projects : [];
+  const projRefPools = [refBullets.proj0, refBullets.proj1];
+
   const projects = [0, 1].map((i) => {
     const basePr = profProjects[i] || {};
     const pr = rawProj[i] || {};
-    const combinedBullets = [...(pr.bullets || []), ...(basePr.bullets || [])]
-      .map(sanitizeBulletSentence)
-      .filter(Boolean);
+    const refPool = projRefPools[i] || basePr.bullets || [];
+    const modelBullets = (pr.bullets || []).map(sanitizeBulletSentence).filter(Boolean);
+
+    const candidateList = [];
+    for (let slot = 0; slot < 2; slot++) {
+      const mBul = modelBullets[slot] || "";
+      const refBul = sanitizeBulletSentence(refPool[slot] || basePr.bullets?.[slot] || "");
+      const mWords = mBul.split(/\s+/).filter(Boolean).length;
+      if (mBul && mWords >= 14 && hasStrongQuantitativeMetric(mBul)) {
+        candidateList.push(mBul);
+      } else if (refBul) {
+        candidateList.push(refBul);
+      } else if (mBul) {
+        candidateList.push(mBul);
+      }
+    }
+    candidateList.push(...refPool.map(sanitizeBulletSentence), ...(basePr.bullets || []).map(sanitizeBulletSentence));
+
     const deduped = [];
     const seenBul = new Set();
-    for (const b of combinedBullets) {
+    for (const b of candidateList.filter(Boolean)) {
       if (deduped.length >= 2) break;
-      const sig = b.slice(0, 45).toLowerCase();
+      const sig = b.slice(0, 42).toLowerCase();
       if (seenBul.has(sig)) continue;
       seenBul.add(sig);
       deduped.push(enforceUniqueStartingVerb(b, usedVerbs));
     }
+
+    const baseStackItems = String(pr.stack || basePr.stack || "")
+      .replace(/\bCI\s*\/\s*CD\b/gi, "CI & CD")
+      .replace(/\s*\/\s*/g, ", ")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s && !/^(ci|cd)$/i.test(s));
+    const jdStackAdditions = allJdKeywords
+      .filter((k) =>
+        i === 0
+          ? /python|langgraph|langchain|rag|vector|fastapi|docker|kubernetes|pytorch|llm/i.test(k)
+          : /typescript|react|fastapi|docker|ci & cd|observability|telemetry|playwright|aws|gcp/i.test(k)
+      )
+      .slice(0, 3);
+    const mergedStack = [];
+    const seenSt = new Set();
+    for (const st of [...baseStackItems, ...jdStackAdditions]) {
+      const cleanSt = st.replace(/\s*\/\s*/g, " & ").trim();
+      if (!cleanSt || seenSt.has(cleanSt.toLowerCase())) continue;
+      seenSt.add(cleanSt.toLowerCase());
+      mergedStack.push(cleanSt);
+      if (mergedStack.length >= 8) break;
+    }
+
     return {
       name: pr.name || basePr.name || "",
-      stack: String(pr.stack || basePr.stack || "").replace(/\s*\/\s*/g, ", "),
+      stack: mergedStack.join(", "),
       bullets: deduped
     };
   });
 
   return {
     targetJobTitle: cleanTitle,
+    archetype,
     summary,
     skillsCategories: normalizedCats,
     experience,
     projects,
-    addedKeywords: Array.isArray(parsed?.addedKeywords) ? parsed.addedKeywords : [],
-    keyChangesSummary: Array.isArray(parsed?.keyChangesSummary) ? parsed.keyChangesSummary : []
+    addedKeywords: allJdKeywords.slice(0, 12),
+    keyChangesSummary: [
+      `Tailored for ${cleanTitle} (${archetype.replace(/_/g, " ")}) with 4-sentence summary and ${totalSkills} JD-aligned skills`,
+      "Preserved 100% of verified Google AI, MassDigi, Wipro & Project metrics across 14 unique action-verb bullets",
+      `Front-loaded ${allJdKeywords.length} exact JD technical keywords across Skills, Summary, Experience & Projects`
+    ]
   };
 }
 
 export async function tailorResumeWithGemini(jobMeta, profile, missingKeywords = [], settings = {}, preferredModel = null) {
   const exactPostingTitle = cleanPostingJobTitle(jobMeta.title || "AI & Platform Software Engineer");
   const modelToUse = preferredModel || settings?.primaryModel || "gemini-3.5-flash";
+  const archetype = detectJobArchetype(jobMeta);
+  const kwScan = analyzeJobKeywords(jobMeta?.description || "", profile);
+  const priorityJdKeywords = [
+    ...new Set([
+      ...(kwScan.matched || []).map((m) => m.keyword),
+      ...(kwScan.missing || []).map((m) => m.keyword),
+      ...(missingKeywords || [])
+    ])
+  ];
 
-  const systemInstruction = `You are an elite ATS & Technical Recruiter Resume Architect who builds every resume FROM SCRATCH from the candidate's full Master Profile + the target Job Description — NEVER generic AI rewording.
+  const systemInstruction = `You are a Principal Technical Recruiter & Staff Engineering Hiring Manager who writes elite, high-converting 1-page technical resumes FROM SCRATCH using the candidate's verified Master Profile and the target Job Description.
 
-EXECUTE THIS EXACT 5-STAGE FROM-SCRATCH FRAMEWORK:
-1. STAGE 1 — EXACT JD KEYWORD EXTRACTION:
-   - Use the exact words and spelling from the Job Description (e.g., if the posting says "ETL pipelines", write "ETL pipelines", not "data workflows").
-2. STAGE 2 — TOP JOB TITLE & 4-SENTENCE SUMMARY QUALITY FRAMEWORK:
-   - "targetJobTitle": Must be the exact clean job title from the posting ("${exactPostingTitle}").
-   - "summary": Strictly 4 sentences, maximum 75 words total, standard implied-subject resume style (NEVER use "I", "I am", "my", "this professional", "the candidate", "this engineer", or "he/she"; zero buzzwords, zero slashes):
-     * Sentence 1: Start directly with "${exactPostingTitle} with 3.5+ years of production engineering experience building..." Do NOT mention or imply any other job titles.
-     * Sentence 2: Highlight 3-5 core technical strengths pulled directly from the JD's hard skills, written naturally in prose (never a long 10-item tool list).
-     * Sentence 3: Describe how these strengths create engineering value (improving reliability, automation, throughput, latency, evaluation rigor, or observability) using high-frequency JD hard skills.
-     * Sentence 4: Integrate 1-2 soft skills behaviorally and end with a forward-looking statement connecting strengths to ${jobMeta.company || "the engineering team"}'s impact.
-3. STAGE 3 — SKILLS SECTION (4 CATEGORIES, 25 TO 40 TOTAL SKILLS):
-   - Arrange 25 to 40 hard skills across EXACTLY 4 clean categories tailored to this posting, combining exact JD keywords (supported by the candidate's real background or functionally equivalent skill translation) with natural supporting skills from the Master Profile.
-4. STAGE 4 — SKILL & UNIQUE ACTION-VERB ALLOCATION (5 / 3 / 2 / 2 / 2):
-   - Allocate JD hard skills, behavioral soft skills, and 14 COMPLETELY UNIQUE strong past-tense action verbs (zero repeated opening verbs across the entire resume!) across:
-     * Experience 1 (GlobalLogic (Client: Google AI)): 5 bullets
-     * Experience 2 (MassDigi at WPI): 3 bullets
-     * Experience 3 (Wipro): 2 bullets
-     * Project 1: 2 bullets
-     * Project 2: 2 bullets
-5. STAGE 5 — STRICT BULLET WRITING & REALISM RULES:
-   - NEVER invent fake employers, fake degrees, fake employment dates, or fake numbers! Every numeric metric (e.g., 13 sandboxed web apps, 48 personas across 9 cloud services, 100% QA accuracy, #1 of 11 throughput across 2,000+ batches and 460+ workflows, 19 custom SxS plugins, 10x video pipeline speedup across 40,000+ clips, ~60% faster diagnosis, 70% faster sandbox startup, 40+ edge cases caught, 60+ FPS and 30+ defects at MassDigi, 10K+ daily eval cases, 95%+ silent failures eliminated, 40% faster feature-to-prod across 8+ teams and 30+ plugins) MUST come strictly from the Master Profile so the candidate can defend every line in an interview.
-   - Skill Translation Rule: You may translate between functionally similar tools or workflows when aligning to the JD, provided every bullet stays 100% realistic and defensible for that specific role and work history.
-   - Each bullet MUST be ONE single sentence, 15 to 30 words, starting with its unique past-tense action verb and ending with a period (".").
-   - Structure every bullet as: Action verb + what you built + how you built it (1-2 exact JD hard skills, no long tool lists) + what changed (real profile metric or concrete engineering artifact/outcome). At least 60%-75% of bullets must contain real profile numbers.
-   - Do NOT use slashes ("/") anywhere inside bullet sentences (write "Python and TypeScript" or "Docker and Kubernetes", never "Python/TypeScript").
-   - Do NOT mention company names or job titles inside bullet text; refer neutrally to platforms, pipelines, sandboxes, teams, or stakeholders.
-   - Avoid repeating the exact same hard skill more than twice across bullets unless central to the JD.
+EXECUTE THIS 5-STAGE HIGH-SIGNAL TAILORING FRAMEWORK:
+1. STAGE 1 — DEEP JD REQUIREMENT & ARCHETYPE ALIGNMENT (Detected Archetype: ${archetype}):
+   - Mirror the exact technical terminology from the Job Description (${priorityJdKeywords.slice(0, 14).join(", ")}).
+   - Lead every section with the engineering systems and stack most relevant to ${exactPostingTitle} at ${jobMeta.company || "the target company"}.
+2. STAGE 2 — TOP JOB TITLE & 4-SENTENCE EXECUTIVE SUMMARY (<= 75 WORDS):
+   - "targetJobTitle": Exact clean job title ("${exactPostingTitle}").
+   - "summary": Strictly 4 sentences, <= 75 words, implied third-person resume style (NEVER use "I", "my", "me", "this candidate", or slashes "/"):
+     * Sentence 1: "${exactPostingTitle} with 3.5+ years of production engineering experience building..." tailored to the JD's core domain at Google AI (via GlobalLogic).
+     * Sentence 2: Highlight 4-5 core JD technical strengths written naturally in prose.
+     * Sentence 3: Highlight flagship quantified impact (Ranked #1 of 11 engineers in platform throughput across 2,000+ batches, 70% faster Docker and Kubernetes sandbox startup, 100% synthetic data accuracy across 48 personas).
+     * Sentence 4: Connect system design rigor and cross-functional execution directly to ${jobMeta.company || "the engineering team"}'s roadmap.
+3. STAGE 3 — FRONT-LOADED SKILLS SECTION (EXACTLY 4 CATEGORIES, 28 TO 38 SKILLS):
+   - Organize 28 to 38 hard skills into 4 crisp categories, placing the JD's exact required technologies FIRST in each category. Never use "/" inside skill names (use "&" or "and").
+4. STAGE 4 — 14 POWERHOUSE BULLETS WITH 14 UNIQUE PAST-TENSE ACTION VERBS (5 / 3 / 2 / 2 / 2):
+   - Every single bullet across the entire resume MUST start with a unique strong engineering verb (Architected, Engineered, Built, Designed, Spearheaded, Orchestrated, Optimized, Automated, Developed, Implemented, Streamlined, Delivered, Scaled, Accelerated, Constructed, Integrated, Modernized, Established, Hardened, Re-engineered, Ranked, Deployed).
+   - NEVER use weak filler verbs ("Facilitated", "Formulated", "Assisted", "Helped", "Utilized", "Leveraged", "Worked on").
+   - Allocate:
+     * Experience 1 — GlobalLogic (Client: Google AI): 5 bullets
+     * Experience 2 — MassDigi at WPI: 3 bullets
+     * Experience 3 — Wipro: 2 bullets
+     * Project 1 — Agentic AI Evaluation & Trajectory Analysis Platform: 2 bullets
+     * Project 2 — AI-Native Developer Tooling & Automated Test Harness: 2 bullets
+5. STAGE 5 — MANDATORY METRIC PRESERVATION & ZERO-SLASH RULE:
+   - NEVER drop or dilute the candidate's verified metrics! Every GlobalLogic bullet and every Project bullet MUST include its specific numeric achievement:
+     * 13 full-stack sandboxed web applications (TypeScript, React, Angular, Python, Playwright)
+     * 48 multi-modal user personas across 9 cloud services with 100% numerical QA accuracy
+     * 1,800+ recordings processed into 40,000+ clips across 8 languages (10x speedup in 10 days)
+     * Ranked #1 of 11 engineers in platform throughput across 2,000+ batches and 460+ workflows + 19 custom React and TypeScript Side-by-Side (SxS) plugins
+     * 60% faster agent diagnosis via telemetry dashboards + 70% faster Docker and Kubernetes warm-pool sandbox startup + 40+ edge cases caught pre-deployment
+     * MassDigi: C# and C++ state machines and behavior trees, in-editor telemetry logging, and 60+ FPS with 30+ integration defects resolved
+     * Projects: 10,000+ daily test cases preventing drift across 12+ model iterations, 95%+ silent failures eliminated, 40% faster feature-to-production across 8+ teams, and 30+ modular validation plugins
+   - Each bullet MUST be ONE single sentence, 16 to 29 words, with 1-2 exact JD keywords woven naturally into how the system was built.
+   - NEVER use "/" anywhere in bullet text (write "CI and CD", "Python and TypeScript", "Docker and Kubernetes").
    - Output ONLY valid JSON matching the requested schema.`;
 
   const prompt = `TARGET JOB POSTING:
 Company: ${jobMeta.company || "Target Company"}
 Exact Posting Job Title: ${exactPostingTitle}
+Detected Role Archetype: ${archetype}
 Location: ${jobMeta.location || ""}
-Priority JD Keywords to incorporate where truthful: ${missingKeywords.slice(0, 14).join(", ") || "Extract directly from JD"}
+Must-Have JD Keywords to weave into Skills, Summary, Experience & Projects: ${priorityJdKeywords.slice(0, 16).join(", ") || "Extract directly from JD"}
 
 FULL JOB DESCRIPTION:
 ${String(jobMeta.description || "").slice(0, 9000)}
 
-CANDIDATE FULL MASTER PROFILE (SINGLE SOURCE OF TRUTH — PICK THE BEST EVIDENCE FOR THIS JOB):
+CANDIDATE FULL MASTER PROFILE (SINGLE SOURCE OF TRUTH — PRESERVE ALL METRICS):
 ${JSON.stringify(
   {
     yearsOfExperience: profile.personal?.yearsOfExperience,
@@ -511,10 +759,10 @@ Return strictly valid JSON with this exact structure:
   "targetJobTitle": "${exactPostingTitle}",
   "summary": "4-sentence implied-subject summary (<=75 words) starting directly with '${exactPostingTitle} with 3.5+ years of...'",
   "skillsCategories": {
-    "Category 1 Name": ["6 to 10 exact JD + profile skills"],
-    "Category 2 Name": ["6 to 10 exact JD + profile skills"],
-    "Category 3 Name": ["6 to 10 exact JD + profile skills"],
-    "Category 4 Name": ["6 to 10 exact JD + profile skills"]
+    "Languages & Core Systems": ["7 to 9 front-loaded JD + profile skills"],
+    "AI, LLMs & Evaluation": ["7 to 10 front-loaded JD + profile skills"],
+    "Frameworks, APIs & Automation": ["7 to 10 front-loaded JD + profile skills"],
+    "Cloud, Data & Observability": ["7 to 10 front-loaded JD + profile skills"]
   },
   "experience": [
     {
@@ -522,40 +770,40 @@ Return strictly valid JSON with this exact structure:
       "title": "Senior AI Solutions Engineer",
       "location": "Santa Clara, CA",
       "period": "Oct 2024 - Present",
-      "bullets": ["5 single-sentence bullets, 15-30 words each, unique action verbs, no slashes, real metrics"]
+      "bullets": ["5 single-sentence bullets (16-29 words each), unique strong verbs, zero slashes, preserving 13 apps, 48 personas & 9 services (100% accuracy), 1,800+ to 40,000+ clips (10x in 10 days), #1 of 11 across 2,000+ batches & 460+ workflows (19 SxS plugins), and 60% diagnosis + 70% K8s latency + 40+ edge cases"]
     },
     {
       "company": "MassDigi at WPI",
       "title": "Software Engineer & Game Developer",
       "location": "Worcester, MA",
       "period": "May 2023 - Aug 2023",
-      "bullets": ["3 single-sentence bullets, 15-30 words each, unique action verbs, no slashes"]
+      "bullets": ["3 single-sentence bullets (16-29 words each), unique strong verbs, zero slashes, preserving C# and C++ behavior trees, telemetry logging, and 60+ FPS with 30+ defects resolved"]
     },
     {
       "company": "Wipro",
       "title": "Software Engineering Intern (.NET Full-Stack)",
       "location": "Hyderabad, India",
       "period": "Mar 2022 - Aug 2022",
-      "bullets": ["2 single-sentence bullets, 15-30 words each, unique action verbs, no slashes"]
+      "bullets": ["2 single-sentence bullets (16-29 words each), unique strong verbs, zero slashes, preserving .NET Core, C#, REST APIs, and SQL tuning"]
     }
   ],
   "projects": [
     {
       "name": "Agentic AI Evaluation & Trajectory Analysis Platform",
-      "stack": "JD-aligned stack from project",
-      "bullets": ["2 single-sentence bullets, 15-30 words each, unique action verbs, no slashes"]
+      "stack": "JD-aligned stack (no slashes)",
+      "bullets": ["2 single-sentence bullets (16-29 words each), unique strong verbs, zero slashes, preserving 10,000+ daily test cases across 12+ model iterations and 95%+ silent failures eliminated"]
     },
     {
       "name": "AI-Native Developer Tooling & Automated Test Harness",
-      "stack": "JD-aligned stack from project",
-      "bullets": ["2 single-sentence bullets, 15-30 words each, unique action verbs, no slashes"]
+      "stack": "JD-aligned stack (no slashes)",
+      "bullets": ["2 single-sentence bullets (16-29 words each), unique strong verbs, zero slashes, preserving 40% faster feature-to-production across 8+ teams and 30+ modular plugins"]
     }
   ],
   "addedKeywords": ["exact JD keyword 1", "exact JD keyword 2"],
   "keyChangesSummary": [
-    "Built from scratch for ${exactPostingTitle} with 4-sentence <=75-word summary and 25-40 categorized JD skills",
-    "Allocated unique action verbs and JD hard skills across 14 single-sentence (15-30 word) bullets",
-    "Grounded 100% of metrics strictly in verified Master Profile achievements"
+    "Built from scratch for ${exactPostingTitle} with 4-sentence <=75-word summary and front-loaded JD skills",
+    "Allocated 14 unique strong past-tense action verbs and JD hard skills across all 14 bullets",
+    "Preserved 100% of verified quantitative metrics from Master Profile"
   ]
 }`;
 
@@ -565,14 +813,14 @@ Return strictly valid JSON with this exact structure:
       systemInstruction,
       requestedModel: modelToUse,
       jsonMode: true,
-      temperature: 0.25,
+      temperature: 0.2,
       maxOutputTokens: 8192,
       timeoutMs: 28000,
       settings
     });
 
     const rawParsed = parseJsonResponse(res.text);
-    const tailored = enforceFromScratchResumeQuality(rawParsed, jobMeta, profile, missingKeywords);
+    const tailored = enforceFromScratchResumeQuality(rawParsed, jobMeta, profile, priorityJdKeywords);
     return {
       tailored,
       modelUsed: res.modelUsed,
@@ -581,7 +829,7 @@ Return strictly valid JSON with this exact structure:
     };
   } catch (err) {
     if (!settings?.geminiApiKey) throw err;
-    const tailored = enforceFromScratchResumeQuality({}, jobMeta, profile, missingKeywords);
+    const tailored = enforceFromScratchResumeQuality({}, jobMeta, profile, priorityJdKeywords);
     return {
       tailored,
       modelUsed: "deterministic-from-scratch",

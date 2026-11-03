@@ -3000,13 +3000,30 @@
 
   function clickElementAndInner(el) {
     if (!el) return;
+    const now = Date.now();
+    const lastClickTs = Number(el.getAttribute?.("data-jobify-apply-clicked-ts") || 0);
+    if (now - lastClickTs < 3500) return;
     try {
+      el.setAttribute?.("data-jobify-apply-clicked-ts", String(now));
       el.scrollIntoView({ block: "center", behavior: "instant" });
     } catch (_) {}
+
+    const stripBlankTargetOnAnchor = (node) => {
+      const anchor = node?.tagName === "A" ? node : node?.closest?.("a");
+      if (!anchor) return;
+      const rawHref = (anchor.getAttribute("href") || "").trim();
+      if (anchor.getAttribute("target") === "_blank" && rawHref && !/^javascript:|^#/i.test(rawHref)) {
+        try {
+          anchor.removeAttribute("target");
+        } catch (_) {}
+      }
+    };
+
     const wdFilter =
       el.querySelector?.("[data-automation-id='click_filter']") ||
       el.parentElement?.querySelector?.("[data-automation-id='click_filter']");
     if (wdFilter && isElementVisible(wdFilter)) {
+      stripBlankTargetOnAnchor(wdFilter);
       dispatchRealClick(wdFilter);
       return;
     }
@@ -3015,8 +3032,14 @@
         ? el.querySelector?.("a, button, [role='button']")
         : null;
     if (innerAction && isElementVisible(innerAction)) {
+      try {
+        innerAction.setAttribute?.("data-jobify-apply-clicked-ts", String(now));
+      } catch (_) {}
+      stripBlankTargetOnAnchor(innerAction);
       dispatchRealClick(innerAction);
+      return;
     }
+    stripBlankTargetOnAnchor(el);
     dispatchRealClick(el);
   }
 
@@ -4706,6 +4729,7 @@
     // 1. Run clean autofill pass first (catches newly-errored open questions, required custom controls & dropdowns without touching optional fields)
     const baseFill = await runFrameAutofill({
       ...options,
+      skipApplyGate: true,
       onlyNeededCleanMode: true,
       fillOpenEndedWithAI: true,
       includeAllUnresolvedOpenEnded: false

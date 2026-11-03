@@ -796,6 +796,7 @@ async function executeAdapterAcrossTab(tabId, method, args = [], opts = {}) {
   };
 
   if (opts.topFrameFirst) {
+    const startTs = Date.now();
     const topRes = await withTimeout(
       chrome.scripting.executeScript({
         target: { tabId, frameIds: [0] },
@@ -805,8 +806,8 @@ async function executeAdapterAcrossTab(tabId, method, args = [], opts = {}) {
       Math.min(timeoutMs, 4800),
       null
     );
-    if (topRes?.[0]?.result?.clicked) {
-      return topRes;
+    if (topRes?.[0]?.result?.clicked || opts.topFrameOnly || findSpawnedChildTab(tabId, startTs)) {
+      return topRes || [];
     }
   }
 
@@ -1035,15 +1036,28 @@ async function waitForPostSubmitOutcome(tabId, preSubmitScreen, jobMeta, hadHtml
 }
 
 function findSpawnedChildTab(openerTabId, sinceMs) {
+  const matched = [];
   for (let i = recentSpawnedTabs.length - 1; i >= 0; i--) {
     const item = recentSpawnedTabs[i];
     if (item.createdAt >= sinceMs - 300 && item.id !== openerTabId) {
       if (!item.openerTabId || item.openerTabId === openerTabId) {
-        return item;
+        matched.push(item);
       }
     }
   }
-  return null;
+  if (matched.length === 0) return null;
+  const primary = matched[0];
+  if (matched.length > 1) {
+    for (let j = 1; j < matched.length; j++) {
+      const dup = matched[j];
+      if (dup.id && dup.id !== primary.id) {
+        chrome.tabs.remove(dup.id).catch(() => {});
+        const idx = recentSpawnedTabs.findIndex((t) => t.id === dup.id);
+        if (idx >= 0) recentSpawnedTabs.splice(idx, 1);
+      }
+    }
+  }
+  return primary;
 }
 
 async function notifyOpenerTabHandoff(prevTabId, newTabId) {
@@ -1086,16 +1100,18 @@ async function executeStep2ApplyAndTransition(initialTabId, jobMeta) {
     {};
   let candidateHref = bestApply?.windowOpenUrl || bestApply?.href || null;
   let navigatedFallback = false;
+  let switchedToChildTab = false;
   let modalClicksInTransition = bestApply?.clickedModalChoice ? 1 : 0;
   let lastScreen = null;
 
   for (let iter = 0; iter < 16; iter++) {
     if (autoApplyAbortFlag) break;
 
-    const childTab = findSpawnedChildTab(tabId, clickTs);
-    if (childTab?.id) {
+    const childTab = findSpawnedChildTab(initialTabId, clickTs);
+    if (childTab?.id && childTab.id !== tabId) {
       const prevTabId = tabId;
       tabId = childTab.id;
+      switchedToChildTab = true;
       await notifyOpenerTabHandoff(prevTabId, tabId);
       await waitForTabComplete(tabId, 10000);
       await ensureTabScripts(tabId);
@@ -1151,6 +1167,8 @@ async function executeStep2ApplyAndTransition(initialTabId, jobMeta) {
     // If Chrome popup blocker blocked <a target="_blank"> or window.open(url) after Step 1 tailoring expired user activation, navigate directly!
     if (
       !navigatedFallback &&
+      !switchedToChildTab &&
+      !findSpawnedChildTab(initialTabId, clickTs) &&
       ((iter >= 1 && modalClicksInTransition >= 1) || (iter >= 2 && !screen.hasApplyChoiceModal))
     ) {
       if (!candidateHref) {
@@ -1320,6 +1338,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
     // Step 2: Click "Apply Now" / Workday "Apply" -> "Apply Manually" modal if on the job posting gate
     const preApplyCheck = await waitForActionableJobScreen(tabId, jobMeta, 4000);
     let applyGateClicks = 0;
+    let lastApplyGateUrl = "";
     if (
       preApplyCheck.hasApplyChoiceModal ||
       (preApplyCheck.hasApplyButton &&
@@ -1328,6 +1347,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         !preApplyCheck.otpChallenge?.detected)
     ) {
       applyGateClicks++;
+      lastApplyGateUrl = (preApplyCheck.url || "").split("#")[0];
       await broadcastAutoApplyProgress(tabId, {
         stage: "clicking_apply",
         stepLabel: preApplyCheck.hasApplyChoiceModal
@@ -1428,8 +1448,17 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
       }
 
       // Check A2: Open "Start Your Application" Choice Modal ("Apply Manually") OR Secondary Tab Apply Gate!
-      if ((screen.hasApplyChoiceModal || (screen.hasApplyButton && !screen.hasCandidateForm && (screen.inventory?.totalFields || 0) === 0)) && applyGateClicks < 3) {
+      const cleanScreenUrl = (screen.url || "").split("#")[0];
+      if (
+        (screen.hasApplyChoiceModal ||
+          (screen.hasApplyButton &&
+            !screen.hasCandidateForm &&
+            (screen.inventory?.totalFields || 0) === 0 &&
+            cleanScreenUrl !== lastApplyGateUrl)) &&
+        applyGateClicks < 3
+      ) {
         applyGateClicks++;
+        lastApplyGateUrl = cleanScreenUrl;
         await broadcastAutoApplyProgress(tabId, {
           stage: "clicking_apply",
           stepLabel: screen.hasApplyChoiceModal
