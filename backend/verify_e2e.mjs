@@ -1203,6 +1203,37 @@ async function main() {
           await new Promise(r => setTimeout(r, 60));
           rendered[v] = document.getElementById("view-container").innerText.trim().length;
         }
+
+        // Verify Resume & Cover Studios open clean (zero prefilled demo text)
+        document.querySelector('#main-nav [data-view="resume"]').click();
+        await new Promise(r => setTimeout(r, 40));
+        const resumeCompEmpty = (document.getElementById("rs-comp")?.value || "") === "";
+        document.querySelector('#main-nav [data-view="cover"]').click();
+        await new Promise(r => setTimeout(r, 40));
+        const coverCompEmpty = (document.getElementById("cl-comp")?.value || "") === "";
+
+        // Explicitly audit Live Jobs view (#jobs): non-empty multi-platform cards + zero prefiltered selections + interactive filter & reset
+        document.querySelector('#main-nav [data-view="jobs"]').click();
+        let hubLiveJobCards = 0;
+        for (let i = 0; i < 30; i++) {
+          await new Promise(r => setTimeout(r, 100));
+          hubLiveJobCards = document.querySelectorAll('[data-hub-job-card="true"]').length;
+          if (hubLiveJobCards >= 30) break;
+        }
+        const hubInitialActiveFilterPills = document.querySelectorAll("#jf-active-chips .active-filter-pill").length;
+        const hubResetHiddenInitially = getComputedStyle(document.getElementById("jf-reset")).display === "none";
+
+        const jfRec = document.getElementById("jf-recency");
+        jfRec.value = "2";
+        jfRec.dispatchEvent(new Event("change"));
+        await new Promise(r => setTimeout(r, 250));
+        const hub2hJobCards = document.querySelectorAll('[data-hub-job-card="true"]').length;
+        const hubActivePillsWhenFiltered = document.querySelectorAll("#jf-active-chips .active-filter-pill").length;
+        document.getElementById("jf-reset").click();
+        await new Promise(r => setTimeout(r, 250));
+        const hubResetJobCards = document.querySelectorAll('[data-hub-job-card="true"]').length;
+        const hubActivePillsAfterReset = document.querySelectorAll("#jf-active-chips .active-filter-pill").length;
+
         // Check Tracker filter controls
         document.querySelector('#main-nav [data-view="tracker"]').click();
         await new Promise(r => setTimeout(r, 50));
@@ -1233,6 +1264,16 @@ async function main() {
 
         return {
           rendered,
+          zeroPrefilledStudios: resumeCompEmpty && coverCompEmpty,
+          hubJobsAudit: {
+            hubLiveJobCards,
+            hubInitialActiveFilterPills,
+            hubResetHiddenInitially,
+            hub2hJobCards,
+            hubActivePillsWhenFiltered,
+            hubResetJobCards,
+            hubActivePillsAfterReset
+          },
           hasTrackerFilters,
           autopilotMode,
           vaultAutoSubmitChecked,
@@ -1240,9 +1281,17 @@ async function main() {
           clPdfOk: Boolean(clPdf?.ok && clPdf?.pdfBase64?.length > 200)
         };
       })()
-    `, 30000);
+    `, 35000);
     if (
       dashCdp.exceptions.length > 0 ||
+      !dashAudit.zeroPrefilledStudios ||
+      !(dashAudit.hubJobsAudit?.hubLiveJobCards >= 30) ||
+      dashAudit.hubJobsAudit?.hubInitialActiveFilterPills !== 0 ||
+      !dashAudit.hubJobsAudit?.hubResetHiddenInitially ||
+      !(dashAudit.hubJobsAudit?.hub2hJobCards >= 4 && dashAudit.hubJobsAudit.hub2hJobCards < dashAudit.hubJobsAudit.hubLiveJobCards) ||
+      dashAudit.hubJobsAudit?.hubActivePillsWhenFiltered !== 1 ||
+      dashAudit.hubJobsAudit?.hubResetJobCards !== dashAudit.hubJobsAudit?.hubLiveJobCards ||
+      dashAudit.hubJobsAudit?.hubActivePillsAfterReset !== 0 ||
       !dashAudit.hasTrackerFilters ||
       dashAudit.autopilotMode !== "full_auto" ||
       !dashAudit.vaultAutoSubmitChecked ||
@@ -1325,16 +1374,19 @@ async function main() {
             document.querySelector(".web-nav-btn[data-web-view='inbox']")
           ),
           hasAllNewFilters: Boolean(
+            document.getElementById("filter-ats") &&
             document.getElementById("filter-recency") &&
             document.getElementById("filter-sponsorship") &&
             document.getElementById("filter-role-type") &&
             document.getElementById("filter-experience") &&
             document.getElementById("filter-work-mode")
           ),
+          initialActiveFilterPills: document.querySelectorAll("#active-filter-chips .active-filter-pill").length,
+          resetBtnHiddenOnLoad: getComputedStyle(document.getElementById("btn-reset-filters")).display === "none",
           hasOrionDrawer: Boolean(document.getElementById("orion-copilot-drawer") && document.getElementById("orion-chat-input"))
         })`)
         .catch(() => null);
-      if (webAppAudit?.extensionConnected && webAppAudit?.renderedJobCards >= 20 && webAppAudit?.syncedAppliedCount >= 6) {
+      if (webAppAudit?.extensionConnected && webAppAudit?.renderedJobCards >= 30 && webAppAudit?.syncedAppliedCount >= 6) {
         break;
       }
     }
@@ -1475,6 +1527,8 @@ async function main() {
       !webAppAudit.floatingCopilotSuppressedOnWebApp ||
       !webAppAudit.hasSidebarViews ||
       !webAppAudit.hasAllNewFilters ||
+      webAppAudit.initialActiveFilterPills !== 0 ||
+      !webAppAudit.resetBtnHiddenOnLoad ||
       !webAppAudit.hasOrionDrawer ||
       !Object.values(autonomousFlowAudit?.platformsPresent || {}).every(Boolean) ||
       !(autonomousFlowAudit?.filterCounts?.count2h >= 4 && autonomousFlowAudit.filterCounts.count2h < autonomousFlowAudit.filterCounts.count12h) ||

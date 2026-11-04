@@ -141,7 +141,7 @@
   },
   {
     "name": "Apex Systems",
-    "url": "https://itcareers.apexsystems.com/en-US/search?keywords=&location=",
+    "url": "https://itcareers.apexsystems.com/en-US/search",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -204,7 +204,7 @@
   },
   {
     "name": "Aerotek",
-    "url": "https://www.aerotek.com/jobs/en-US/search?keywords=&enableMultiLocation=true&location=&orderby=Relevance",
+    "url": "https://www.aerotek.com/jobs/en-US/search",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -253,7 +253,7 @@
   },
   {
     "name": "CRG",
-    "url": "https://www.jobs.net/jobs/crg/en-us/search/?keyword=&location=",
+    "url": "https://www.jobs.net/jobs/crg/en-us/search/",
     "portalType": "Jobs.net",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -344,7 +344,7 @@
   },
   {
     "name": "HORIZONTAL INTEGRATION",
-    "url": "https://www.horizontaltalent.com/job-board#sort=%40postedz32xdate%20descending&jobid=39769",
+    "url": "https://www.horizontaltalent.com/job-board",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -365,7 +365,7 @@
   },
   {
     "name": "The Execu-search",
-    "url": "https://careers.execu-search.com/jobs?keyword=Cloud&http_referrer=https:%2F%2Fcareers.execu-search.com%2Fjobs%3Fkeyword%3D&http_referrer=&location=&utm_source=&utm_medium=&category=",
+    "url": "https://careers.execu-search.com/jobs",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -393,14 +393,14 @@
   },
   {
     "name": "GetHired",
-    "url": "https://www.gettinghired.com/en/jobs?&keyword=DevOps&page=1",
+    "url": "https://www.gettinghired.com/en/jobs",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
   },
   {
     "name": "Allegispartners",
-    "url": "https://careers-allegispartners.icims.com/jobs/search?ss=1&searchKeyword=DevOps+Engineer",
+    "url": "https://careers-allegispartners.icims.com/jobs/search?ss=1",
     "portalType": "iCIMS",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -449,7 +449,7 @@
   },
   {
     "name": "Teksystems",
-    "url": "https://www.teksystems.com/it-jobs/search?keywords=DevOps",
+    "url": "https://www.teksystems.com/en/it-jobs/search",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -470,14 +470,14 @@
   },
   {
     "name": "Kforce staffing",
-    "url": "https://www.kforce.com/find-work/search-jobs/#/?t=DevOps%20II&l=%5B%5D",
+    "url": "https://www.kforce.com/find-work/search-jobs/",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
   },
   {
     "name": "Cprime",
-    "url": "https://www.cprime.com/technology/devops/",
+    "url": "https://www.cprime.com/careers/",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -526,7 +526,7 @@
   },
   {
     "name": "Eliassen Group",
-    "url": "https://careers.eliassen.com/en-US/search?keywords=DevOps&location=",
+    "url": "https://careers.eliassen.com/en-US/search",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -638,7 +638,7 @@
   },
   {
     "name": "Envision",
-    "url": "https://recruiting.ultipro.com/LEA1007LPAQ/JobBoard/ba394e2a-343c-42ba-9d2a-33d78b79790c/?q=&o=postedDateDesc",
+    "url": "https://recruiting.ultipro.com/LEA1007LPAQ/JobBoard/ba394e2a-343c-42ba-9d2a-33d78b79790c/",
     "portalType": "UltiPro",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -771,7 +771,7 @@
   },
   {
     "name": "ATR Internationl",
-    "url": "https://www.atrinternational.com/category/it-jobs/",
+    "url": "https://www.atrinternational.com/jobs/",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -785,7 +785,7 @@
   },
   {
     "name": "Andimo",
-    "url": "https://www.andiamogo.com/job/search?category_id=5&category_name=Database",
+    "url": "https://www.andiamogo.com/job/search",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -876,14 +876,14 @@
   },
   {
     "name": "Flex Jobs",
-    "url": "https://www.flexjobs.com/search?search=devops",
+    "url": "https://www.flexjobs.com/search",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
   },
   {
     "name": "Jsfirm",
-    "url": "https://www.jsfirm.com/AllCategories/devops+/Charlotte,+North+Carolina/searchquickjobs",
+    "url": "https://www.jsfirm.com/searchjobs",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true

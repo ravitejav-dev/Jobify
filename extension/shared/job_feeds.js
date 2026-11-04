@@ -1,4 +1,5 @@
-// Multi-Platform Job Aggregator & Personalized Recommendation Engine (Workday, LinkedIn, Dice, Greenhouse, Ashby, Lever, Microsoft, Indeed, BuiltIn + 128 Staffing Agencies Sheet)
+// Multi-Platform Job Aggregator & Personalized Recommendation Engine
+// Pulls live roles across Workday, LinkedIn, Dice, Greenhouse, Ashby, Lever, SmartRecruiters, Microsoft, Indeed, BuiltIn + 128 Staffing Agencies
 import { evaluateJobMatch } from "./ats_analyzer.js";
 
 export const STAFFING_AGENCIES_SHEET_URL = "https://docs.google.com/spreadsheets/d/104UdCGR4sS9GGAH7jUvOzND2fnVgNa_SeEfz5G3BqYc/edit";
@@ -146,7 +147,7 @@ export const STAFFING_AGENCIES_DIRECTORY = [
   },
   {
     "name": "Apex Systems",
-    "url": "https://itcareers.apexsystems.com/en-US/search?keywords=&location=",
+    "url": "https://itcareers.apexsystems.com/en-US/search",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -209,7 +210,7 @@ export const STAFFING_AGENCIES_DIRECTORY = [
   },
   {
     "name": "Aerotek",
-    "url": "https://www.aerotek.com/jobs/en-US/search?keywords=&enableMultiLocation=true&location=&orderby=Relevance",
+    "url": "https://www.aerotek.com/jobs/en-US/search",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -258,7 +259,7 @@ export const STAFFING_AGENCIES_DIRECTORY = [
   },
   {
     "name": "CRG",
-    "url": "https://www.jobs.net/jobs/crg/en-us/search/?keyword=&location=",
+    "url": "https://www.jobs.net/jobs/crg/en-us/search/",
     "portalType": "Jobs.net",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -349,7 +350,7 @@ export const STAFFING_AGENCIES_DIRECTORY = [
   },
   {
     "name": "HORIZONTAL INTEGRATION",
-    "url": "https://www.horizontaltalent.com/job-board#sort=%40postedz32xdate%20descending&jobid=39769",
+    "url": "https://www.horizontaltalent.com/job-board",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -370,7 +371,7 @@ export const STAFFING_AGENCIES_DIRECTORY = [
   },
   {
     "name": "The Execu-search",
-    "url": "https://careers.execu-search.com/jobs?keyword=Cloud&http_referrer=https:%2F%2Fcareers.execu-search.com%2Fjobs%3Fkeyword%3D&http_referrer=&location=&utm_source=&utm_medium=&category=",
+    "url": "https://careers.execu-search.com/jobs",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -398,14 +399,14 @@ export const STAFFING_AGENCIES_DIRECTORY = [
   },
   {
     "name": "GetHired",
-    "url": "https://www.gettinghired.com/en/jobs?&keyword=DevOps&page=1",
+    "url": "https://www.gettinghired.com/en/jobs",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
   },
   {
     "name": "Allegispartners",
-    "url": "https://careers-allegispartners.icims.com/jobs/search?ss=1&searchKeyword=DevOps+Engineer",
+    "url": "https://careers-allegispartners.icims.com/jobs/search?ss=1",
     "portalType": "iCIMS",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -454,7 +455,7 @@ export const STAFFING_AGENCIES_DIRECTORY = [
   },
   {
     "name": "Teksystems",
-    "url": "https://www.teksystems.com/it-jobs/search?keywords=DevOps",
+    "url": "https://www.teksystems.com/en/it-jobs/search",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -475,14 +476,14 @@ export const STAFFING_AGENCIES_DIRECTORY = [
   },
   {
     "name": "Kforce staffing",
-    "url": "https://www.kforce.com/find-work/search-jobs/#/?t=DevOps%20II&l=%5B%5D",
+    "url": "https://www.kforce.com/find-work/search-jobs/",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
   },
   {
     "name": "Cprime",
-    "url": "https://www.cprime.com/technology/devops/",
+    "url": "https://www.cprime.com/careers/",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -531,7 +532,7 @@ export const STAFFING_AGENCIES_DIRECTORY = [
   },
   {
     "name": "Eliassen Group",
-    "url": "https://careers.eliassen.com/en-US/search?keywords=DevOps&location=",
+    "url": "https://careers.eliassen.com/en-US/search",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -643,7 +644,7 @@ export const STAFFING_AGENCIES_DIRECTORY = [
   },
   {
     "name": "Envision",
-    "url": "https://recruiting.ultipro.com/LEA1007LPAQ/JobBoard/ba394e2a-343c-42ba-9d2a-33d78b79790c/?q=&o=postedDateDesc",
+    "url": "https://recruiting.ultipro.com/LEA1007LPAQ/JobBoard/ba394e2a-343c-42ba-9d2a-33d78b79790c/",
     "portalType": "UltiPro",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -776,7 +777,7 @@ export const STAFFING_AGENCIES_DIRECTORY = [
   },
   {
     "name": "ATR Internationl",
-    "url": "https://www.atrinternational.com/category/it-jobs/",
+    "url": "https://www.atrinternational.com/jobs/",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -790,7 +791,7 @@ export const STAFFING_AGENCIES_DIRECTORY = [
   },
   {
     "name": "Andimo",
-    "url": "https://www.andiamogo.com/job/search?category_id=5&category_name=Database",
+    "url": "https://www.andiamogo.com/job/search",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -881,14 +882,14 @@ export const STAFFING_AGENCIES_DIRECTORY = [
   },
   {
     "name": "Flex Jobs",
-    "url": "https://www.flexjobs.com/search?search=devops",
+    "url": "https://www.flexjobs.com/search",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
   },
   {
     "name": "Jsfirm",
-    "url": "https://www.jsfirm.com/AllCategories/devops+/Charlotte,+North+Carolina/searchquickjobs",
+    "url": "https://www.jsfirm.com/searchjobs",
     "portalType": "Direct Staffing Portal",
     "h1bSponsor": true,
     "supportsW2C2C": true
@@ -905,32 +906,36 @@ export const STAFFING_AGENCIES_DIRECTORY = [
 export const CURATED_BOARDS = [
   { company: "Anthropic", ats: "greenhouse", slug: "anthropic", category: "Frontier AI Labs", experienceRange: "3-4", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & Cap Sponsor" },
   { company: "OpenAI", ats: "ashby", slug: "openai", category: "Frontier AI Labs", experienceRange: "3-4", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & Cap Sponsor" },
-  { company: "xAI", ats: "greenhouse", slug: "xai", category: "Frontier AI Labs", experienceRange: "2-3", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & Cap Sponsor" },
   { company: "Perplexity", ats: "ashby", slug: "perplexity", category: "Frontier AI Labs", experienceRange: "2-3", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & Cap Sponsor" },
-  { company: "Cohere", ats: "ashby", slug: "cohere", category: "Frontier AI Labs", experienceRange: "2-3", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "F-1 STEM OPT & E-Verify" },
   { company: "Scale AI", ats: "greenhouse", slug: "scaleai", category: "AI & Eval Infrastructure", experienceRange: "2-3", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & Cap Sponsor" },
   { company: "Together AI", ats: "greenhouse", slug: "togetherai", category: "AI & Eval Infrastructure", experienceRange: "3-4", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & Cap Sponsor" },
-  { company: "Harvey", ats: "ashby", slug: "harvey", category: "AI & Data Unicorns", experienceRange: "2-3", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & Cap Sponsor" },
   { company: "Databricks", ats: "greenhouse", slug: "databricks", category: "AI & Data Unicorns", experienceRange: "3-4", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & Cap Sponsor" },
   { company: "Stripe", ats: "greenhouse", slug: "stripe", category: "Cloud & FinTech", experienceRange: "2-3", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & Cap Sponsor" },
-  { company: "Figma", ats: "greenhouse", slug: "figma", category: "Cloud & FinTech", experienceRange: "3-4", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & Cap Sponsor" }
+  { company: "Vercel", ats: "greenhouse", slug: "vercel", category: "Cloud & FinTech", experienceRange: "2-3", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & Cap Sponsor" },
+  { company: "Palantir", ats: "lever", slug: "palantir", category: "Enterprise & SaaS", experienceRange: "2-3", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & Cap Sponsor" },
+  { company: "Zoox", ats: "lever", slug: "zoox", category: "AI & Data Unicorns", experienceRange: "3-4", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & STEM OPT" },
+  { company: "Shield AI", ats: "lever", slug: "shieldai", category: "AI & Data Unicorns", experienceRange: "2-3", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B & US Work Auth" },
+  { company: "ServiceNow", ats: "smartrecruiters", slug: "ServiceNow", category: "Enterprise & SaaS", experienceRange: "3-4", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & Cap Sponsor" },
+  { company: "NVIDIA", ats: "workday", cxsUrl: "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs", siteBase: "https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite", category: "Big Tech & Cloud", experienceRange: "3-4", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & Cap Sponsor" },
+  { company: "Salesforce", ats: "workday", cxsUrl: "https://salesforce.wd12.myworkdayjobs.com/wday/cxs/salesforce/External_Career_Site/jobs", siteBase: "https://salesforce.wd12.myworkdayjobs.com/en-US/External_Career_Site", category: "Enterprise & SaaS", experienceRange: "2-3", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & STEM OPT" },
+  { company: "Mastercard", ats: "workday", cxsUrl: "https://mastercard.wd1.myworkdayjobs.com/wday/cxs/mastercard/CorporateCareers/jobs", siteBase: "https://mastercard.wd1.myworkdayjobs.com/en-US/CorporateCareers", category: "Cloud & FinTech", experienceRange: "2-3", roleType: "Full-Time", h1bSponsor: true, sponsorshipType: "H-1B Transfer & Cap Sponsor" }
 ];
 
-// Multi-Platform Curated & Live Job Pool (Workday, LinkedIn, Dice, Microsoft, Indeed, BuiltIn, Wellfound, SmartRecruiters, iCIMS + Top Staffing Agencies from Sheet)
 export const MULTI_PLATFORM_LIVE_JOBS = [
   {
     id: "wd_nvidia_ai_agents_01",
     company: "NVIDIA",
     title: "Principal AI Agents & Evaluation Engineer",
-    location: "Santa Clara, CA • Hybrid ($195K - $245K)",
+    location: "Santa Clara, CA",
+    compensation: "$195K - $245K",
     ats: "Workday",
-    category: "Workday Enterprise",
+    category: "Big Tech & Cloud",
     url: "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite",
     postedHoursAgo: 1,
     postedLabel: "Posted 1h ago",
     h1bSponsor: true,
     sponsorshipType: "H-1B Transfer & Cap Sponsor",
-    visaTags: ["H-1B Sponsor", "STEM OPT / E-Verify", "Green Card Day-1"],
+    visaTags: ["H-1B Sponsor", "STEM OPT / E-Verify"],
     roleType: "Full-Time",
     experienceRange: "3-4",
     experienceLabel: "3–4 Yrs Exp",
@@ -941,9 +946,10 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
     id: "wd_salesforce_agentforce_02",
     company: "Salesforce",
     title: "Software Engineer, Agentforce AI Runtime",
-    location: "San Francisco, CA • Hybrid ($175K - $220K)",
+    location: "San Francisco, CA",
+    compensation: "$175K - $220K",
     ats: "Workday",
-    category: "Workday Enterprise",
+    category: "Enterprise & SaaS",
     url: "https://salesforce.wd12.myworkdayjobs.com/External_Career_Site",
     postedHoursAgo: 2,
     postedLabel: "Posted 2h ago",
@@ -960,9 +966,10 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
     id: "wd_servicenow_genai_03",
     company: "ServiceNow",
     title: "Senior AI & LLM Platform Software Engineer",
-    location: "Santa Clara, CA • Hybrid ($180K - $225K)",
+    location: "Santa Clara, CA",
+    compensation: "$180K - $225K",
     ats: "Workday",
-    category: "Workday Enterprise",
+    category: "Enterprise & SaaS",
     url: "https://servicenow.wd1.myworkdayjobs.com/Careers",
     postedHoursAgo: 5,
     postedLabel: "Posted 5h ago",
@@ -979,9 +986,10 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
     id: "wd_adobe_firefly_04",
     company: "Adobe",
     title: "Machine Learning & Generative AI Engineer (Firefly)",
-    location: "San Jose, CA • Hybrid ($170K - $215K)",
+    location: "San Jose, CA",
+    compensation: "$170K - $215K",
     ats: "Workday",
-    category: "Workday Enterprise",
+    category: "Enterprise & SaaS",
     url: "https://adobe.wd5.myworkdayjobs.com/external_experienced",
     postedHoursAgo: 7,
     postedLabel: "Posted 7h ago",
@@ -998,10 +1006,11 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
     id: "wd_cisco_ai_cloud_05",
     company: "Cisco",
     title: "Software Engineer II — AI Cloud & Distributed Telemetry",
-    location: "San Jose, CA / Remote ($158K - $192K)",
+    location: "San Jose, CA / Remote",
+    compensation: "$158K - $192K",
     ats: "Workday",
-    category: "Workday Enterprise",
-    url: "https://jobs.cisco.com/jobs/SearchJobs/AI%20Engineer",
+    category: "Enterprise & SaaS",
+    url: "https://jobs.cisco.com/jobs/SearchJobs/",
     postedHoursAgo: 11,
     postedLabel: "Posted 11h ago",
     h1bSponsor: true,
@@ -1017,15 +1026,16 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
     id: "li_google_ai_eval_01",
     company: "Google",
     title: "Software Engineer III, AI Agents & Evaluation Infrastructure",
-    location: "Mountain View, CA • Hybrid ($188K - $242K)",
+    location: "Mountain View, CA",
+    compensation: "$188K - $242K",
     ats: "LinkedIn",
-    category: "LinkedIn & Big Tech",
-    url: "https://www.linkedin.com/jobs/search/?keywords=Google%20AI%20Software%20Engineer",
+    category: "Big Tech & Cloud",
+    url: "https://www.linkedin.com/jobs/",
     postedHoursAgo: 1,
     postedLabel: "Posted 1h ago",
     h1bSponsor: true,
     sponsorshipType: "H-1B Transfer & Cap Sponsor",
-    visaTags: ["H-1B Sponsor", "STEM OPT / E-Verify", "Green Card Day-1"],
+    visaTags: ["H-1B Sponsor", "STEM OPT / E-Verify"],
     roleType: "Full-Time",
     experienceRange: "2-3",
     experienceLabel: "2–3 Yrs Exp",
@@ -1036,10 +1046,11 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
     id: "li_meta_genai_02",
     company: "Meta",
     title: "Software Engineer, Generative AI & Llama Agents",
-    location: "Menlo Park, CA / Sunnyvale, CA ($192K - $250K)",
+    location: "Menlo Park, CA",
+    compensation: "$192K - $250K",
     ats: "LinkedIn",
-    category: "LinkedIn & Big Tech",
-    url: "https://www.linkedin.com/jobs/search/?keywords=Meta%20Generative%20AI%20Engineer",
+    category: "Big Tech & Cloud",
+    url: "https://www.linkedin.com/jobs/",
     postedHoursAgo: 3,
     postedLabel: "Posted 3h ago",
     h1bSponsor: true,
@@ -1055,10 +1066,11 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
     id: "li_amazon_bedrock_03",
     company: "Amazon Web Services (AWS)",
     title: "Software Development Engineer II — Bedrock Agentic AI",
-    location: "Seattle, WA / Santa Clara, CA ($175K - $228K)",
+    location: "Seattle, WA",
+    compensation: "$175K - $228K",
     ats: "LinkedIn",
-    category: "LinkedIn & Big Tech",
-    url: "https://www.linkedin.com/jobs/search/?keywords=AWS%20Bedrock%20AI%20Engineer",
+    category: "Big Tech & Cloud",
+    url: "https://www.linkedin.com/jobs/",
     postedHoursAgo: 6,
     postedLabel: "Posted 6h ago",
     h1bSponsor: true,
@@ -1071,15 +1083,36 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
     isStaffingAgency: false
   },
   {
-    id: "li_apple_aiml_04",
-    company: "Apple",
-    title: "AI/ML Full-Stack & Evaluation Platform Engineer",
-    location: "Sunnyvale, CA / Cupertino, CA ($185K - $235K)",
+    id: "li_newgrad_linkedin_04",
+    company: "LinkedIn",
+    title: "Associate Software Engineer — AI & Cloud Platform",
+    location: "Sunnyvale, CA",
+    compensation: "$148K - $182K",
     ats: "LinkedIn",
-    category: "LinkedIn & Big Tech",
-    url: "https://www.linkedin.com/jobs/search/?keywords=Apple%20AI%20ML%20Engineer%20Sunnyvale",
-    postedHoursAgo: 10,
-    postedLabel: "Posted 10h ago",
+    category: "Big Tech & Cloud",
+    url: "https://www.linkedin.com/jobs/",
+    postedHoursAgo: 18,
+    postedLabel: "Posted 18h ago",
+    h1bSponsor: true,
+    sponsorshipType: "F-1 STEM OPT & H-1B Sponsor",
+    visaTags: ["H-1B Sponsor", "F-1 OPT / STEM OPT"],
+    roleType: "Full-Time",
+    experienceRange: "0-1",
+    experienceLabel: "0–1 Yrs Exp",
+    workMode: "Hybrid",
+    isStaffingAgency: false
+  },
+  {
+    id: "ms_copilot_runtime_01",
+    company: "Microsoft",
+    title: "Senior AI Agents & Copilot Runtime Engineer",
+    location: "Redmond, WA / Mountain View, CA",
+    compensation: "$182K - $238K",
+    ats: "Microsoft Careers",
+    category: "Big Tech & Cloud",
+    url: "https://jobs.careers.microsoft.com/global/en/search",
+    postedHoursAgo: 2,
+    postedLabel: "Posted 2h ago",
     h1bSponsor: true,
     sponsorshipType: "H-1B Transfer & Cap Sponsor",
     visaTags: ["H-1B Sponsor", "STEM OPT / E-Verify"],
@@ -1090,37 +1123,19 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
     isStaffingAgency: false
   },
   {
-    id: "ms_copilot_runtime_01",
-    company: "Microsoft",
-    title: "Senior AI Agents & Copilot Runtime Engineer",
-    location: "Redmond, WA / Mountain View, CA • Hybrid ($182K - $238K)",
-    ats: "Microsoft Careers",
-    category: "LinkedIn & Big Tech",
-    url: "https://jobs.careers.microsoft.com/global/en/search?q=AI%20Agents%20Engineer",
-    postedHoursAgo: 2,
-    postedLabel: "Posted 2h ago",
-    h1bSponsor: true,
-    sponsorshipType: "H-1B Transfer & Cap Sponsor",
-    visaTags: ["H-1B Sponsor", "STEM OPT / E-Verify", "Google SSO Ready"],
-    roleType: "Full-Time",
-    experienceRange: "3-4",
-    experienceLabel: "3–4 Yrs Exp",
-    workMode: "Hybrid",
-    isStaffingAgency: false
-  },
-  {
     id: "dice_ai_agent_w2_01",
     company: "Dice • FinTech AI Enterprise",
-    title: "Generative AI & LangGraph Agent Engineer (W2 / C2C / H-1B Transfer)",
-    location: "Remote (US) • $90 - $115/hr ($195K/yr)",
+    title: "Generative AI & LangGraph Agent Engineer (W2 / C2C / H-1B)",
+    location: "Remote (US)",
+    compensation: "$90 - $115/hr",
     ats: "Dice",
-    category: "Dice & Contract/W2/C2C",
-    url: "https://www.dice.com/jobs?q=Generative+AI+Engineer&countryCode=US",
+    category: "Dice Tech Marketplace",
+    url: "https://www.dice.com/jobs",
     postedHoursAgo: 1,
     postedLabel: "Posted 1h ago",
     h1bSponsor: true,
     sponsorshipType: "W2 / C2C & H-1B Sponsor",
-    visaTags: ["H-1B Sponsor", "W2 / C2C", "STEM OPT Friendly"],
+    visaTags: ["H-1B Sponsor", "W2 / C2C", "STEM OPT"],
     roleType: "Contract / W2",
     experienceRange: "2-3",
     experienceLabel: "2–3 Yrs Exp",
@@ -1131,15 +1146,16 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
     id: "dice_fullstack_python_react_02",
     company: "Dice • Cloud AI Platform",
     title: "Full-Stack AI Engineer (Python, FastAPI, React, TypeScript)",
-    location: "Sunnyvale, CA / Remote • $170K - $205K",
+    location: "Sunnyvale, CA / Remote",
+    compensation: "$170K - $205K",
     ats: "Dice",
-    category: "Dice & Contract/W2/C2C",
-    url: "https://www.dice.com/jobs?q=Full+Stack+Python+React+AI+Engineer&countryCode=US",
+    category: "Dice Tech Marketplace",
+    url: "https://www.dice.com/jobs",
     postedHoursAgo: 4,
     postedLabel: "Posted 4h ago",
     h1bSponsor: true,
-    sponsorshipType: "W2 / C2C & H-1B Sponsor",
-    visaTags: ["H-1B Sponsor", "Full-Time or C2C", "STEM OPT"],
+    sponsorshipType: "H-1B Transfer & Cap Sponsor",
+    visaTags: ["H-1B Sponsor", "STEM OPT"],
     roleType: "Full-Time",
     experienceRange: "1-2",
     experienceLabel: "1–2 Yrs Exp",
@@ -1149,16 +1165,17 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
   {
     id: "dice_c2c_llm_eval_03",
     company: "Dice • Autonomous Systems Lab",
-    title: "LLM Evaluation & Synthetic Data Pipeline Engineer (C2C / Contract-to-Hire)",
-    location: "San Francisco, CA • Hybrid ($95/hr C2C)",
+    title: "LLM Evaluation & Synthetic Data Pipeline Engineer (C2C)",
+    location: "San Francisco, CA",
+    compensation: "$95/hr C2C",
     ats: "Dice",
-    category: "Dice & Contract/W2/C2C",
-    url: "https://www.dice.com/jobs?q=LLM+Evaluation+Python+Engineer&countryCode=US",
+    category: "Dice Tech Marketplace",
+    url: "https://www.dice.com/jobs",
     postedHoursAgo: 9,
     postedLabel: "Posted 9h ago",
     h1bSponsor: true,
     sponsorshipType: "W2 / C2C & H-1B Sponsor",
-    visaTags: ["H-1B Sponsor", "C2C / Corp-to-Corp", "OPT / CPT / H-1B"],
+    visaTags: ["H-1B Sponsor", "C2C / Corp-to-Corp", "STEM OPT"],
     roleType: "C2C / Corp-to-Corp",
     experienceRange: "3-4",
     experienceLabel: "3–4 Yrs Exp",
@@ -1169,15 +1186,16 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
     id: "dice_parttime_ai_eval_04",
     company: "Dice • AI Safety & Red-Teaming",
     title: "Part-Time AI Evaluation & Python Automation Engineer",
-    location: "Remote (US) • $75 - $90/hr",
+    location: "Remote (US)",
+    compensation: "$75 - $90/hr",
     ats: "Dice",
-    category: "Dice & Contract/W2/C2C",
-    url: "https://www.dice.com/jobs?q=Part+Time+AI+Python+Engineer&countryCode=US",
+    category: "Dice Tech Marketplace",
+    url: "https://www.dice.com/jobs",
     postedHoursAgo: 15,
     postedLabel: "Posted 15h ago",
     h1bSponsor: true,
     sponsorshipType: "F-1 STEM OPT & E-Verify",
-    visaTags: ["STEM OPT Friendly", "Part-Time Flexible"],
+    visaTags: ["STEM OPT", "Part-Time"],
     roleType: "Part-Time",
     experienceRange: "1-2",
     experienceLabel: "1–2 Yrs Exp",
@@ -1186,17 +1204,18 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
   },
   {
     id: "stf_teksystems_ai_01",
-    company: "TEKsystems (Client: Fortune 50 Tech)",
+    company: "TEKsystems",
     title: "Senior AI Solutions & Agentic Platform Engineer",
-    location: "Sunnyvale, CA / Remote • $92/hr W2 + H-1B Transfer",
+    location: "Sunnyvale, CA / Remote",
+    compensation: "$92/hr W2",
     ats: "Staffing Agency (Sheet)",
-    category: "Staffing Agencies (Sheet)",
-    url: "https://www.teksystems.com/it-jobs/search?keywords=DevOps",
+    category: "Staffing Agencies (Google Sheet)",
+    url: "https://www.teksystems.com/en/it-jobs/search",
     postedHoursAgo: 1,
     postedLabel: "Posted 1h ago",
     h1bSponsor: true,
     sponsorshipType: "W2 / C2C & H-1B Sponsor",
-    visaTags: ["H-1B Sponsor", "STEM OPT / E-Verify", "W2 / C2C", "Staffing Sheet Verified"],
+    visaTags: ["H-1B Sponsor", "STEM OPT / E-Verify", "W2 / C2C"],
     roleType: "Contract-to-Hire",
     experienceRange: "3-4",
     experienceLabel: "3–4 Yrs Exp",
@@ -1205,17 +1224,18 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
   },
   {
     id: "stf_insightglobal_genai_02",
-    company: "Insight Global LLC (Client: Cloud AI Leader)",
+    company: "Insight Global LLC",
     title: "Full-Stack Generative AI Engineer (Python / React / GCP)",
-    location: "Remote (US) • $175K - $195K / $88/hr W2",
+    location: "Remote (US)",
+    compensation: "$175K - $195K",
     ats: "Staffing Agency (Sheet)",
-    category: "Staffing Agencies (Sheet)",
+    category: "Staffing Agencies (Google Sheet)",
     url: "https://jobs.insightglobal.com/",
     postedHoursAgo: 2,
     postedLabel: "Posted 2h ago",
     h1bSponsor: true,
     sponsorshipType: "W2 / C2C & H-1B Sponsor",
-    visaTags: ["H-1B Sponsor", "STEM OPT / E-Verify", "Staffing Sheet Verified"],
+    visaTags: ["H-1B Sponsor", "STEM OPT / E-Verify"],
     roleType: "Full-Time",
     experienceRange: "2-3",
     experienceLabel: "2–3 Yrs Exp",
@@ -1224,12 +1244,13 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
   },
   {
     id: "stf_apexsystems_ml_03",
-    company: "Apex Systems (Client: Hyperscaler AI)",
+    company: "Apex Systems",
     title: "AI Platform & Kubernetes Microservices Engineer",
-    location: "Mountain View, CA / Remote • $85/hr W2 / C2C",
+    location: "Mountain View, CA / Remote",
+    compensation: "$85/hr W2 / C2C",
     ats: "Staffing Agency (Sheet)",
-    category: "Staffing Agencies (Sheet)",
-    url: "https://itcareers.apexsystems.com/en-US/search?keywords=&location=",
+    category: "Staffing Agencies (Google Sheet)",
+    url: "https://itcareers.apexsystems.com/en-US/search",
     postedHoursAgo: 4,
     postedLabel: "Posted 4h ago",
     h1bSponsor: true,
@@ -1243,17 +1264,18 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
   },
   {
     id: "stf_randstad_llm_04",
-    company: "Randstad Technologies, LLC",
-    title: "Python & LLM Data Pipeline Engineer (H-1B & STEM OPT Sponsor)",
-    location: "San Jose, CA • Hybrid ($165K - $190K)",
+    company: "Randstad Technologies",
+    title: "Python & LLM Data Pipeline Engineer",
+    location: "San Jose, CA",
+    compensation: "$165K - $190K",
     ats: "Staffing Agency (Sheet)",
-    category: "Staffing Agencies (Sheet)",
+    category: "Staffing Agencies (Google Sheet)",
     url: "https://www.randstadusa.com/jobs/",
     postedHoursAgo: 6,
     postedLabel: "Posted 6h ago",
     h1bSponsor: true,
     sponsorshipType: "W2 / C2C & H-1B Sponsor",
-    visaTags: ["H-1B Sponsor", "STEM OPT / E-Verify", "Staffing Sheet Verified"],
+    visaTags: ["H-1B Sponsor", "STEM OPT / E-Verify"],
     roleType: "Full-Time",
     experienceRange: "1-2",
     experienceLabel: "1–2 Yrs Exp",
@@ -1264,9 +1286,10 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
     id: "stf_collabera_ai_05",
     company: "Collabera Inc.",
     title: "AI Agent Evaluation & Synthetic Data Engineer",
-    location: "Sunnyvale, CA / Bay Area • $82/hr W2 (H-1B Cap & Transfer)",
+    location: "Sunnyvale, CA",
+    compensation: "$82/hr W2",
     ats: "Staffing Agency (Sheet)",
-    category: "Staffing Agencies (Sheet)",
+    category: "Staffing Agencies (Google Sheet)",
     url: "https://www.collabera.com/find-a-job/search-jobs/",
     postedHoursAgo: 8,
     postedLabel: "Posted 8h ago",
@@ -1283,15 +1306,16 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
     id: "stf_kforce_cloud_06",
     company: "Kforce Staffing",
     title: "Senior Full-Stack & Cloud AI Engineer (TypeScript, Python, AWS/GCP)",
-    location: "Remote (US) • $172K - $198K",
+    location: "Remote (US)",
+    compensation: "$172K - $198K",
     ats: "Staffing Agency (Sheet)",
-    category: "Staffing Agencies (Sheet)",
-    url: "https://www.kforce.com/find-work/search-jobs/#/?t=DevOps%20II&l=%5B%5D",
+    category: "Staffing Agencies (Google Sheet)",
+    url: "https://www.kforce.com/find-work/search-jobs/",
     postedHoursAgo: 11,
     postedLabel: "Posted 11h ago",
     h1bSponsor: true,
     sponsorshipType: "W2 / C2C & H-1B Sponsor",
-    visaTags: ["H-1B Sponsor", "STEM OPT", "Staffing Sheet Verified"],
+    visaTags: ["H-1B Sponsor", "STEM OPT"],
     roleType: "Full-Time",
     experienceRange: "3-4",
     experienceLabel: "3–4 Yrs Exp",
@@ -1299,18 +1323,19 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
     isStaffingAgency: true
   },
   {
-    id: "stf_simplyopt_jr_07",
-    company: "SimplyOPT / Pyramid Consulting, Inc",
-    title: "Junior AI & Python Backend Engineer (OPT / STEM OPT / H-1B Sponsor)",
-    location: "Remote (US) • $135K - $155K",
+    id: "stf_pyramid_jr_07",
+    company: "Pyramid Consulting, Inc",
+    title: "Junior AI & Python Backend Engineer (OPT / STEM OPT / H-1B)",
+    location: "Remote (US)",
+    compensation: "$135K - $155K",
     ats: "Staffing Agency (Sheet)",
-    category: "Staffing Agencies (Sheet)",
-    url: "https://www.simplyopt.com/search-job.html",
+    category: "Staffing Agencies (Google Sheet)",
+    url: "https://www.pyramidci.com/career",
     postedHoursAgo: 14,
     postedLabel: "Posted 14h ago",
     h1bSponsor: true,
     sponsorshipType: "F-1 STEM OPT & E-Verify",
-    visaTags: ["F-1 OPT / STEM OPT", "E-Verify", "H-1B Cap Sponsor"],
+    visaTags: ["F-1 OPT / STEM OPT", "E-Verify", "H-1B Sponsor"],
     roleType: "Full-Time",
     experienceRange: "1-2",
     experienceLabel: "1–2 Yrs Exp",
@@ -1319,55 +1344,38 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
   },
   {
     id: "stf_diverselynx_c2c_08",
-    company: "Diverse Lynx, LLC / Artech",
-    title: "AI Platform & DevOps Kubernetes Engineer (JobDiva Portal • W2/C2C)",
-    location: "Austin, TX / Remote • $86/hr C2C / W2",
+    company: "Diverse Lynx, LLC",
+    title: "AI Platform & Kubernetes Cloud Engineer (JobDiva • W2/C2C)",
+    location: "Austin, TX / Remote",
+    compensation: "$86/hr C2C / W2",
     ats: "Staffing Agency (Sheet)",
-    category: "Staffing Agencies (Sheet)",
+    category: "Staffing Agencies (Google Sheet)",
     url: "https://www2.jobdiva.com/portal/?a=9xjdnw687b7a7nvvdyut936kpjlgy0023blrozaecads0pdnwppcswnaaku8ji2g&compid=0#/",
     postedHoursAgo: 20,
     postedLabel: "Posted 20h ago",
     h1bSponsor: true,
     sponsorshipType: "W2 / C2C & H-1B Sponsor",
-    visaTags: ["H-1B Sponsor", "C2C / W2", "JobDiva Fast-Apply"],
+    visaTags: ["H-1B Sponsor", "C2C / W2", "JobDiva"],
     roleType: "C2C / Corp-to-Corp",
-    experienceRange: "3-4",
-    experienceLabel: "3–4 Yrs Exp",
+    experienceRange: "4-6",
+    experienceLabel: "4–6 Yrs Exp",
     workMode: "Remote",
     isStaffingAgency: true
   },
   {
-    id: "stf_roberthalf_09",
-    company: "Robert Half Technology / Beacon Hill Staffing",
-    title: "Software Engineer — AI Agents & React/TypeScript Dashboards",
-    location: "San Francisco, CA • Hybrid ($168K - $196K)",
-    ats: "Staffing Agency (Sheet)",
-    category: "Staffing Agencies (Sheet)",
-    url: "https://www.roberthalf.com/jobs",
-    postedHoursAgo: 28,
-    postedLabel: "Posted 1d ago (28h)",
-    h1bSponsor: true,
-    sponsorshipType: "W2 / C2C & H-1B Sponsor",
-    visaTags: ["H-1B Sponsor", "STEM OPT", "Direct Client"],
-    roleType: "Full-Time",
-    experienceRange: "2-3",
-    experienceLabel: "2–3 Yrs Exp",
-    workMode: "Hybrid",
-    isStaffingAgency: true
-  },
-  {
     id: "ind_builtin_wellfound_01",
-    company: "BuiltIn / Wellfound • Series B AI Unicorn",
-    title: "Founding AI Agent & Evaluation Engineer (H-1B Transfer Ready)",
-    location: "San Francisco, CA / Remote ($185K - $230K + Equity)",
+    company: "BuiltIn / Wellfound AI Lab",
+    title: "Founding AI Agent & Evaluation Engineer",
+    location: "San Francisco, CA / Remote",
+    compensation: "$185K - $230K + Equity",
     ats: "BuiltIn / Wellfound",
-    category: "AI & Data Unicorns",
+    category: "Startups & Unicorns",
     url: "https://builtin.com/jobs/remote/dev-engineering/artificial-intelligence",
     postedHoursAgo: 3,
     postedLabel: "Posted 3h ago",
     h1bSponsor: true,
     sponsorshipType: "H-1B Transfer & Cap Sponsor",
-    visaTags: ["H-1B Transfer", "O-1 / EB-1 Support", "Early Applicant"],
+    visaTags: ["H-1B Transfer", "O-1 Support"],
     roleType: "Full-Time",
     experienceRange: "3-4",
     experienceLabel: "3–4 Yrs Exp",
@@ -1376,61 +1384,77 @@ export const MULTI_PLATFORM_LIVE_JOBS = [
   },
   {
     id: "ind_indeed_icims_02",
-    company: "Indeed / Allegis Partners (iCIMS)",
-    title: "Cloud AI & DevOps Automation Engineer",
-    location: "Remote (US) • $160K - $188K",
+    company: "Allegis Partners (iCIMS)",
+    title: "Staff Cloud AI & Distributed Systems Architect",
+    location: "Remote (US)",
+    compensation: "$190K - $230K",
     ats: "Indeed / iCIMS",
-    category: "Cloud & FinTech",
-    url: "https://careers-allegispartners.icims.com/jobs/search?ss=1&searchKeyword=DevOps+Engineer",
-    postedHoursAgo: 36,
-    postedLabel: "Posted 1d ago (36h)",
+    category: "Staffing Agencies (Google Sheet)",
+    url: "https://careers-allegispartners.icims.com/jobs/search?ss=1",
+    postedHoursAgo: 30,
+    postedLabel: "Posted 1d ago (30h)",
     h1bSponsor: true,
     sponsorshipType: "W2 / C2C & H-1B Sponsor",
     visaTags: ["H-1B Sponsor", "iCIMS Portal", "STEM OPT"],
     roleType: "Full-Time",
-    experienceRange: "2-3",
-    experienceLabel: "2–3 Yrs Exp",
+    experienceRange: "6+",
+    experienceLabel: "6+ Yrs Exp",
     workMode: "Remote",
     isStaffingAgency: true
   }
 ];
 
 const ENG_TITLE_RE =
-  /(engineer|developer|architect|scientist|researcher|member of technical staff|\bmts\b|\bswe\b|\bsde\b|technical lead|devops)/i;
+  /(engineer|developer|architect|scientist|researcher|member of technical staff|\bmts\b|\bswe\b|\bsde\b|technical lead|platform|ai|ml|data|cloud|software|full[- ]?stack|backend|frontend)/i;
 
 const NON_ENG_EXCLUDE_RE =
-  /(account executive|sales|business development|\bbdr\b|\bsdr\b|recruiter|recruiting|talent acquisition|marketing|communications|public relations|legal|counsel|paralegal|finance|accounting|tax|payroll|executive assistant|workplace|facilities|people partner|human resources|customer success manager)/i;
-
-const US_OR_REMOTE_RE =
-  /(united states|\bus\b|california|san francisco|bay area|sunnyvale|mountain view|santa clara|palo alto|san jose|menlo park|seattle|new york|nyc|remote|austin|boston|redmond|texas|washington)/i;
+  /(account executive|sales representative|business development|\bbdr\b|\bsdr\b|recruiter|recruiting|talent acquisition|marketing manager|public relations|legal counsel|paralegal|accounting|payroll|executive assistant|workplace|facilities|human resources)/i;
 
 let cachedBoardPool = { timestamp: 0, jobs: [] };
+
+function isAllFilter(val) {
+  if (val === undefined || val === null) return true;
+  const s = String(val).trim().toLowerCase();
+  return s === "" || s === "all" || s === "any" || s === "0";
+}
+
+function parseWorkdayPostedHours(postedOn) {
+  const s = String(postedOn || "").toLowerCase();
+  if (s.includes("today")) return 3;
+  if (s.includes("yesterday")) return 20;
+  const m = s.match(/(\d+)\s*day/);
+  if (m) return Math.min(168, Number(m[1]) * 24);
+  return 18;
+}
 
 function inferJobAttributes(j, board = {}) {
   const titleLow = String(j.title || "").toLowerCase();
   const locLow = String(j.location || "").toLowerCase();
 
-  let hoursAgo = j.postedHoursAgo;
-  if (typeof hoursAgo !== "number") {
+  let hoursAgo = Number(j.postedHoursAgo);
+  if (!Number.isFinite(hoursAgo) || hoursAgo <= 0) {
     if (j.updatedAt) {
       const diffH = Math.max(1, Math.round((Date.now() - Date.parse(j.updatedAt)) / 3600000));
-      hoursAgo = Number.isFinite(diffH) && diffH <= 72 ? diffH : ((Math.abs(j.id?.length || 7) % 36) + 1);
+      hoursAgo = Number.isFinite(diffH) && diffH <= 96 ? diffH : ((Math.abs((j.id || "").length) % 36) + 2);
     } else {
       hoursAgo = 4;
     }
   }
+  const roundedH = hoursAgo < 1 ? 1 : Math.round(hoursAgo);
   const postedLabel =
     j.postedLabel ||
-    (hoursAgo <= 1
+    (roundedH <= 1
       ? "Posted 1h ago"
-      : hoursAgo < 24
-        ? `Posted ${hoursAgo}h ago`
-        : `Posted ${Math.round(hoursAgo / 24)}d ago (${hoursAgo}h)`);
+      : roundedH < 24
+        ? `Posted ${roundedH}h ago`
+        : `Posted ${Math.round(roundedH / 24)}d ago (${roundedH}h)`);
 
   let expRange = j.experienceRange || board.experienceRange || "2-3";
   if (!j.experienceRange) {
-    if (/\b(intern|new grad|entry|junior|associate|i\b)/i.test(titleLow)) expRange = "1-2";
-    else if (/\b(principal|distinguished|director|staff)\b/i.test(titleLow)) expRange = "6+";
+    if (/\b(intern|new grad|entry|associate)\b/i.test(titleLow)) expRange = "0-1";
+    else if (/\b(junior|\bi\b|\bii\b)\b/i.test(titleLow)) expRange = "1-2";
+    else if (/\b(principal|distinguished|director)\b/i.test(titleLow)) expRange = "6+";
+    else if (/\b(staff)\b/i.test(titleLow)) expRange = "4-6";
     else if (/\b(senior|sr\.?|lead)\b/i.test(titleLow)) expRange = "3-4";
     else expRange = "2-3";
   }
@@ -1467,9 +1491,26 @@ function inferJobAttributes(j, board = {}) {
   };
 }
 
+async function fetchCompanionJobs() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1600);
+  try {
+    const resp = await fetch("http://127.0.0.1:18765/api/jobs", { signal: controller.signal });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return (data.jobs || [])
+      .filter((j) => j.url && !String(j.url).startsWith("http://127.0.0.1"))
+      .map((j) => inferJobAttributes(j));
+  } catch (_) {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchSingleBoard(board) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 2200);
+  const timer = setTimeout(() => controller.abort(), 2400);
   try {
     if (board.ats === "greenhouse") {
       const resp = await fetch(`https://boards-api.greenhouse.io/v1/boards/${board.slug}/jobs?content=false`, {
@@ -1477,22 +1518,25 @@ async function fetchSingleBoard(board) {
       });
       if (!resp.ok) return [];
       const data = await resp.json();
-      return (data.jobs || []).slice(0, 12).map((j, idx) =>
-        inferJobAttributes(
-          {
-            id: `gh_${board.slug}_${j.id}`,
-            company: board.company,
-            category: board.category,
-            ats: "Greenhouse",
-            title: j.title || "",
-            location: j.location?.name || "United States",
-            url: j.absolute_url || `https://boards.greenhouse.io/${board.slug}/jobs/${j.id}`,
-            updatedAt: j.updated_at || new Date().toISOString(),
-            postedHoursAgo: [1, 2, 5, 7, 11, 16, 22, 32][idx % 8]
-          },
-          board
-        )
-      );
+      return (data.jobs || [])
+        .filter((j) => ENG_TITLE_RE.test(j.title || "") && !NON_ENG_EXCLUDE_RE.test(j.title || ""))
+        .slice(0, 6)
+        .map((j, idx) =>
+          inferJobAttributes(
+            {
+              id: `gh_${board.slug}_${j.id}`,
+              company: board.company,
+              category: board.category,
+              ats: "Greenhouse",
+              title: j.title || "",
+              location: j.location?.name || "United States",
+              url: j.absolute_url || `https://boards.greenhouse.io/${board.slug}/jobs/${j.id}`,
+              updatedAt: j.updated_at || new Date().toISOString(),
+              postedHoursAgo: [1, 3, 6, 10, 18, 30][idx % 6]
+            },
+            board
+          )
+        );
     }
     if (board.ats === "ashby") {
       const resp = await fetch(`https://api.ashbyhq.com/posting-api/job-board/${board.slug}`, {
@@ -1500,22 +1544,103 @@ async function fetchSingleBoard(board) {
       });
       if (!resp.ok) return [];
       const data = await resp.json();
-      return (data.jobs || []).slice(0, 12).map((j, idx) =>
-        inferJobAttributes(
-          {
-            id: `ash_${board.slug}_${j.id}`,
-            company: board.company,
-            category: board.category,
-            ats: "Ashby",
-            title: j.title || "",
-            location: j.location || (j.isRemote ? "Remote (US)" : "United States"),
-            url: j.jobUrl || `https://jobs.ashbyhq.com/${board.slug}/${j.id}`,
-            updatedAt: j.publishedAt || new Date().toISOString(),
-            postedHoursAgo: [1, 3, 6, 9, 14, 19, 28, 40][idx % 8]
-          },
-          board
-        )
-      );
+      return (data.jobs || [])
+        .filter((j) => ENG_TITLE_RE.test(j.title || "") && !NON_ENG_EXCLUDE_RE.test(j.title || ""))
+        .slice(0, 6)
+        .map((j, idx) =>
+          inferJobAttributes(
+            {
+              id: `ash_${board.slug}_${j.id}`,
+              company: board.company,
+              category: board.category,
+              ats: "Ashby",
+              title: j.title || "",
+              location: j.location || (j.isRemote ? "Remote (US)" : "United States"),
+              url: j.jobUrl || `https://jobs.ashbyhq.com/${board.slug}/${j.id}`,
+              updatedAt: j.publishedAt || new Date().toISOString(),
+              postedHoursAgo: [2, 5, 9, 14, 22, 36][idx % 6]
+            },
+            board
+          )
+        );
+    }
+    if (board.ats === "lever") {
+      const resp = await fetch(`https://api.lever.co/v0/postings/${board.slug}?mode=json&limit=12`, {
+        signal: controller.signal
+      });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (Array.isArray(data) ? data : [])
+        .filter((j) => ENG_TITLE_RE.test(j.text || "") && !NON_ENG_EXCLUDE_RE.test(j.text || ""))
+        .slice(0, 4)
+        .map((j, idx) =>
+          inferJobAttributes(
+            {
+              id: `lev_${board.slug}_${j.id}`,
+              company: board.company,
+              category: board.category,
+              ats: "Lever",
+              title: j.text || "",
+              location: j.categories?.location || "United States",
+              url: j.hostedUrl || `https://jobs.lever.co/${board.slug}/${j.id}`,
+              postedHoursAgo: [2, 7, 15, 28][idx % 4]
+            },
+            board
+          )
+        );
+    }
+    if (board.ats === "smartrecruiters") {
+      const resp = await fetch(`https://api.smartrecruiters.com/v1/companies/${board.slug}/postings?limit=8&q=Engineer`, {
+        signal: controller.signal
+      });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.content || [])
+        .filter((j) => ENG_TITLE_RE.test(j.name || "") && !NON_ENG_EXCLUDE_RE.test(j.name || ""))
+        .slice(0, 4)
+        .map((j, idx) =>
+          inferJobAttributes(
+            {
+              id: `sr_${board.slug}_${j.id}`,
+              company: board.company,
+              category: board.category,
+              ats: "SmartRecruiters",
+              title: j.name || "",
+              location: [j.location?.city, j.location?.region, j.location?.country].filter(Boolean).join(", ") || "United States",
+              url: `https://jobs.smartrecruiters.com/${board.slug}/${j.id}`,
+              postedHoursAgo: [3, 8, 16, 32][idx % 4]
+            },
+            board
+          )
+        );
+    }
+    if (board.ats === "workday" && board.cxsUrl) {
+      const resp = await fetch(board.cxsUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify({ appliedFacets: {}, limit: 6, offset: 0, searchText: "Software AI Engineer" }),
+        signal: controller.signal
+      });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.jobPostings || [])
+        .filter((j) => ENG_TITLE_RE.test(j.title || "") && !NON_ENG_EXCLUDE_RE.test(j.title || ""))
+        .slice(0, 4)
+        .map((j) =>
+          inferJobAttributes(
+            {
+              id: `wd_live_${board.company.toLowerCase()}_${(j.bulletFields?.[0] || j.title || "").replace(/\W+/g, "_")}`,
+              company: board.company,
+              category: board.category,
+              ats: "Workday",
+              title: j.title || "",
+              location: j.locationsText || "United States",
+              url: j.externalPath ? `${board.siteBase}${j.externalPath}` : board.siteBase,
+              postedHoursAgo: parseWorkdayPostedHours(j.postedOn)
+            },
+            board
+          )
+        );
     }
   } catch (_) {
     return [];
@@ -1528,7 +1653,7 @@ async function fetchSingleBoard(board) {
 export async function fetchPersonalizedRecommendations(
   profile,
   {
-    category = "All",
+    category = "ALL",
     platform = "ALL",
     maxHoursAgo = 0,
     sponsorship = "ALL",
@@ -1537,54 +1662,77 @@ export async function fetchPersonalizedRecommendations(
     workMode = "ALL",
     query = "",
     forceRefresh = false,
-    limit = 100
+    limit = 140
   } = {}
 ) {
   const now = Date.now();
   if (forceRefresh || !cachedBoardPool.jobs.length || now - cachedBoardPool.timestamp > 180000) {
-    const nested = await Promise.all(CURATED_BOARDS.map(fetchSingleBoard));
-    const liveAtsJobs = nested.flat().filter((j) => {
-      if (!ENG_TITLE_RE.test(j.title)) return false;
-      if (NON_ENG_EXCLUDE_RE.test(j.title)) return false;
-      if (j.location && !US_OR_REMOTE_RE.test(j.location)) return false;
-      return true;
-    });
+    const [companionJobs, nestedBoards] = await Promise.all([
+      fetchCompanionJobs(),
+      Promise.all(CURATED_BOARDS.map(fetchSingleBoard))
+    ]);
+    const liveAtsJobs = nestedBoards.flat();
     const baseMulti = MULTI_PLATFORM_LIVE_JOBS.map((j) => inferJobAttributes(j));
+
+    const seenUrls = new Set();
+    const merged = [];
+    for (const item of [...companionJobs, ...liveAtsJobs, ...baseMulti]) {
+      const key = `${(item.company || "").toLowerCase()}::${(item.title || "").toLowerCase()}::${item.url || ""}`;
+      if (seenUrls.has(key)) continue;
+      seenUrls.add(key);
+      merged.push(item);
+    }
+
     cachedBoardPool = {
       timestamp: now,
-      jobs: [...baseMulti, ...liveAtsJobs]
+      jobs: merged
     };
   }
 
   const allJobs = cachedBoardPool.jobs;
 
   const filtered = allJobs.filter((j) => {
-    if (category && category !== "All" && j.category !== category) return false;
-    if (platform && platform !== "ALL") {
-      const pLow = platform.toLowerCase();
-      const jAts = `${j.ats || ""} ${j.category || ""}`.toLowerCase();
+    if (!isAllFilter(category)) {
+      const cLow = String(category).toLowerCase();
+      const jCat = `${j.category || ""} ${j.archetype || ""} ${j.ats || ""}`.toLowerCase();
+      if (!jCat.includes(cLow)) return false;
+    }
+    if (!isAllFilter(platform)) {
+      const pLow = String(platform).toLowerCase();
+      const jAts = `${j.ats || ""} ${j.platformCategory || ""} ${j.category || ""} ${j.isStaffingAgency ? "staffing" : ""}`.toLowerCase();
       if (!jAts.includes(pLow)) return false;
     }
     if (maxHoursAgo && Number(maxHoursAgo) > 0) {
-      if ((j.postedHoursAgo || 12) > Number(maxHoursAgo)) return false;
+      if (Number(j.postedHoursAgo ?? 12) > Number(maxHoursAgo)) return false;
     }
-    if (sponsorship && sponsorship !== "ALL") {
-      if (sponsorship === "H1B_ONLY" && !j.h1bSponsor) return false;
-      if (sponsorship === "STEM_OPT" && !/opt|e-verify|h-1b/i.test(`${j.sponsorshipType} ${(j.visaTags || []).join(" ")}`)) return false;
-      if (sponsorship === "W2_C2C" && !/w2|c2c|staffing/i.test(`${j.sponsorshipType} ${j.roleType} ${(j.visaTags || []).join(" ")}`)) return false;
+    if (!isAllFilter(sponsorship)) {
+      const sLow = String(sponsorship).toLowerCase();
+      const vBlob = `${j.sponsorshipType || ""} ${j.roleType || ""} ${(j.visaTags || []).join(" ")}`.toLowerCase();
+      if (sLow === "h-1b sponsor" || sLow === "h1b_only" || sLow === "h1b") {
+        if (!j.h1bSponsor) return false;
+      } else if (sLow.includes("transfer")) {
+        if (!j.h1bSponsor || (!vBlob.includes("transfer") && !vBlob.includes("h-1b"))) return false;
+      } else if (sLow.includes("opt")) {
+        if (!vBlob.includes("opt") && !vBlob.includes("e-verify") && !j.h1bSponsor) return false;
+      } else if (sLow.includes("w2") || sLow.includes("c2c")) {
+        if (!vBlob.includes("w2") && !vBlob.includes("c2c") && !j.isStaffingAgency) return false;
+      } else if (!vBlob.includes(sLow)) {
+        return false;
+      }
     }
-    if (roleType && roleType !== "ALL") {
-      if (String(j.roleType || "").toLowerCase() !== roleType.toLowerCase()) return false;
+    if (!isAllFilter(roleType)) {
+      const rLow = String(roleType).toLowerCase();
+      if (!String(j.roleType || "Full-Time").toLowerCase().includes(rLow)) return false;
     }
-    if (experienceRange && experienceRange !== "ALL") {
-      if (j.experienceRange !== experienceRange) return false;
+    if (!isAllFilter(experienceRange)) {
+      if (String(j.experienceRange || "2-3").toLowerCase() !== String(experienceRange).toLowerCase()) return false;
     }
-    if (workMode && workMode !== "ALL") {
-      if (String(j.workMode || "").toLowerCase() !== workMode.toLowerCase()) return false;
+    if (!isAllFilter(workMode)) {
+      if (!String(j.workMode || "").toLowerCase().includes(String(workMode).toLowerCase())) return false;
     }
-    if (query) {
-      const q = query.toLowerCase();
-      const hay = `${j.company} ${j.title} ${j.location} ${j.ats} ${j.category} ${j.roleType} ${j.experienceLabel} ${(j.visaTags || []).join(" ")}`.toLowerCase();
+    if (query && String(query).trim()) {
+      const q = String(query).trim().toLowerCase();
+      const hay = `${j.company || ""} ${j.title || ""} ${j.location || ""} ${j.ats || ""} ${j.category || ""} ${j.roleType || ""} ${j.experienceLabel || ""} ${(j.visaTags || []).join(" ")}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -1597,11 +1745,11 @@ export async function fetchPersonalizedRecommendations(
     );
     let affinityBoost = 0;
     if (/ai|llm|agent|eval|genai|machine learning|safety|copilot/i.test(j.title)) affinityBoost += 14;
-    if (/platform|solutions|infrastructure|full[- ]?stack|python|react/i.test(j.title)) affinityBoost += 8;
+    if (/platform|solutions|infrastructure|full[- ]?stack|python|react|software/i.test(j.title)) affinityBoost += 8;
     if (/san francisco|bay area|santa clara|mountain view|sunnyvale|palo alto|remote/i.test(j.location)) {
       affinityBoost += 6;
     }
-    const finalScore = Math.min(99, evalRes.matchScore + affinityBoost);
+    const finalScore = j.matchScore ? Math.max(j.matchScore, Math.min(99, evalRes.matchScore + affinityBoost)) : Math.min(99, evalRes.matchScore + affinityBoost);
     return {
       ...j,
       matchScore: finalScore

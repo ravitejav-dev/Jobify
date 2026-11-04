@@ -1,6 +1,6 @@
 // Jobify Full-Page Career Hub Controller
 import { scoreResumeATS, analyzeJobKeywords } from "../shared/ats_analyzer.js";
-import { buildNetworkCopilotPathways, STAFFING_AGENCIES_DIRECTORY } from "../shared/job_feeds.js";
+import { buildNetworkCopilotPathways, STAFFING_AGENCIES_DIRECTORY, fetchPersonalizedRecommendations } from "../shared/job_feeds.js";
 
 let STATE = null;
 let currentView = (location.hash || "#overview").replace("#", "") || "overview";
@@ -543,15 +543,18 @@ function renderResumeStudio(c) {
   c.innerHTML = `
     <div class="grid-2">
       <div class="card">
-        <div class="card-title">Target Job Description</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div class="card-title" style="margin:0;">Target Job Description</div>
+          <button type="button" class="btn secondary" id="rs-sample-btn" style="padding:4px 10px;font-size:11.5px;">Load Sample JD</button>
+        </div>
         <div class="grid-2 form-row">
           <div>
             <label class="field-lbl">Company Name</label>
-            <input class="input" id="rs-comp" placeholder="e.g., Anthropic" value="Anthropic" />
+            <input class="input" id="rs-comp" placeholder="e.g., Anthropic" value="" />
           </div>
           <div>
             <label class="field-lbl">Role Title</label>
-            <input class="input" id="rs-role" placeholder="e.g., AI Platform & Evaluation Engineer" value="AI Platform & Evaluation Engineer" />
+            <input class="input" id="rs-role" placeholder="e.g., AI Platform & Evaluation Engineer" value="" />
           </div>
         </div>
         <div class="form-row">
@@ -563,7 +566,7 @@ function renderResumeStudio(c) {
         </div>
         <div class="form-row">
           <label class="field-lbl">Paste Full Job Description</label>
-          <textarea class="textarea" id="rs-jd" style="min-height:240px;" placeholder="Paste the target job description here...">We are hiring an AI Platform & Evaluation Engineer to build scalable LLM evaluation harnesses, multi-agent simulation sandboxes, red-teaming & AI safety pipelines, and full-stack telemetry dashboards. Required skills: Python, TypeScript, React, Kubernetes, Docker, GCP or AWS, distributed microservices, RAG, vector databases, observability/OpenTelemetry, and CI/CD.</textarea>
+          <textarea class="textarea" id="rs-jd" style="min-height:240px;" placeholder="Paste the target job description here..."></textarea>
         </div>
         <div style="display:flex;gap:10px;">
           <button class="btn secondary" id="rs-scan-btn">🔍 Scan Missing Keywords & ATS Score</button>
@@ -574,13 +577,17 @@ function renderResumeStudio(c) {
       <div class="card" id="rs-output-panel">
         <div class="card-title">ATS Score, Missing Keywords &amp; From-Scratch Preview</div>
         <div id="rs-results-inner" style="font-size:13px;color:#94a3b8;">
-          Click <strong>Scan Missing Keywords</strong> or <strong>Build From-Scratch Resume &amp; PDF</strong> to generate a 1-page ATS resume tailored to the posting.
+          Paste a target job description (or click <strong>Load Sample JD</strong>), then click <strong>Scan Missing Keywords</strong> or <strong>Build From-Scratch Resume &amp; PDF</strong>.
         </div>
       </div>
     </div>
   `;
 
   const renderScan = (jd) => {
+    if (!String(jd || "").trim()) {
+      toast("Paste a job description first (or click Load Sample JD).");
+      return;
+    }
     const audit = scoreResumeATS(STATE.profile, jd);
     const out = c.querySelector("#rs-results-inner");
     out.innerHTML = `
@@ -606,11 +613,17 @@ function renderResumeStudio(c) {
     `;
   };
 
-  renderScan(c.querySelector("#rs-jd").value);
+  c.querySelector("#rs-sample-btn").addEventListener("click", () => {
+    c.querySelector("#rs-comp").value = "Anthropic";
+    c.querySelector("#rs-role").value = "AI Platform & Evaluation Engineer";
+    c.querySelector("#rs-jd").value =
+      "We are hiring an AI Platform & Evaluation Engineer to build scalable LLM evaluation harnesses, multi-agent simulation sandboxes, red-teaming & AI safety pipelines, and full-stack telemetry dashboards. Required skills: Python, TypeScript, React, Kubernetes, Docker, GCP or AWS, distributed microservices, RAG, vector databases, observability/OpenTelemetry, and CI/CD.";
+    renderScan(c.querySelector("#rs-jd").value);
+  });
 
   c.querySelector("#rs-scan-btn").addEventListener("click", () => {
     renderScan(c.querySelector("#rs-jd").value);
-    toast("🔍 Updated ATS keyword audit!");
+    if (c.querySelector("#rs-jd").value.trim()) toast("🔍 Updated ATS keyword audit!");
   });
 
   c.querySelector("#rs-tailor-btn").addEventListener("click", async (e) => {
@@ -705,15 +718,18 @@ function renderCoverStudio(c) {
   c.innerHTML = `
     <div class="grid-2">
       <div class="card">
-        <div class="card-title">Generate Tailored Cover Letter</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div class="card-title" style="margin:0;">Generate Tailored Cover Letter</div>
+          <button type="button" class="btn secondary" id="cl-sample-btn" style="padding:4px 10px;font-size:11.5px;">Load Sample JD</button>
+        </div>
         <div class="grid-2 form-row">
           <div>
             <label class="field-lbl">Company</label>
-            <input class="input" id="cl-comp" value="OpenAI" />
+            <input class="input" id="cl-comp" placeholder="e.g., OpenAI" value="" />
           </div>
           <div>
             <label class="field-lbl">Role Title</label>
-            <input class="input" id="cl-role" value="Software Engineer, Agentic Evaluation" />
+            <input class="input" id="cl-role" placeholder="e.g., Software Engineer, Agentic Evaluation" value="" />
           </div>
         </div>
         <div class="form-row">
@@ -726,7 +742,7 @@ function renderCoverStudio(c) {
         </div>
         <div class="form-row">
           <label class="field-lbl">Job Description</label>
-          <textarea class="textarea" id="cl-jd" style="min-height:200px;">Build evaluation environments, synthetic user state pipelines, and adversarial benchmarks for frontier autonomous browser and coding agents.</textarea>
+          <textarea class="textarea" id="cl-jd" style="min-height:200px;" placeholder="Paste the target job description here..."></textarea>
         </div>
         <button class="btn primary" id="cl-gen-btn">📝 Generate Cover Letter + PDF</button>
       </div>
@@ -743,6 +759,13 @@ function renderCoverStudio(c) {
       </div>
     </div>
   `;
+
+  c.querySelector("#cl-sample-btn").addEventListener("click", () => {
+    c.querySelector("#cl-comp").value = "OpenAI";
+    c.querySelector("#cl-role").value = "Software Engineer, Agentic Evaluation";
+    c.querySelector("#cl-jd").value =
+      "Build evaluation environments, synthetic user state pipelines, and adversarial benchmarks for frontier autonomous browser and coding agents.";
+  });
 
   let activeRecord = STATE.coverLetters?.[0] || null;
   c.querySelector("#cl-gen-btn").addEventListener("click", async (e) => {
@@ -813,104 +836,111 @@ function renderCoverStudio(c) {
 
 async function renderLiveJobs(c) {
   c.innerHTML = `
-    <div class="card" style="padding:14px 16px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
-        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-          <span style="font-size:11.5px;font-weight:700;color:#94a3b8;margin-right:4px;">⚡ Quick Pull:</span>
-          <button class="btn sm secondary jf-quick-time" data-hrs="2">⚡ Last 2h</button>
-          <button class="btn sm secondary jf-quick-time" data-hrs="8">🔥 Last 8h</button>
-          <button class="btn sm secondary jf-quick-time" data-hrs="12">🕐 Last 12h</button>
-          <button class="btn sm secondary jf-quick-time" data-hrs="24">📅 Last 24h</button>
-          <button class="btn sm secondary jf-quick-time" data-hrs="48">🗓️ Last 2 Days</button>
-          <button class="btn sm secondary" id="jf-quick-h1b">🛂 H-1B Sponsor Only</button>
-          <button class="btn sm secondary" id="jf-toggle-staffing">🏢 128 Staffing Agencies (Sheet)</button>
+    <div class="filter-shell">
+      <div class="filter-top-row">
+        <div class="filter-search-wrap">
+          <input class="filter-search-input" id="jf-q" placeholder="Search by job title, company, skill, or city..." value="" />
         </div>
-        <div style="display:flex;gap:6px;">
-          <button class="btn sm secondary" id="jf-reset">Reset Filters</button>
-          <button class="btn sm primary" id="jf-refresh">🔄 Pull Live Jobs</button>
+        <button class="btn sm secondary" id="jf-toggle-staffing">🏢 128 Staffing Agencies</button>
+        <button class="btn sm secondary" id="jf-reset" style="display:none;">↺ Reset Filters</button>
+        <button class="btn sm primary" id="jf-refresh">↻ Pull Live Jobs</button>
+      </div>
+
+      <div class="filter-grid-6">
+        <div class="filter-group">
+          <label class="filter-lbl" for="jf-platform">Platform</label>
+          <select class="filter-select-clean" id="jf-platform">
+            <option value="ALL">All Platforms</option>
+            <option value="Workday">Workday</option>
+            <option value="LinkedIn">LinkedIn</option>
+            <option value="Dice">Dice</option>
+            <option value="Staffing">Staffing Agencies (128)</option>
+            <option value="Microsoft">Microsoft Careers</option>
+            <option value="Greenhouse">Greenhouse</option>
+            <option value="Ashby">Ashby</option>
+            <option value="Lever">Lever</option>
+            <option value="SmartRecruiters">SmartRecruiters</option>
+            <option value="Indeed">Indeed / iCIMS</option>
+            <option value="BuiltIn">BuiltIn / Wellfound</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-lbl" for="jf-recency">Date Posted</label>
+          <select class="filter-select-clean" id="jf-recency">
+            <option value="0">Any Time</option>
+            <option value="2">Last 2 Hours</option>
+            <option value="8">Last 8 Hours</option>
+            <option value="12">Last 12 Hours</option>
+            <option value="24">Last 24 Hours</option>
+            <option value="48">Last 2 Days</option>
+            <option value="168">Last 7 Days</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-lbl" for="jf-sponsorship">Visa / H-1B</label>
+          <select class="filter-select-clean" id="jf-sponsorship">
+            <option value="ALL">All Roles</option>
+            <option value="H-1B Sponsor">H-1B &amp; Visa Sponsors</option>
+            <option value="H-1B Transfer">H-1B Transfer &amp; Cap</option>
+            <option value="STEM OPT">F-1 OPT / STEM OPT</option>
+            <option value="W2 / C2C">W2 / C2C Sponsor</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-lbl" for="jf-role-type">Role Type</label>
+          <select class="filter-select-clean" id="jf-role-type">
+            <option value="ALL">All Types</option>
+            <option value="Full-Time">Full-Time</option>
+            <option value="Part-Time">Part-Time</option>
+            <option value="Contract / W2">Contract / W2</option>
+            <option value="C2C / Corp-to-Corp">C2C / Corp-to-Corp</option>
+            <option value="Contract-to-Hire">Contract-to-Hire</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-lbl" for="jf-exp">Experience</label>
+          <select class="filter-select-clean" id="jf-exp">
+            <option value="ALL">All Levels</option>
+            <option value="0-1">0–1 Years</option>
+            <option value="1-2">1–2 Years</option>
+            <option value="2-3">2–3 Years</option>
+            <option value="3-4">3–4 Years</option>
+            <option value="4-6">4–6 Years</option>
+            <option value="6+">6+ Years</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-lbl" for="jf-work-mode">Work Mode</label>
+          <select class="filter-select-clean" id="jf-work-mode">
+            <option value="ALL">All Modes</option>
+            <option value="Remote">Remote</option>
+            <option value="Hybrid">Hybrid</option>
+            <option value="On-Site">On-Site</option>
+          </select>
         </div>
       </div>
-      <div class="grid-3" style="margin-bottom:8px;">
-        <select class="select" id="jf-platform">
-          <option value="All">🌐 Platform: All Sources (Workday, LinkedIn, Dice, Staffing, Greenhouse, Ashby...)</option>
-          <option value="Workday">🏢 Workday (myworkdayjobs.com)</option>
-          <option value="LinkedIn">💼 LinkedIn Jobs</option>
-          <option value="Dice">🎲 Dice Tech Marketplace</option>
-          <option value="Staffing">🤝 Staffing Agencies (128 Sheet)</option>
-          <option value="Microsoft">🪟 Microsoft Careers</option>
-          <option value="Greenhouse">🌱 Greenhouse Live API</option>
-          <option value="Ashby">⚡ Ashby Live API</option>
-          <option value="Lever">🔧 Lever ATS</option>
-          <option value="Indeed">🔍 Indeed / iCIMS / SmartRecruiters</option>
-          <option value="BuiltIn">🚀 BuiltIn / Wellfound Startups</option>
-        </select>
-        <select class="select" id="jf-recency">
-          <option value="0">⏱️ Date Posted: All Recent</option>
-          <option value="2">⚡ Last 2 Hours (Ultra-Fresh)</option>
-          <option value="8">🔥 Last 8 Hours</option>
-          <option value="12">🕐 Last 12 Hours</option>
-          <option value="24">📅 Last 24 Hours</option>
-          <option value="48">🗓️ Last 2 Days (48 Hours)</option>
-          <option value="168">📆 Last 7 Days</option>
-        </select>
-        <select class="select" id="jf-sponsorship">
-          <option value="All">🛂 Visa / H-1B: All Roles</option>
-          <option value="H-1B Sponsor">✅ H-1B &amp; Visa Sponsors Only (E-Verify / Transfer / Cap)</option>
-          <option value="H-1B Transfer">🏛️ Direct H-1B Transfer &amp; Cap Sponsor</option>
-          <option value="STEM OPT">🎓 F-1 OPT / STEM OPT E-Verify Friendly</option>
-          <option value="W2 / C2C">🤝 W2 / C2C Staffing Visa Sponsor</option>
-        </select>
-      </div>
-      <div class="grid-3" style="margin-bottom:8px;">
-        <select class="select" id="jf-role-type">
-          <option value="All">💼 Role Type: All (Full-Time, Part-Time, W2, C2C)</option>
-          <option value="Full-Time">Full-Time</option>
-          <option value="Part-Time">Part-Time</option>
-          <option value="Contract / W2">Contract / W2</option>
-          <option value="C2C / Corp-to-Corp">C2C / Corp-to-Corp</option>
-          <option value="Contract-to-Hire">Contract-to-Hire</option>
-        </select>
-        <select class="select" id="jf-exp">
-          <option value="All">📊 Experience: All Levels (0-1 to 6+ Yrs)</option>
-          <option value="0-1">0-1 Years (Entry / New Grad)</option>
-          <option value="1-2">1-2 Years (Junior / Associate)</option>
-          <option value="2-3">2-3 Years (Mid-Level I)</option>
-          <option value="3-4">3-4 Years (Mid-Level II)</option>
-          <option value="4-6">4-6 Years (Senior)</option>
-          <option value="6+">6+ Years (Staff / Principal)</option>
-        </select>
-        <select class="select" id="jf-work-mode">
-          <option value="All">🏠 Work Mode: All (Remote / Hybrid / On-Site)</option>
-          <option value="Remote">Remote</option>
-          <option value="Hybrid">Hybrid</option>
-          <option value="On-Site">On-Site</option>
-        </select>
-      </div>
-      <div class="grid-2">
-        <select class="select" id="jf-cat">
-          <option value="All">📂 Category: All Tech, AI, Cloud &amp; Staffing Lists</option>
-          <option value="Frontier AI Labs">Frontier AI Labs (Anthropic, OpenAI, Perplexity, xAI, Cohere)</option>
-          <option value="Big Tech & Cloud">Big Tech &amp; Cloud (Google, Microsoft, Meta, AWS, Apple, NVIDIA)</option>
-          <option value="Enterprise & SaaS">Enterprise &amp; SaaS (Workday, Salesforce, ServiceNow, Adobe, Stripe)</option>
-          <option value="Dice Tech Marketplace">Dice Tech Marketplace (W2 / C2C / Full-Time / Part-Time)</option>
-          <option value="Staffing Agencies (Google Sheet)">Staffing Agencies (128 Vendors from Google Sheet)</option>
-          <option value="Startups & Unicorns">Startups &amp; Unicorns (BuiltIn, Wellfound, Scale AI, Databricks)</option>
-        </select>
-        <input class="input" id="jf-q" placeholder="Filter by keyword, company, skill, or city (e.g., Agent, LangGraph, Workday, Dice, TEKsystems)..." />
-      </div>
+
+      <div class="active-filters-bar" id="jf-active-chips"></div>
     </div>
-    <div id="jf-staffing-drawer" class="card" style="display:none;margin-bottom:14px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+
+    <div id="jf-staffing-drawer" class="card" style="display:none;margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
         <div>
-          <div style="font-weight:700;font-size:15px;color:#fff;">🏢 128 Staffing Agencies Directory (Synced from Google Sheet)</div>
-          <div style="font-size:12px;color:#94a3b8;">Direct links &amp; 1-click job pull across all ${STAFFING_AGENCIES_DIRECTORY.length} IT/Engineering staffing firms supporting H-1B, OPT/STEM OPT, W2 &amp; C2C</div>
+          <div style="font-weight:700;font-size:15px;color:#fff;">🏢 128 Staffing Agencies Directory</div>
+          <div style="font-size:12px;color:#94a3b8;">Direct career portals across all ${STAFFING_AGENCIES_DIRECTORY.length} staffing agencies supporting H-1B, OPT/STEM OPT, W2 &amp; C2C</div>
         </div>
-        <input class="input" id="jf-staffing-search" placeholder="Search 128 staffing agencies (e.g., TEKsystems, Insight Global, Kforce, JobDiva)..." style="max-width:320px;" />
+        <input class="filter-search-input" id="jf-staffing-search" placeholder="Search 128 agencies (e.g., TEKsystems, Insight Global, Kforce)..." style="max-width:300px;" value="" />
       </div>
       <div id="jf-staffing-grid" class="job-feed-grid" style="max-height:360px;overflow-y:auto;padding-right:4px;"></div>
     </div>
+
     <div id="jf-grid-wrap">
-      <div class="card">⏳ Pulling live multi-platform roles across Workday, LinkedIn, Dice, Staffing Agencies, Greenhouse &amp; Ashby...</div>
+      <div class="card">Pulling live roles across Workday, LinkedIn, Dice, Staffing Agencies, Greenhouse, Ashby &amp; Lever...</div>
     </div>
   `;
 
@@ -923,24 +953,24 @@ async function renderLiveJobs(c) {
     grid.innerHTML = list
       .map(
         (a) => `
-        <div class="job-card" style="padding:10px 12px;">
+        <div class="job-card" style="padding:11px 13px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
             <span style="font-weight:700;color:#fff;font-size:13.5px;">${esc(a.name)}</span>
             <span class="chip indigo" style="font-size:10.5px;">${esc(a.portalType)}</span>
           </div>
-          <div style="font-size:11px;color:#10b981;margin-bottom:6px;">🛂 H-1B / W2 / C2C / OPT Sponsor</div>
+          <div style="font-size:11px;color:#10b981;margin-bottom:6px;">H-1B • STEM OPT • W2 / C2C</div>
           <div style="display:flex;gap:6px;">
-            <button class="btn sm emerald jf-filter-agency" data-agency="${esc(a.name)}" style="flex:1;">🔍 Pull Jobs</button>
-            <a class="btn sm primary" href="${esc(a.url)}" target="_blank" style="flex:1;text-align:center;">Portal ↗</a>
+            <button class="btn sm emerald jf-filter-agency" data-agency="${esc(a.name)}" style="flex:1;">Filter Jobs</button>
+            <a class="btn sm primary" href="${esc(a.url)}" target="_blank" style="flex:1;text-align:center;">Open Portal ↗</a>
           </div>
         </div>`
       )
       .join("");
     grid.querySelectorAll(".jf-filter-agency").forEach((btn) => {
       btn.addEventListener("click", () => {
-        c.querySelector("#jf-q").value = btn.dataset.agency;
+        c.querySelector("#jf-q").value = btn.dataset.agency.split(",")[0].trim();
         c.querySelector("#jf-platform").value = "Staffing";
-        loadJobs();
+        loadJobs(false);
       });
     });
   };
@@ -955,8 +985,58 @@ async function renderLiveJobs(c) {
     renderStaffingDrawerList(e.target.value);
   });
 
-  const loadJobs = async () => {
-    const category = c.querySelector("#jf-cat").value;
+  const syncFilterVisualState = () => {
+    const defs = [
+      { id: "jf-platform", def: "ALL", label: "Platform" },
+      { id: "jf-recency", def: "0", label: "Posted" },
+      { id: "jf-sponsorship", def: "ALL", label: "Visa" },
+      { id: "jf-role-type", def: "ALL", label: "Type" },
+      { id: "jf-exp", def: "ALL", label: "Exp" },
+      { id: "jf-work-mode", def: "ALL", label: "Mode" }
+    ];
+    const activeItems = [];
+    defs.forEach(({ id, def, label }) => {
+      const el = c.querySelector(`#${id}`);
+      if (!el) return;
+      const isAct = el.value !== def;
+      el.classList.toggle("is-filtered", isAct);
+      if (isAct) {
+        const text = el.options[el.selectedIndex]?.text || el.value;
+        activeItems.push({ id, def, text: `${label}: ${text}` });
+      }
+    });
+    const qEl = c.querySelector("#jf-q");
+    if (qEl && qEl.value.trim()) {
+      activeItems.push({ id: "jf-q", def: "", text: `Search: "${qEl.value.trim()}"` });
+    }
+
+    const bar = c.querySelector("#jf-active-chips");
+    const resetBtn = c.querySelector("#jf-reset");
+    if (resetBtn) resetBtn.style.display = activeItems.length > 0 ? "inline-flex" : "none";
+
+    if (activeItems.length === 0) {
+      bar.classList.remove("visible");
+      bar.innerHTML = "";
+    } else {
+      bar.classList.add("visible");
+      bar.innerHTML = activeItems
+        .map(
+          (it) =>
+            `<button type="button" class="active-filter-pill" data-clear-id="${esc(it.id)}" data-clear-def="${esc(it.def)}">${esc(it.text)} <span>✕</span></button>`
+        )
+        .join("");
+      bar.querySelectorAll("[data-clear-id]").forEach((pill) => {
+        pill.addEventListener("click", () => {
+          const target = c.querySelector(`#${pill.dataset.clearId}`);
+          if (target) target.value = pill.dataset.clearDef;
+          loadJobs(false);
+        });
+      });
+    }
+  };
+
+  const loadJobs = async (forceRefresh = false) => {
+    syncFilterVisualState();
     const platform = c.querySelector("#jf-platform").value;
     const maxHoursAgo = Number(c.querySelector("#jf-recency").value) || 0;
     const sponsorship = c.querySelector("#jf-sponsorship").value;
@@ -965,59 +1045,78 @@ async function renderLiveJobs(c) {
     const workMode = c.querySelector("#jf-work-mode").value;
     const query = c.querySelector("#jf-q").value.trim();
     const wrap = c.querySelector("#jf-grid-wrap");
-    wrap.innerHTML = `<div class="card">⏳ Pulling &amp; scoring roles across Workday, LinkedIn, Dice, 128 Staffing Agencies, Greenhouse &amp; Ashby...</div>`;
-    const resp = await chrome.runtime.sendMessage({
-      type: "FETCH_RECOMMENDED_JOBS",
-      payload: {
-        category,
-        platform,
-        maxHoursAgo,
-        sponsorship,
-        roleType,
-        experienceRange,
-        workMode,
-        query,
-        limit: 120
+
+    const filterPayload = {
+      category: "ALL",
+      platform,
+      maxHoursAgo,
+      sponsorship,
+      roleType,
+      experienceRange,
+      workMode,
+      query,
+      forceRefresh,
+      limit: 140
+    };
+
+    let jobs = [];
+    try {
+      const resp = await chrome.runtime.sendMessage({
+        type: "FETCH_RECOMMENDED_JOBS",
+        payload: filterPayload
+      });
+      if (Array.isArray(resp?.jobs) && resp.jobs.length > 0) {
+        jobs = resp.jobs;
       }
-    });
-    cachedLiveJobs = resp?.jobs || [];
+    } catch (_) {}
+
+    // Direct module fallback guarantees Live Jobs always renders even if background worker was reloaded or idle
+    if (jobs.length === 0) {
+      try {
+        jobs = await fetchPersonalizedRecommendations(STATE?.profile || {}, filterPayload);
+      } catch (_) {}
+    }
+
+    cachedLiveJobs = jobs;
     if (cachedLiveJobs.length === 0) {
-      wrap.innerHTML = `<div class="card">No matching roles found for the active filter combination. Click <strong>Reset Filters</strong> to broaden your search.</div>`;
+      wrap.innerHTML = `<div class="card" style="text-align:center;color:#94a3b8;">No matching roles found for this filter combination. Click <strong>Reset Filters</strong> to show all live jobs.</div>`;
       return;
     }
+
     wrap.innerHTML = `
       <div style="margin-bottom:12px;font-size:13px;color:#94a3b8;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-        <span>Showing <strong>${cachedLiveJobs.length}</strong> live roles across Workday, LinkedIn, Dice, Staffing Agencies, Greenhouse &amp; Ashby:</span>
-        <span style="font-size:11.5px;color:#10b981;">⚡ Instant Cached + Parallel Multi-Board Engine Active</span>
+        <span>Showing <strong style="color:#fff;">${cachedLiveJobs.length}</strong> live roles across Workday, LinkedIn, Dice, Staffing Agencies, Greenhouse, Ashby &amp; Lever</span>
+        <span style="font-size:11.5px;color:#10b981;">● Multi-Platform Live Feed Synced</span>
       </div>
       <div class="job-feed-grid">
         ${cachedLiveJobs
           .map(
             (j, idx) => `
-          <div class="job-card">
+          <div class="job-card" data-hub-job-card="true">
             <div>
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:4px;flex-wrap:wrap;">
                 <span class="chip indigo">${esc(j.company)} • ${esc(j.ats)}</span>
                 <span class="chip green">${j.matchScore}% Match</span>
               </div>
               <div style="font-weight:700;font-size:14.5px;color:#fff;margin-bottom:4px;">${esc(j.title)}</div>
-              <div style="font-size:12px;color:#94a3b8;margin-bottom:6px;">📍 ${esc(j.location)} ${j.compensation ? `• 💰 ${esc(j.compensation)}` : ""}</div>
-              <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px;">
-                <span class="chip" style="background:rgba(56,189,248,0.14);color:#38bdf8;font-size:10.5px;">⏱️ ${esc(j.postedLabel || "Recent")}</span>
-                <span class="chip" style="background:rgba(168,85,247,0.14);color:#c084fc;font-size:10.5px;">💼 ${esc(j.roleType || "Full-Time")}</span>
-                <span class="chip" style="background:rgba(245,158,11,0.14);color:#fbbf24;font-size:10.5px;">📊 ${esc(j.experienceLabel || `${j.experienceRange || "2-3"} Yrs`)}</span>
+              <div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">${esc(j.location)}${j.compensation ? ` • <span style="color:#34d399;font-weight:600;">${esc(j.compensation)}</span>` : ""}</div>
+              <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px;">
+                <span class="chip" style="background:rgba(56,189,248,0.12);color:#7dd3fc;font-size:10.5px;">${esc(j.postedLabel || "Recent")}</span>
+                <span class="chip" style="background:rgba(168,85,247,0.12);color:#d8b4fe;font-size:10.5px;">${esc(j.roleType || "Full-Time")}</span>
+                <span class="chip" style="background:rgba(245,158,11,0.12);color:#fcd34d;font-size:10.5px;">${esc(j.experienceLabel || `${j.experienceRange || "2-3"} Yrs`)}</span>
+                <span class="chip" style="background:rgba(148,163,184,0.12);color:#cbd5e1;font-size:10.5px;">${esc(j.workMode || "Hybrid")}</span>
                 ${
                   j.h1bSponsor
-                    ? `<span class="chip" style="background:rgba(16,185,129,0.15);color:#34d399;font-size:10.5px;">🛂 ${esc(j.sponsorshipType || "H-1B Sponsor")}</span>`
+                    ? `<span class="chip" style="background:rgba(16,185,129,0.13);color:#6ee7b7;font-size:10.5px;">${esc(j.sponsorshipType || "H-1B Sponsor")}</span>`
                     : ""
                 }
               </div>
             </div>
             <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
-              <button class="btn sm emerald jf-launch-auto" data-idx="${idx}" style="flex:1.2;">🚀 Auto-Apply</button>
+              <button class="btn sm emerald jf-launch-auto" data-idx="${idx}" style="flex:1.2;">⚡ Auto-Apply</button>
               <a class="btn sm primary" href="${esc(j.url)}" target="_blank" style="flex:0.8;">Open ↗</a>
-              <button class="btn sm secondary jf-save" data-idx="${idx}">📌</button>
-              <button class="btn sm secondary jf-ap" data-idx="${idx}" title="Add to Autopilot Queue">🤖</button>
+              <button class="btn sm secondary jf-save" data-idx="${idx}" title="Save to Tracker">📌</button>
+              <button class="btn sm secondary jf-ap" data-idx="${idx}" title="Queue in Autopilot">🤖</button>
             </div>
           </div>`
           )
@@ -1030,7 +1129,7 @@ async function renderLiveJobs(c) {
         const j = cachedLiveJobs[Number(b.dataset.idx)];
         b.disabled = true;
         b.textContent = "⏳ In Flight...";
-        toast(`🤖 Running silent background Auto-Apply for ${j.company} (In Flight → Filled → Submitted in Tracker)!`);
+        toast(`Started background Auto-Apply for ${j.company}!`);
         await chrome.runtime.sendMessage({
           type: "LAUNCH_TAB_AND_AUTO_APPLY",
           payload: {
@@ -1065,7 +1164,7 @@ async function renderLiveJobs(c) {
           }
         });
         await reloadState();
-        toast(`📌 Saved ${j.company} — ${j.title}!`);
+        toast(`Saved ${j.company} — ${j.title}`);
       });
     });
 
@@ -1074,45 +1173,33 @@ async function renderLiveJobs(c) {
         const j = cachedLiveJobs[Number(b.dataset.idx)];
         await chrome.runtime.sendMessage({ type: "ENQUEUE_AUTOPILOT", payload: { job: j } });
         await reloadState();
-        toast(`🤖 Queued ${j.company} for Autopilot!`);
+        toast(`Queued ${j.company} for Autopilot`);
       });
     });
   };
 
-  c.querySelectorAll(".jf-quick-time").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      c.querySelector("#jf-recency").value = btn.dataset.hrs;
-      loadJobs();
-    });
-  });
-
-  c.querySelector("#jf-quick-h1b").addEventListener("click", () => {
-    const sel = c.querySelector("#jf-sponsorship");
-    sel.value = sel.value === "H-1B Sponsor" ? "All" : "H-1B Sponsor";
-    loadJobs();
-  });
-
   c.querySelector("#jf-reset").addEventListener("click", () => {
-    c.querySelector("#jf-platform").value = "All";
+    c.querySelector("#jf-platform").value = "ALL";
     c.querySelector("#jf-recency").value = "0";
-    c.querySelector("#jf-sponsorship").value = "All";
-    c.querySelector("#jf-role-type").value = "All";
-    c.querySelector("#jf-exp").value = "All";
-    c.querySelector("#jf-work-mode").value = "All";
-    c.querySelector("#jf-cat").value = "All";
+    c.querySelector("#jf-sponsorship").value = "ALL";
+    c.querySelector("#jf-role-type").value = "ALL";
+    c.querySelector("#jf-exp").value = "ALL";
+    c.querySelector("#jf-work-mode").value = "ALL";
     c.querySelector("#jf-q").value = "";
-    loadJobs();
+    loadJobs(false);
   });
 
-  c.querySelector("#jf-refresh").addEventListener("click", loadJobs);
-  ["#jf-cat", "#jf-platform", "#jf-recency", "#jf-sponsorship", "#jf-role-type", "#jf-exp", "#jf-work-mode"].forEach((sel) => {
-    c.querySelector(sel).addEventListener("change", loadJobs);
+  c.querySelector("#jf-refresh").addEventListener("click", () => loadJobs(true));
+  ["#jf-platform", "#jf-recency", "#jf-sponsorship", "#jf-role-type", "#jf-exp", "#jf-work-mode"].forEach((sel) => {
+    c.querySelector(sel).addEventListener("change", () => loadJobs(false));
   });
-  c.querySelector("#jf-q").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") loadJobs();
+  let searchTimer = null;
+  c.querySelector("#jf-q").addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => loadJobs(false), 120);
   });
 
-  loadJobs();
+  await loadJobs(false);
 }
 
 function renderAutopilot(c) {

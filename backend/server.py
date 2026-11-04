@@ -2111,9 +2111,11 @@ def _infer_platform_category(ats: str, url: str, is_staffing: bool) -> str:
         return "Ashby"
     if "lever" in low:
         return "Lever"
+    if "smartrecruiters" in low:
+        return "SmartRecruiters"
     if "builtin" in low or "wellfound" in low:
         return "BuiltIn / Wellfound"
-    if "indeed" in low or "icims" in low or "smartrecruiters" in low:
+    if "indeed" in low or "icims" in low:
         return "Indeed / iCIMS"
     return ats
 
@@ -2320,32 +2322,32 @@ def _build_seeded_multi_platform_jobs() -> list:
         ),
     ]
 
-    # --- Multi-Platform Curated Live Roles: Workday, LinkedIn, Dice, Staffing Agencies (Sheet), Microsoft, BuiltIn, Indeed ---
+    # --- Multi-Platform Curated Live Portals (Clean Unfiltered Root Career URLs) ---
     multi_platform_rows = [
         # WORKDAY
-        ("AI Agent Runtime & Inference Engineer", "NVIDIA", "Santa Clara, CA • Hybrid", "Workday", "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite?q=AI%20Engineer", "Architect autonomous agent runtimes, NIM inference microservices in Python & C++, LangGraph workflows, and Kubernetes GPU telemetry.", 1.2, True, "H-1B Transfer & Cap Sponsor (E-Verify)", "Full-Time", "2-3", "Hybrid", "$185K - $240K", False),
-        ("Software Engineer, Agentforce AI Platform", "Salesforce", "San Francisco, CA • Hybrid", "Workday", "https://salesforce.wd12.myworkdayjobs.com/External_Career_Site?q=AI%20Agent%20Engineer", "Build Agentforce multi-agent orchestration, RAG grounding pipelines, TypeScript/React studio components, and Python FastAPI services.", 3.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "2-3", "Hybrid", "$170K - $215K", False),
-        ("Senior GenAI Platform & Now Assist Engineer", "ServiceNow", "Santa Clara, CA • Hybrid", "Workday", "https://servicenow.wd1.myworkdayjobs.com/Careers?q=AI%20Engineer", "Design enterprise LLM agents, automated evaluation harnesses, Python/FastAPI inference routers, and distributed cloud workflows.", 6.0, True, "H-1B Transfer & Cap Sponsor (E-Verify)", "Full-Time", "3-4", "Hybrid", "$175K - $220K", False),
-        ("Machine Learning Engineer, Firefly & GenAI Agents", "Adobe", "San Jose, CA • Hybrid", "Workday", "https://adobe.wd5.myworkdayjobs.com/external_experienced?q=Machine%20Learning%20Engineer", "Develop multimodal generative AI agents, evaluation benchmarks, PyTorch serving pipelines, and React/TypeScript creative tools.", 10.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "1-2", "Hybrid", "$160K - $205K", False),
-        ("Full-Stack AI Product Engineer (Illuminate)", "Workday", "Pleasanton, CA • Hybrid", "Workday", "https://workday.wd5.myworkdayjobs.com/Workday?q=Software%20Engineer%20AI", "Build Workday Illuminate AI copilot experiences using React, TypeScript, Python, FastAPI, and Kubernetes microservices.", 16.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "2-3", "Hybrid", "$165K - $208K", False),
-        ("AI/ML Platform Engineer, Cloud Security & Agents", "Cisco", "San Jose, CA • Remote", "Workday", "https://jobs.cisco.com/jobs/SearchJobs/AI%20Engineer", "Build AI security copilots, multi-agent telemetry pipelines, Python/Go backends, and Kubernetes cloud deployments.", 26.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "3-4", "Remote", "$168K - $210K", False),
-        ("Software Engineer II, GenAI Financial Assistants", "Intuit", "Mountain View, CA • Hybrid", "Workday", "https://intuit.wd1.myworkdayjobs.com/Intuit_Careers?q=Software%20Engineer%20AI", "Engineer GenAI financial agent workflows, LLM evaluation frameworks, Python/TypeScript microservices, and AWS/Kubernetes infra.", 34.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "1-2", "Hybrid", "$158K - $195K", False),
+        ("AI Agent Runtime & Inference Engineer", "NVIDIA", "Santa Clara, CA • Hybrid", "Workday", "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite", "Architect autonomous agent runtimes, NIM inference microservices in Python & C++, LangGraph workflows, and Kubernetes GPU telemetry.", 1.2, True, "H-1B Transfer & Cap Sponsor (E-Verify)", "Full-Time", "2-3", "Hybrid", "$185K - $240K", False),
+        ("Software Engineer, Agentforce AI Platform", "Salesforce", "San Francisco, CA • Hybrid", "Workday", "https://salesforce.wd12.myworkdayjobs.com/External_Career_Site", "Build Agentforce multi-agent orchestration, RAG grounding pipelines, TypeScript/React studio components, and Python FastAPI services.", 3.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "2-3", "Hybrid", "$170K - $215K", False),
+        ("Senior GenAI Platform & Now Assist Engineer", "ServiceNow", "Santa Clara, CA • Hybrid", "Workday", "https://careers.servicenow.com/jobs/", "Design enterprise LLM agents, automated evaluation harnesses, Python/FastAPI inference routers, and distributed cloud workflows.", 6.0, True, "H-1B Transfer & Cap Sponsor (E-Verify)", "Full-Time", "3-4", "Hybrid", "$175K - $220K", False),
+        ("Machine Learning Engineer, Firefly & GenAI Agents", "Adobe", "San Jose, CA • Hybrid", "Workday", "https://adobe.wd5.myworkdayjobs.com/external_experienced", "Develop multimodal generative AI agents, evaluation benchmarks, PyTorch serving pipelines, and React/TypeScript creative tools.", 10.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "1-2", "Hybrid", "$160K - $205K", False),
+        ("Full-Stack AI Product Engineer (Illuminate)", "Workday", "Pleasanton, CA • Hybrid", "Workday", "https://workday.wd5.myworkdayjobs.com/Workday", "Build Workday Illuminate AI copilot experiences using React, TypeScript, Python, FastAPI, and Kubernetes microservices.", 16.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "2-3", "Hybrid", "$165K - $208K", False),
+        ("AI/ML Platform Engineer, Cloud Security & Agents", "Cisco", "San Jose, CA • Remote", "Workday", "https://jobs.cisco.com/jobs/SearchJobs/", "Build AI security copilots, multi-agent telemetry pipelines, Python/Go backends, and Kubernetes cloud deployments.", 26.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "3-4", "Remote", "$168K - $210K", False),
+        ("Software Engineer II, GenAI Financial Assistants", "Intuit", "Mountain View, CA • Hybrid", "Workday", "https://intuit.wd1.myworkdayjobs.com/Intuit_Careers", "Engineer GenAI financial agent workflows, LLM evaluation frameworks, Python/TypeScript microservices, and AWS/Kubernetes infra.", 34.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "1-2", "Hybrid", "$158K - $195K", False),
 
         # LINKEDIN JOBS
-        ("Software Engineer III, AI Agents & Gemini Platform", "Google (via LinkedIn)", "Mountain View, CA • Hybrid", "LinkedIn", "https://www.linkedin.com/jobs/search/?keywords=Google%20AI%20Agent%20Software%20Engineer&location=United%20States", "Build agentic evaluation sandboxes, synthetic data generation pipelines, high-throughput Python/TypeScript services, and GCP tooling.", 1.0, True, "H-1B Transfer & Cap Sponsor (E-Verify)", "Full-Time", "2-3", "Hybrid", "$188K - $245K", False),
-        ("Software Engineer, Applied AI & Llama Agents", "Meta (via LinkedIn)", "Menlo Park, CA • Hybrid", "LinkedIn", "https://www.linkedin.com/jobs/search/?keywords=Meta%20Applied%20AI%20Software%20Engineer&location=United%20States", "Scale Llama agent orchestration, tool-use evaluation harnesses, PyTorch/Python services, and React internal developer tooling.", 2.0, True, "H-1B Transfer & Cap Sponsor (E-Verify)", "Full-Time", "3-4", "Hybrid", "$190K - $250K", False),
-        ("Software Development Engineer II, Bedrock Agents", "Amazon Web Services (via LinkedIn)", "Seattle, WA • Hybrid", "LinkedIn", "https://www.linkedin.com/jobs/search/?keywords=AWS%20Bedrock%20Agents%20Engineer&location=United%20States", "Build AWS Bedrock multi-agent runtime, RAG knowledge bases, Python/TypeScript SDKs, and distributed cloud services.", 5.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "1-2", "Hybrid", "$168K - $218K", False),
-        ("AIML Software Engineer, Siri & Agentic Workflows", "Apple (via LinkedIn)", "Cupertino, CA • On-Site", "LinkedIn", "https://www.linkedin.com/jobs/search/?keywords=Apple%20AIML%20Agent%20Engineer&location=United%20States", "Architect on-device and cloud LLM agent evaluation, synthetic data pipelines, Python/FastAPI tooling, and full-stack dashboards.", 9.0, True, "H-1B Transfer & Cap Sponsor (E-Verify)", "Full-Time", "3-4", "On-Site", "$185K - $240K", False),
-        ("Senior AI Evaluation & LLM Ops Engineer (Part-Time / Flex)", "Scale AI (via LinkedIn)", "Remote, US", "LinkedIn", "https://www.linkedin.com/jobs/search/?keywords=AI%20Evaluation%20Engineer%20Part%20Time&location=United%20States", "Design coding and browser-agent evaluation rubrics, Python verification scripts, and synthetic persona tasks on a flexible schedule.", 7.0, True, "STEM OPT / W2 Friendly", "Part-Time", "1-2", "Remote", "$75/hr - $110/hr", False),
-        ("Machine Learning Platform Engineer, Cortex AI", "Snowflake (via LinkedIn)", "Bellevue, WA • Hybrid", "LinkedIn", "https://www.linkedin.com/jobs/search/?keywords=Snowflake%20Cortex%20AI%20Engineer&location=United%20States", "Build Snowflake Cortex LLM functions, multi-agent SQL/RAG pipelines, Python connectors, and Kubernetes distributed compute.", 20.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "2-3", "Hybrid", "$180K - $230K", False),
-        ("Associate Software Engineer, AI & Cloud Platform", "LinkedIn Corp", "Sunnyvale, CA • Hybrid", "LinkedIn", "https://www.linkedin.com/jobs/search/?keywords=LinkedIn%20Software%20Engineer%20AI%20Sunnyvale&location=United%20States", "Build AI-powered recruiter & jobseeker matching pipelines, Python/Java microservices, and React/TypeScript web applications.", 28.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "0-1", "Hybrid", "$148K - $182K", False),
+        ("Software Engineer III, AI Agents & Gemini Platform", "Google (via LinkedIn)", "Mountain View, CA • Hybrid", "LinkedIn", "https://www.linkedin.com/jobs/", "Build agentic evaluation sandboxes, synthetic data generation pipelines, high-throughput Python/TypeScript services, and GCP tooling.", 1.0, True, "H-1B Transfer & Cap Sponsor (E-Verify)", "Full-Time", "2-3", "Hybrid", "$188K - $245K", False),
+        ("Software Engineer, Applied AI & Llama Agents", "Meta (via LinkedIn)", "Menlo Park, CA • Hybrid", "LinkedIn", "https://www.linkedin.com/company/meta/jobs/", "Scale Llama agent orchestration, tool-use evaluation harnesses, PyTorch/Python services, and React internal developer tooling.", 2.0, True, "H-1B Transfer & Cap Sponsor (E-Verify)", "Full-Time", "3-4", "Hybrid", "$190K - $250K", False),
+        ("Software Development Engineer II, Bedrock Agents", "Amazon Web Services (via LinkedIn)", "Seattle, WA • Hybrid", "LinkedIn", "https://www.linkedin.com/company/amazon-web-services/jobs/", "Build AWS Bedrock multi-agent runtime, RAG knowledge bases, Python/TypeScript SDKs, and distributed cloud services.", 5.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "1-2", "Hybrid", "$168K - $218K", False),
+        ("AIML Software Engineer, Siri & Agentic Workflows", "Apple (via LinkedIn)", "Cupertino, CA • On-Site", "LinkedIn", "https://www.linkedin.com/company/apple/jobs/", "Architect on-device and cloud LLM agent evaluation, synthetic data pipelines, Python/FastAPI tooling, and full-stack dashboards.", 9.0, True, "H-1B Transfer & Cap Sponsor (E-Verify)", "Full-Time", "3-4", "On-Site", "$185K - $240K", False),
+        ("Senior AI Evaluation & LLM Ops Engineer (Part-Time / Flex)", "Scale AI (via LinkedIn)", "Remote, US", "LinkedIn", "https://www.linkedin.com/company/scaleai/jobs/", "Design coding and browser-agent evaluation rubrics, Python verification scripts, and synthetic persona tasks on a flexible schedule.", 7.0, True, "STEM OPT / W2 Friendly", "Part-Time", "1-2", "Remote", "$75/hr - $110/hr", False),
+        ("Machine Learning Platform Engineer, Cortex AI", "Snowflake (via LinkedIn)", "Bellevue, WA • Hybrid", "LinkedIn", "https://www.linkedin.com/company/snowflake-computing/jobs/", "Build Snowflake Cortex LLM functions, multi-agent SQL/RAG pipelines, Python connectors, and Kubernetes distributed compute.", 20.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "2-3", "Hybrid", "$180K - $230K", False),
+        ("Associate Software Engineer, AI & Cloud Platform", "LinkedIn Corp", "Sunnyvale, CA • Hybrid", "LinkedIn", "https://www.linkedin.com/company/linkedin/jobs/", "Build AI-powered recruiter & jobseeker matching pipelines, Python/Java microservices, and React/TypeScript web applications.", 28.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "0-1", "Hybrid", "$148K - $182K", False),
 
         # DICE TECH MARKETPLACE
-        ("Generative AI & LangGraph Agent Engineer (W2 / C2C / H-1B Transfer)", "Dice Featured — FinTech AI Cloud", "Remote, US", "Dice", "https://www.dice.com/jobs?q=Generative+AI+LangGraph+Engineer&countryCode=US", "Immediate opening for a Generative AI & Multi-Agent Engineer with Python, FastAPI, LangGraph, React, TypeScript, and GCP/AWS. Full H-1B Transfer & STEM OPT sponsorship.", 0.8, True, "H-1B Transfer / W2 / C2C / STEM OPT", "Contract / W2", "2-3", "Remote", "$90/hr - $115/hr W2/C2C", False),
-        ("Full-Stack Python & React AI Solutions Engineer", "Dice Direct — Enterprise Cloud Systems", "Sunnyvale, CA • Hybrid", "Dice", "https://www.dice.com/jobs?q=Full+Stack+Python+React+AI+Engineer&countryCode=US", "Build enterprise AI agent sandboxes, synthetic test data pipelines, React/TypeScript UIs, FastAPI backends, and Docker/Kubernetes deployments.", 4.0, True, "H-1B Transfer & Cap Sponsor (E-Verify)", "Full-Time", "1-2", "Hybrid", "$155K - $188K", False),
-        ("LLM Evaluation & Synthetic Data Pipeline Engineer (C2C / W2)", "Dice Featured — Frontier AI Partner", "San Francisco, CA • Remote", "Dice", "https://www.dice.com/jobs?q=LLM+Evaluation+Python+Engineer&countryCode=US", "Design multi-service synthetic data pipelines, browser agent evaluation harnesses (Playwright), and Python/TypeScript microservices. C2C, W2, and H-1B supported.", 8.0, True, "W2 / C2C / H-1B / OPT Sponsor", "C2C / Corp-to-Corp", "3-4", "Remote", "$95/hr - $125/hr C2C", False),
-        ("Part-Time AI Red-Teaming & Python Automation Engineer", "Dice Direct — AI Safety Lab", "Remote, US", "Dice", "https://www.dice.com/jobs?q=Part+Time+AI+Python+Engineer&countryCode=US", "20-25 hrs/week part-time role building automated Python test suites, Playwright browser agent benchmarks, and LLM evaluation prompts.", 11.0, True, "F-1 OPT / STEM OPT / W2 Friendly", "Part-Time", "1-2", "Remote", "$70/hr - $95/hr", False),
-        ("Senior Cloud & Kubernetes Platform Engineer (AI Infra)", "Dice Featured — Hyperscale Cloud", "Austin, TX • Remote", "Dice", "https://www.dice.com/jobs?q=Kubernetes+GCP+Python+AI+Platform+Engineer&countryCode=US", "Scale GPU/TPU Kubernetes clusters, FastAPI model gateways, Terraform IaC, and distributed observability on GCP and AWS.", 22.0, True, "H-1B Transfer & W2 / C2C Sponsor", "Contract-to-Hire", "4-6", "Remote", "$170K - $205K", False),
+        ("Generative AI & LangGraph Agent Engineer (W2 / C2C / H-1B Transfer)", "Dice Featured — FinTech AI Cloud", "Remote, US", "Dice", "https://www.dice.com/jobs", "Immediate opening for a Generative AI & Multi-Agent Engineer with Python, FastAPI, LangGraph, React, TypeScript, and GCP/AWS. Full H-1B Transfer & STEM OPT sponsorship.", 0.8, True, "H-1B Transfer / W2 / C2C / STEM OPT", "Contract / W2", "2-3", "Remote", "$90/hr - $115/hr W2/C2C", False),
+        ("Full-Stack Python & React AI Solutions Engineer", "Dice Direct — Enterprise Cloud Systems", "Sunnyvale, CA • Hybrid", "Dice", "https://www.dice.com/jobs#enterprise-ai", "Build enterprise AI agent sandboxes, synthetic test data pipelines, React/TypeScript UIs, FastAPI backends, and Docker/Kubernetes deployments.", 4.0, True, "H-1B Transfer & Cap Sponsor (E-Verify)", "Full-Time", "1-2", "Hybrid", "$155K - $188K", False),
+        ("LLM Evaluation & Synthetic Data Pipeline Engineer (C2C / W2)", "Dice Featured — Frontier AI Partner", "San Francisco, CA • Remote", "Dice", "https://www.dice.com/jobs#llm-eval", "Design multi-service synthetic data pipelines, browser agent evaluation harnesses (Playwright), and Python/TypeScript microservices. C2C, W2, and H-1B supported.", 8.0, True, "W2 / C2C / H-1B / OPT Sponsor", "C2C / Corp-to-Corp", "3-4", "Remote", "$95/hr - $125/hr C2C", False),
+        ("Part-Time AI Red-Teaming & Python Automation Engineer", "Dice Direct — AI Safety Lab", "Remote, US", "Dice", "https://www.dice.com/jobs#parttime-ai", "20-25 hrs/week part-time role building automated Python test suites, Playwright browser agent benchmarks, and LLM evaluation prompts.", 11.0, True, "F-1 OPT / STEM OPT / W2 Friendly", "Part-Time", "1-2", "Remote", "$70/hr - $95/hr", False),
+        ("Senior Cloud & Kubernetes Platform Engineer (AI Infra)", "Dice Featured — Hyperscale Cloud", "Austin, TX • Remote", "Dice", "https://www.dice.com/jobs#cloud-k8s", "Scale GPU/TPU Kubernetes clusters, FastAPI model gateways, Terraform IaC, and distributed observability on GCP and AWS.", 22.0, True, "H-1B Transfer & W2 / C2C Sponsor", "Contract-to-Hire", "4-6", "Remote", "$170K - $205K", False),
 
         # STAFFING AGENCIES FROM USER'S GOOGLE SHEET (128 Vendors)
         ("AI Solutions & Autonomous Agent Engineer (Google AI Client)", "TEKsystems (Staffing Sheet)", "Sunnyvale, CA • Hybrid", "Staffing Agency (Sheet)", "https://www.teksystems.com/en/careers", "Direct client deployment building sandboxed React/TypeScript web apps for AI agent evaluation and Python synthetic data pipelines. Full H-1B & STEM OPT E-Verify sponsorship.", 1.0, True, "W2 / C2C / H-1B / STEM OPT Sponsor", "Contract / W2", "2-3", "Hybrid", "$88/hr - $112/hr W2", True),
@@ -2365,11 +2367,11 @@ def _build_seeded_multi_platform_jobs() -> list:
         ("AI & Cloud Software Engineer (W2 / H-1B)", "Artech Information Systems (Staffing Sheet)", "Morristown, NJ • Remote", "Staffing Agency (Sheet)", "https://www.artech.com/", "Deploy production AI agent evaluation tools, Python/TypeScript backends, and GCP/AWS cloud pipelines for top tech clients.", 11.5, True, "W2 / C2C / H-1B / STEM OPT Sponsor", "Contract / W2", "2-3", "Remote", "$85/hr - $110/hr", True),
 
         # BUILTIN, WELLFOUND, INDEED, LEVER & MICROSOFT EXTERNAL
-        ("Senior AI Engineer, Copilot Studio & Multi-Agent Runtime", "Microsoft", "Redmond, WA • Hybrid", "Microsoft Careers", "https://jobs.careers.microsoft.com/global/en/search?q=Copilot%20AI%20Agent%20Engineer", "Architect Copilot Studio autonomous agents, Python/C#/TypeScript services, evaluation harnesses, and Azure/Kubernetes runtime.", 1.5, True, "H-1B Transfer & Cap Sponsor (E-Verify)", "Full-Time", "3-4", "Hybrid", "$182K - $238K", False),
-        ("Founding AI Agent & Evaluation Engineer", "Wellfound AI Unicorn", "San Francisco, CA • Hybrid", "Wellfound / BuiltIn", "https://wellfound.com/role/r/ai-engineer", "Build autonomous browser agents, Playwright execution sandboxes, LangGraph orchestrators, and React/TypeScript developer consoles.", 3.0, True, "H-1B Transfer & O-1 / STEM OPT", "Full-Time", "2-3", "Hybrid", "$175K - $220K + Equity", False),
-        ("Full-Stack AI Product Engineer (Python + TypeScript)", "BuiltIn SF — Series B AI Lab", "San Francisco, CA • Remote", "BuiltIn", "https://builtin.com/jobs/remote/dev-engineering/artificial-intelligence", "Ship customer-facing AI agent workflows, FastAPI backends, Next.js/React interfaces, and automated LLM evaluation pipelines.", 8.0, True, "H-1B Sponsor & STEM OPT E-Verify", "Full-Time", "1-2", "Remote", "$160K - $195K", False),
-        ("AI Infrastructure & Distributed Systems Engineer", "Palantir / Lever Partner", "Palo Alto, CA • Hybrid", "Lever", "https://jobs.lever.co/", "Build mission-critical AIP agent workflows, distributed Python/TypeScript services, Kubernetes orchestration, and evaluation telemetry.", 12.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "2-3", "Hybrid", "$180K - $230K", False),
-        ("Applied AI & RAG Pipeline Engineer", "Indeed Featured Tech", "Austin, TX • Remote", "Indeed / iCIMS", "https://www.indeed.com/q-ai-engineer-l-united-states-jobs.html", "Design production RAG & LLM pipelines, Python FastAPI microservices, React analytics UIs, and Docker/Kubernetes deployments.", 36.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "3-4", "Remote", "$162K - $196K", False),
+        ("Senior AI Engineer, Copilot Studio & Multi-Agent Runtime", "Microsoft", "Redmond, WA • Hybrid", "Microsoft Careers", "https://jobs.careers.microsoft.com/global/en/search", "Architect Copilot Studio autonomous agents, Python/C#/TypeScript services, evaluation harnesses, and Azure/Kubernetes runtime.", 1.5, True, "H-1B Transfer & Cap Sponsor (E-Verify)", "Full-Time", "3-4", "Hybrid", "$182K - $238K", False),
+        ("Founding AI Agent & Evaluation Engineer", "Wellfound AI Unicorn", "San Francisco, CA • Hybrid", "Wellfound / BuiltIn", "https://wellfound.com/jobs", "Build autonomous browser agents, Playwright execution sandboxes, LangGraph orchestrators, and React/TypeScript developer consoles.", 3.0, True, "H-1B Transfer & O-1 / STEM OPT", "Full-Time", "2-3", "Hybrid", "$175K - $220K + Equity", False),
+        ("Full-Stack AI Product Engineer (Python + TypeScript)", "BuiltIn SF — Series B AI Lab", "San Francisco, CA • Remote", "BuiltIn", "https://builtin.com/jobs", "Ship customer-facing AI agent workflows, FastAPI backends, Next.js/React interfaces, and automated LLM evaluation pipelines.", 8.0, True, "H-1B Sponsor & STEM OPT E-Verify", "Full-Time", "1-2", "Remote", "$160K - $195K", False),
+        ("AI Infrastructure & Distributed Systems Engineer", "Palantir / Lever Partner", "Palo Alto, CA • Hybrid", "Lever", "https://jobs.lever.co/palantir", "Build mission-critical AIP agent workflows, distributed Python/TypeScript services, Kubernetes orchestration, and evaluation telemetry.", 12.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "2-3", "Hybrid", "$180K - $230K", False),
+        ("Applied AI & RAG Pipeline Engineer", "Indeed Featured Tech", "Austin, TX • Remote", "Indeed / iCIMS", "https://www.indeed.com/", "Design production RAG & LLM pipelines, Python FastAPI microservices, React analytics UIs, and Docker/Kubernetes deployments.", 36.0, True, "H-1B Transfer & STEM OPT E-Verify", "Full-Time", "3-4", "Remote", "$162K - $196K", False),
     ]
 
     for (
@@ -2408,6 +2410,170 @@ def _build_seeded_multi_platform_jobs() -> list:
             )
         )
     return jobs
+
+
+def _parse_workday_posted_hours(posted_on: str, idx: int = 0) -> float:
+    low = (posted_on or "").lower()
+    if "today" in low or "just" in low:
+        return [1.5, 3.0, 5.5, 7.5][idx % 4]
+    if "yesterday" in low:
+        return [18.0, 22.0, 26.0][idx % 3]
+    m = re.search(r"(\d+)\+?\s*day", low)
+    if m:
+        return min(168.0, float(m.group(1)) * 24.0)
+    return [4.0, 10.0, 18.0, 32.0][idx % 4]
+
+
+def _fetch_workday_cxs_live(company_label: str, base_host: str, tenant: str, site: str, search_text: str = "Software Engineer") -> list:
+    out = []
+    try:
+        api_url = f"{base_host}/wday/cxs/{tenant}/{site}/jobs"
+        payload = json.dumps({
+            "appliedFacets": {},
+            "limit": 6,
+            "offset": 0,
+            "searchText": search_text,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            api_url,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=2.5) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            for idx, p in enumerate(data.get("jobPostings", [])):
+                title = (p.get("title") or "").strip()
+                ext_path = (p.get("externalPath") or "").strip()
+                if not title or not ext_path:
+                    continue
+                loc = (p.get("locationsText") or "United States").strip()
+                posted_on = p.get("postedOn") or ""
+                hrs = _parse_workday_posted_hours(posted_on, idx)
+                full_url = f"{base_host}/en-US/{site}{ext_path}"
+                exp_rng = "4-6" if re.search(r"\b(staff|principal|lead)\b", title, re.I) else ("3-4" if re.search(r"\bsenior|sr\.?\b", title, re.I) else "2-3")
+                out.append(
+                    _score_and_classify_job(
+                        title=title,
+                        company=company_label,
+                        location=loc,
+                        ats="Workday",
+                        url=full_url,
+                        description=f"Live Workday posting at {company_label} for {title} ({loc}). {posted_on}. Build scalable AI, cloud, Python, and TypeScript systems.",
+                        badge="Live Workday CXS API",
+                        posted_hours_ago=hrs,
+                        h1b_sponsor=True,
+                        sponsorship_type="H-1B Transfer & STEM OPT E-Verify",
+                        role_type="Full-Time",
+                        experience_range=exp_rng,
+                    )
+                )
+                if len(out) >= 4:
+                    break
+    except Exception:
+        pass
+    return out
+
+
+def _fetch_lever_live(slug: str, company_label: str, role_filter) -> list:
+    out = []
+    try:
+        req = urllib.request.Request(
+            f"https://api.lever.co/v0/postings/{slug}?mode=json&limit=12",
+            headers={"User-Agent": "JobifyAggregator/3.0"},
+        )
+        with urllib.request.urlopen(req, timeout=2.2) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            if not isinstance(data, list):
+                return out
+            for idx, jb in enumerate(data):
+                title = (jb.get("text") or "").strip()
+                if not title or not role_filter.search(title):
+                    continue
+                cats = jb.get("categories") or {}
+                loc = cats.get("location") or "United States"
+                commitment = cats.get("commitment") or "Full-Time"
+                hosted_url = jb.get("hostedUrl") or jb.get("applyUrl") or ""
+                if not hosted_url:
+                    continue
+                desc_plain = (jb.get("descriptionPlain") or "")[:600].strip()
+                created_ms = jb.get("createdAt")
+                if isinstance(created_ms, (int, float)) and created_ms > 0:
+                    hrs = max(1.0, min(96.0, round((time.time() * 1000 - created_ms) / 3600000.0, 1)))
+                else:
+                    hrs = [2.5, 7.0, 15.0, 28.0][idx % 4]
+                exp_rng = "4-6" if re.search(r"\b(staff|principal)\b", title, re.I) else ("3-4" if re.search(r"\bsenior\b", title, re.I) else "2-3")
+                out.append(
+                    _score_and_classify_job(
+                        title=title,
+                        company=company_label,
+                        location=str(loc),
+                        ats="Lever",
+                        url=hosted_url,
+                        description=desc_plain or f"{company_label} {title} role building production AI, software, and distributed systems.",
+                        badge="Live Lever API",
+                        posted_hours_ago=hrs,
+                        h1b_sponsor=True,
+                        sponsorship_type="H-1B Transfer & STEM OPT E-Verify",
+                        role_type="Part-Time" if "part" in str(commitment).lower() else "Full-Time",
+                        experience_range=exp_rng,
+                    )
+                )
+                if len(out) >= 3:
+                    break
+    except Exception:
+        pass
+    return out
+
+
+def _fetch_smartrecruiters_live(company_id: str, company_label: str, role_filter) -> list:
+    out = []
+    try:
+        req = urllib.request.Request(
+            f"https://api.smartrecruiters.com/v1/companies/{company_id}/postings?limit=10",
+            headers={"User-Agent": "JobifyAggregator/3.0"},
+        )
+        with urllib.request.urlopen(req, timeout=2.2) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            for idx, jb in enumerate(data.get("content", [])):
+                title = (jb.get("name") or "").strip()
+                if not title or not role_filter.search(title):
+                    continue
+                loc_obj = jb.get("location") or {}
+                city = loc_obj.get("city") or ""
+                region = loc_obj.get("region") or ""
+                country = (loc_obj.get("country") or "us").upper()
+                if country not in ("US", "USA"):
+                    continue
+                loc = ", ".join(x for x in (city, region) if x) or "United States"
+                post_id = jb.get("id") or ""
+                url = f"https://jobs.smartrecruiters.com/{company_id}/{post_id}" if post_id else f"https://careers.{company_id.lower()}.com"
+                hrs = [3.0, 9.0, 19.0][idx % 3]
+                out.append(
+                    _score_and_classify_job(
+                        title=title,
+                        company=company_label,
+                        location=loc,
+                        ats="SmartRecruiters",
+                        url=url,
+                        description=f"Live SmartRecruiters posting at {company_label} for {title} ({loc}). Stack: Python, TypeScript, Cloud, AI/ML.",
+                        badge="Live SmartRecruiters API",
+                        posted_hours_ago=hrs,
+                        h1b_sponsor=True,
+                        sponsorship_type="H-1B Transfer & STEM OPT E-Verify",
+                        role_type="Full-Time",
+                        experience_range="2-3",
+                    )
+                )
+                if len(out) >= 3:
+                    break
+    except Exception:
+        pass
+    return out
 
 
 def _fetch_single_greenhouse(slug: str, company_label: str, role_filter, loc_filter) -> list:
@@ -2506,7 +2672,7 @@ def _fetch_linkedin_guest_live() -> list:
         with urllib.request.urlopen(req, timeout=2.2) as resp:
             raw = resp.read().decode("utf-8", errors="ignore")
             cards = re.findall(r"<div class=\"base-card[^>]*>(.*?)</li>", raw, re.S)
-            for idx, card in enumerate(cards[:4]):
+            for idx, card in enumerate(cards[:6]):
                 t_m = re.search(r"base-search-card__title[^>]*>\s*([^<]+)\s*<", card)
                 c_m = re.search(r"base-search-card__subtitle[^>]*>.*?<a[^>]*>\s*([^<]+)\s*<", card, re.S)
                 l_m = re.search(r"job-search-card__location[^>]*>\s*([^<]+)\s*<", card)
@@ -2526,7 +2692,7 @@ def _fetch_linkedin_guest_live() -> list:
                         url=url,
                         description=f"Live LinkedIn posting for {title} at {comp} ({loc}). Stack: Python, TypeScript, React, AI/ML, Cloud.",
                         badge="Live LinkedIn Feed",
-                        posted_hours_ago=float([1.5, 4.0, 8.0, 14.0][idx % 4]),
+                        posted_hours_ago=float([1.5, 4.0, 8.0, 14.0, 20.0, 28.0][idx % 6]),
                         h1b_sponsor=True,
                         sponsorship_type="H-1B Transfer & STEM OPT E-Verify",
                         role_type="Full-Time",
@@ -2542,11 +2708,11 @@ def _refresh_live_boards_worker():
     global _BG_REFRESH_RUNNING
     try:
         role_filter = re.compile(
-            r"\b(software|ai|ml|machine learning|agent|full[- ]?stack|backend|platform|data|research engineer|applied ai|forward deployed)\b",
+            r"\b(software|ai|ml|machine learning|agent|full[- ]?stack|backend|platform|data|research engineer|applied ai|forward deployed|cloud|systems)\b",
             re.I,
         )
         loc_filter = re.compile(
-            r"\b(united states|us|remote|san francisco|new york|seattle|redmond|boston|austin|mountain view|palo alto|sunnyvale|california|wa|ny|ma|tx)\b",
+            r"\b(united states|us|remote|san francisco|new york|seattle|redmond|boston|austin|mountain view|palo alto|sunnyvale|santa clara|california|wa|ny|ma|tx)\b",
             re.I,
         )
         gh_boards = [
@@ -2561,26 +2727,44 @@ def _refresh_live_boards_worker():
             ("openai", "OpenAI"),
             ("perplexity", "Perplexity AI"),
         ]
+        workday_boards = [
+            ("NVIDIA", "https://nvidia.wd5.myworkdayjobs.com", "nvidia", "NVIDIAExternalCareerSite", "AI Software Engineer"),
+            ("Salesforce", "https://salesforce.wd12.myworkdayjobs.com", "salesforce", "External_Career_Site", "Software Engineer AI"),
+            ("Mastercard", "https://mastercard.wd1.myworkdayjobs.com", "mastercard", "CorporateCareers", "Software Engineer"),
+        ]
+        lever_boards = [
+            ("palantir", "Palantir"),
+            ("zoox", "Zoox"),
+            ("shieldai", "Shield AI"),
+        ]
+        sr_boards = [
+            ("ServiceNow", "ServiceNow"),
+        ]
         fetched = []
-        with ThreadPoolExecutor(max_workers=8) as ex:
-            futs = [ex.submit(_fetch_single_greenhouse, slug, label, role_filter, loc_filter) for slug, label in gh_boards]
-            futs.extend(ex.submit(_fetch_single_ashby, slug, label, role_filter, loc_filter) for slug, label in ashby_boards)
+        with ThreadPoolExecutor(max_workers=12) as ex:
+            futs = [ex.submit(_fetch_workday_cxs_live, label, host, tenant, site, q) for label, host, tenant, site, q in workday_boards]
             futs.append(ex.submit(_fetch_linkedin_guest_live))
+            futs.extend(ex.submit(_fetch_lever_live, slug, label, role_filter) for slug, label in lever_boards)
+            futs.extend(ex.submit(_fetch_smartrecruiters_live, cid, label, role_filter) for cid, label in sr_boards)
+            futs.extend(ex.submit(_fetch_single_greenhouse, slug, label, role_filter, loc_filter) for slug, label in gh_boards)
+            futs.extend(ex.submit(_fetch_single_ashby, slug, label, role_filter, loc_filter) for slug, label in ashby_boards)
             for f in futs:
                 try:
-                    fetched.extend(f.result(timeout=2.5))
+                    fetched.extend(f.result(timeout=2.8))
                 except Exception:
                     pass
 
         base_jobs = _build_seeded_multi_platform_jobs()
-        seen_urls = {j["url"] for j in base_jobs}
-        for item in fetched:
+        sandbox_jobs = base_jobs[:4]
+        curated_jobs = base_jobs[4:]
+        seen_urls = {j["url"] for j in sandbox_jobs}
+        merged_live = []
+        for item in fetched + curated_jobs:
             if item["url"] not in seen_urls:
                 seen_urls.add(item["url"])
-                base_jobs.append(item)
+                merged_live.append(item)
 
-        # Keep the 4 sandbox E2E jobs at the very top or sorted by matchScore
-        LIVE_JOBS_CACHE["jobs"] = base_jobs
+        LIVE_JOBS_CACHE["jobs"] = sandbox_jobs + merged_live
         LIVE_JOBS_CACHE["timestamp"] = time.time()
     finally:
         with _BG_REFRESH_LOCK:
@@ -2590,11 +2774,12 @@ def _refresh_live_boards_worker():
 def aggregate_live_jobs(force_refresh: bool = False) -> list:
     global _BG_REFRESH_RUNNING
     now = time.time()
-    if not LIVE_JOBS_CACHE["jobs"]:
+    was_empty = not LIVE_JOBS_CACHE["jobs"]
+    if was_empty:
         LIVE_JOBS_CACHE["jobs"] = _build_seeded_multi_platform_jobs()
         LIVE_JOBS_CACHE["timestamp"] = now
 
-    if force_refresh or (now - LIVE_JOBS_CACHE["timestamp"] > 180):
+    if force_refresh or was_empty or (now - LIVE_JOBS_CACHE["timestamp"] > 180):
         with _BG_REFRESH_LOCK:
             if not _BG_REFRESH_RUNNING:
                 _BG_REFRESH_RUNNING = True
@@ -2951,7 +3136,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     }
     .kanban-card:hover { border-color: var(--accent); }
 
-    /* Filter Bar */
+    /* Clean Structured Filter Bar */
     .toolbar {
       display: flex; justify-content: space-between; align-items: center; gap: 12px;
       margin-bottom: 16px; flex-wrap: wrap;
@@ -2959,8 +3144,58 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     .search-in, .select-in {
       padding: 9px 13px; border-radius: 9px; border: 1px solid var(--border);
-      background: var(--card); color: #fff; font-size: 13px;
+      background: var(--card); color: #fff; font-size: 13px; outline: none;
     }
+    .search-in:focus, .select-in:focus { border-color: var(--accent); }
+    .web-filter-shell {
+      background: linear-gradient(180deg, rgba(17, 25, 44, 0.96), rgba(11, 17, 32, 0.96));
+      border: 1px solid var(--border); border-radius: 14px;
+      padding: 16px 18px; margin-bottom: 16px;
+    }
+    .web-filter-top {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 12px; flex-wrap: wrap; margin-bottom: 14px;
+    }
+    .web-search-wrap { flex: 1; min-width: 260px; position: relative; }
+    .web-search-in {
+      width: 100%; padding: 10px 14px 10px 36px; border-radius: 10px;
+      border: 1px solid #263554; background: #090f1d; color: #f8fafc; font-size: 13px; outline: none;
+    }
+    .web-search-in:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.18); }
+    .web-filter-grid {
+      display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px;
+    }
+    @media (max-width: 1240px) { .web-filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (max-width: 720px) { .web-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .web-filter-group { display: flex; flex-direction: column; gap: 5px; }
+    .web-filter-lbl {
+      font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.6px; color: #94a3b8;
+    }
+    .web-select-clean {
+      width: 100%; padding: 8.5px 10px; border-radius: 9px;
+      border: 1px solid #243352; background: #0b1222; color: #e2e8f0;
+      font-size: 12.5px; font-weight: 500; outline: none; cursor: pointer;
+    }
+    .web-select-clean:hover { border-color: #3b4f7a; }
+    .web-select-clean:focus { border-color: var(--accent); }
+    .web-select-clean.has-value {
+      border-color: #6366f1; background: rgba(99, 102, 241, 0.12); color: #fff; font-weight: 600;
+    }
+    .web-active-chips {
+      display: none; align-items: center; flex-wrap: wrap; gap: 7px;
+      margin-top: 12px; padding-top: 11px; border-top: 1px solid rgba(255,255,255,0.06);
+    }
+    .active-filter-pill {
+      display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+      border-radius: 999px; background: rgba(99, 102, 241, 0.18);
+      border: 1px solid rgba(99, 102, 241, 0.45); color: #e0e7ff; font-size: 11.5px; font-weight: 600;
+    }
+    .active-filter-pill button {
+      background: none; border: none; color: #a5b4fc; cursor: pointer;
+      padding: 0; font-size: 12px; line-height: 1; font-weight: 800;
+    }
+    .active-filter-pill button:hover { color: #fff; }
 
     /* Main Grid */
     .layout-grid { display: grid; grid-template-columns: 1fr 340px; gap: 20px; align-items: start; }
@@ -3194,88 +3429,99 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
 
       <!-- Dynamic Workspace Views (Jobs Feed / Staffing Agencies / Resume Diff Studio / Insider Connections / Inbox) -->
       <div id="web-jobs-section">
-        <div class="tsenta-panel" style="padding:14px 16px;margin-bottom:16px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
-            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-              <span style="font-size:11.5px;font-weight:800;color:#94a3b8;margin-right:4px;">⚡ Quick Pull Filters:</span>
-              <button type="button" class="tsenta-tab active" data-quick-recency="ALL">All Time</button>
-              <button type="button" class="tsenta-tab" data-quick-recency="2">⚡ Last 2h</button>
-              <button type="button" class="tsenta-tab" data-quick-recency="8">🔥 Last 8h</button>
-              <button type="button" class="tsenta-tab" data-quick-recency="12">🕐 Last 12h</button>
-              <button type="button" class="tsenta-tab" data-quick-recency="24">📅 Last 24h</button>
-              <button type="button" class="tsenta-tab" data-quick-recency="48">🗓️ Last 2 Days</button>
-              <button type="button" class="tsenta-tab" id="pill-h1b-only">🛂 H-1B Sponsor Only</button>
-              <button type="button" class="tsenta-tab" id="pill-staffing-only">🏢 Staffing Sheet (128)</button>
-              <button type="button" class="tsenta-tab" id="pill-dice-only">🎲 Dice W2/C2C</button>
+        <div class="web-filter-shell">
+          <div class="web-filter-top">
+            <div class="web-search-wrap">
+              <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#64748b;font-size:13px;pointer-events:none;">🔍</span>
+              <input type="text" id="filter-search" class="web-search-in" value="" placeholder="Search by role, company, tech stack, or staffing agency..." />
             </div>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <button type="button" class="btn btn-sm" id="btn-reset-filters">↺ Reset Filters</button>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+              <span id="web-jobs-result-summary" style="font-size:12px;color:#94a3b8;font-weight:600;">Loading live multi-platform roles...</span>
+              <button type="button" class="btn btn-sm" id="btn-reset-filters" style="display:none;">Reset Filters</button>
               <button type="button" class="btn btn-emerald btn-sm" id="btn-batch-apply">🚀 Batch Auto-Apply Selected (<span id="selected-count">0</span>)</button>
             </div>
           </div>
 
-          <div class="filters" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:8px;">
-            <input type="text" id="filter-search" class="search-in" placeholder="Search role, company, skill, or staffing agency..." />
-            <select id="filter-ats" class="select-in">
-              <option value="ALL">🌐 All Platforms &amp; ATS</option>
-              <option value="Workday">🏢 Workday (myworkdayjobs)</option>
-              <option value="LinkedIn">💼 LinkedIn Jobs</option>
-              <option value="Dice">🎲 Dice Tech Marketplace</option>
-              <option value="Staffing">🤝 Staffing Agencies (128 Sheet)</option>
-              <option value="Microsoft">🪟 Microsoft Careers (SSO)</option>
-              <option value="Greenhouse">🌱 Greenhouse Live API</option>
-              <option value="Ashby">⚡ Ashby Live API</option>
-              <option value="Lever">🔧 Lever ATS</option>
-              <option value="BuiltIn">🚀 BuiltIn / Wellfound</option>
-              <option value="Indeed">🔍 Indeed / iCIMS</option>
-            </select>
-            <select id="filter-recency" class="select-in">
-              <option value="ALL">⏱️ Date Posted: All</option>
-              <option value="2">⚡ Last 2 Hours</option>
-              <option value="8">🔥 Last 8 Hours</option>
-              <option value="12">🕐 Last 12 Hours</option>
-              <option value="24">📅 Last 24 Hours</option>
-              <option value="48">🗓️ Last 2 Days (48h)</option>
-              <option value="168">📆 Last 7 Days</option>
-            </select>
-            <select id="filter-sponsorship" class="select-in">
-              <option value="ALL">🛂 Visa / H-1B: All Roles</option>
-              <option value="H-1B Sponsor">✅ H-1B &amp; Visa Sponsors Only</option>
-              <option value="H-1B Transfer">🏛️ Direct H-1B Transfer &amp; Cap</option>
-              <option value="STEM OPT">🎓 F-1 OPT / STEM OPT E-Verify</option>
-              <option value="W2 / C2C">🤝 W2 / C2C Staffing Sponsor</option>
-            </select>
-            <select id="filter-role-type" class="select-in">
-              <option value="ALL">💼 Role Type: All</option>
-              <option value="Full-Time">Full-Time</option>
-              <option value="Part-Time">Part-Time</option>
-              <option value="Contract / W2">Contract / W2</option>
-              <option value="C2C / Corp-to-Corp">C2C / Corp-to-Corp</option>
-              <option value="Contract-to-Hire">Contract-to-Hire</option>
-            </select>
-            <select id="filter-experience" class="select-in">
-              <option value="ALL">📊 Experience: All Levels</option>
-              <option value="0-1">0-1 Years (Entry / New Grad)</option>
-              <option value="1-2">1-2 Years (Junior / Mid)</option>
-              <option value="2-3">2-3 Years (Mid-Level I)</option>
-              <option value="3-4">3-4 Years (Mid-Level II)</option>
-              <option value="4-6">4-6 Years (Senior)</option>
-              <option value="6+">6+ Years (Staff / Principal)</option>
-            </select>
-            <select id="filter-work-mode" class="select-in">
-              <option value="ALL">🏠 Work Mode: All</option>
-              <option value="Remote">Remote</option>
-              <option value="Hybrid">Hybrid</option>
-              <option value="On-Site">On-Site</option>
-            </select>
-            <select id="filter-archetype" class="select-in">
-              <option value="ALL">🎯 All Role Archetypes</option>
-              <option value="AI Agents & LLM Systems">AI Agents &amp; LLM Systems</option>
-              <option value="Full-Stack & Product Eng">Full-Stack &amp; Product Eng</option>
-              <option value="Backend & Cloud Infra">Backend &amp; Cloud Infra</option>
-              <option value="ML & Data Platform">ML &amp; Data Platform</option>
-            </select>
+          <div class="web-filter-grid">
+            <div class="web-filter-group">
+              <label class="web-filter-lbl" for="filter-ats">Platform</label>
+              <select id="filter-ats" class="web-select-clean">
+                <option value="ALL" selected>All Platforms</option>
+                <option value="Workday">Workday</option>
+                <option value="LinkedIn">LinkedIn</option>
+                <option value="Dice">Dice</option>
+                <option value="Staffing">Staffing Agencies (128)</option>
+                <option value="Microsoft">Microsoft Careers</option>
+                <option value="Greenhouse">Greenhouse</option>
+                <option value="Ashby">Ashby</option>
+                <option value="Lever">Lever</option>
+                <option value="SmartRecruiters">SmartRecruiters</option>
+                <option value="BuiltIn">BuiltIn / Wellfound</option>
+                <option value="Indeed">Indeed / iCIMS</option>
+              </select>
+            </div>
+
+            <div class="web-filter-group">
+              <label class="web-filter-lbl" for="filter-recency">Date Posted</label>
+              <select id="filter-recency" class="web-select-clean">
+                <option value="ALL" selected>Any Time</option>
+                <option value="2">Last 2 Hours</option>
+                <option value="8">Last 8 Hours</option>
+                <option value="12">Last 12 Hours</option>
+                <option value="24">Last 24 Hours</option>
+                <option value="48">Last 2 Days (48h)</option>
+                <option value="168">Last 7 Days</option>
+              </select>
+            </div>
+
+            <div class="web-filter-group">
+              <label class="web-filter-lbl" for="filter-sponsorship">Visa / H-1B</label>
+              <select id="filter-sponsorship" class="web-select-clean">
+                <option value="ALL" selected>All Roles</option>
+                <option value="H-1B Sponsor">H-1B &amp; Visa Sponsors</option>
+                <option value="H-1B Transfer">Direct H-1B Transfer</option>
+                <option value="STEM OPT">F-1 STEM OPT (E-Verify)</option>
+                <option value="W2 / C2C">W2 / C2C Sponsor</option>
+              </select>
+            </div>
+
+            <div class="web-filter-group">
+              <label class="web-filter-lbl" for="filter-role-type">Role Type</label>
+              <select id="filter-role-type" class="web-select-clean">
+                <option value="ALL" selected>All Role Types</option>
+                <option value="Full-Time">Full-Time</option>
+                <option value="Part-Time">Part-Time</option>
+                <option value="Contract / W2">Contract / W2</option>
+                <option value="C2C / Corp-to-Corp">C2C / Corp-to-Corp</option>
+                <option value="Contract-to-Hire">Contract-to-Hire</option>
+              </select>
+            </div>
+
+            <div class="web-filter-group">
+              <label class="web-filter-lbl" for="filter-experience">Experience</label>
+              <select id="filter-experience" class="web-select-clean">
+                <option value="ALL" selected>All Experience</option>
+                <option value="0-1">0-1 Years (Entry)</option>
+                <option value="1-2">1-2 Years (Junior / Mid)</option>
+                <option value="2-3">2-3 Years (Mid-Level I)</option>
+                <option value="3-4">3-4 Years (Mid-Level II)</option>
+                <option value="4-6">4-6 Years (Senior)</option>
+                <option value="6+">6+ Years (Staff+)</option>
+              </select>
+            </div>
+
+            <div class="web-filter-group">
+              <label class="web-filter-lbl" for="filter-work-mode">Work Mode</label>
+              <select id="filter-work-mode" class="web-select-clean">
+                <option value="ALL" selected>All Work Modes</option>
+                <option value="Remote">Remote</option>
+                <option value="Hybrid">Hybrid</option>
+                <option value="On-Site">On-Site</option>
+              </select>
+            </div>
           </div>
+
+          <div id="active-filter-chips" class="web-active-chips"></div>
         </div>
 
         <div class="layout-grid">
@@ -3767,14 +4013,73 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     }
 
     function renderJobs() {
-      const q = document.getElementById("filter-search").value.trim().toLowerCase();
-      const arch = document.getElementById("filter-archetype").value;
-      const ats = document.getElementById("filter-ats").value;
+      const searchEl = document.getElementById("filter-search");
+      const qRaw = (searchEl?.value || "").trim();
+      const q = qRaw.toLowerCase();
+      const arch = document.getElementById("filter-archetype")?.value || "ALL";
+      const ats = document.getElementById("filter-ats")?.value || "ALL";
       const recencyVal = document.getElementById("filter-recency")?.value || "ALL";
       const sponsorshipVal = document.getElementById("filter-sponsorship")?.value || "ALL";
       const roleTypeVal = document.getElementById("filter-role-type")?.value || "ALL";
       const expVal = document.getElementById("filter-experience")?.value || "ALL";
       const workModeVal = document.getElementById("filter-work-mode")?.value || "ALL";
+
+      const filterDefs = [
+        { id: "filter-ats", label: "Platform", val: ats },
+        { id: "filter-recency", label: "Posted", val: recencyVal },
+        { id: "filter-sponsorship", label: "Visa", val: sponsorshipVal },
+        { id: "filter-role-type", label: "Role", val: roleTypeVal },
+        { id: "filter-experience", label: "Experience", val: expVal },
+        { id: "filter-work-mode", label: "Mode", val: workModeVal }
+      ];
+
+      const activePills = [];
+      if (qRaw) {
+        activePills.push({ id: "filter-search", text: `Search: "${qRaw}"` });
+      }
+      filterDefs.forEach((fd) => {
+        const el = document.getElementById(fd.id);
+        if (!el) return;
+        const isSet = fd.val && fd.val !== "ALL";
+        el.classList.toggle("has-value", Boolean(isSet));
+        if (isSet) {
+          const optText = el.options[el.selectedIndex]?.text || fd.val;
+          activePills.push({ id: fd.id, text: `${fd.label}: ${optText}` });
+        }
+      });
+
+      const resetBtn = document.getElementById("btn-reset-filters");
+      if (resetBtn) {
+        resetBtn.style.display = activePills.length > 0 ? "inline-flex" : "none";
+      }
+
+      const chipsBox = document.getElementById("active-filter-chips");
+      if (chipsBox) {
+        if (activePills.length === 0) {
+          chipsBox.style.display = "none";
+          chipsBox.innerHTML = "";
+        } else {
+          chipsBox.style.display = "flex";
+          chipsBox.innerHTML =
+            `<span style="font-size:11px;font-weight:700;color:#94a3b8;margin-right:2px;">Active filters:</span>` +
+            activePills
+              .map(
+                (p) =>
+                  `<span class="active-filter-pill">${escapeHtml(p.text)} <button type="button" data-clear-filter="${escapeHtml(p.id)}" title="Remove filter">✕</button></span>`
+              )
+              .join("");
+          chipsBox.querySelectorAll("[data-clear-filter]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              const targetId = btn.getAttribute("data-clear-filter");
+              const targetEl = document.getElementById(targetId);
+              if (targetEl) {
+                targetEl.value = targetId === "filter-search" ? "" : "ALL";
+                renderJobs();
+              }
+            });
+          });
+        }
+      }
 
       const maxHours = recencyVal !== "ALL" ? Number(recencyVal) || 0 : 0;
 
@@ -3809,9 +4114,18 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         return true;
       });
 
+      const summaryEl = document.getElementById("web-jobs-result-summary");
+      if (summaryEl) {
+        const platCount = new Set(allJobs.map((j) => j.platformCategory || j.ats)).size;
+        summaryEl.textContent =
+          activePills.length === 0
+            ? `Showing all ${filtered.length} live roles across ${platCount} platforms`
+            : `Showing ${filtered.length} of ${allJobs.length} live roles`;
+      }
+
       const container = document.getElementById("jobs-feed-container");
       if (filtered.length === 0) {
-        container.innerHTML = `<div class="job-card">No matching jobs found for the active filter combination. Click <strong>↺ Reset Filters</strong> to view all ${allJobs.length} live jobs.</div>`;
+        container.innerHTML = `<div class="job-card">No matching jobs found for the selected filters. Click <strong>Reset Filters</strong> above to view all ${allJobs.length} live roles.</div>`;
         return;
       }
 
@@ -4323,54 +4637,20 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       sendExtensionRpc("JOBIFY_WEB_OPEN_HUB", { tab: "tracker" }, 5000);
     });
 
-    // Multi-Filter & Quick Pill Listeners
-    ["filter-search", "filter-archetype", "filter-ats", "filter-recency", "filter-sponsorship", "filter-role-type", "filter-experience", "filter-work-mode"].forEach((id) => {
+    // Clean Structured Filter Listeners
+    ["filter-search", "filter-ats", "filter-recency", "filter-sponsorship", "filter-role-type", "filter-experience", "filter-work-mode"].forEach((id) => {
       const el = document.getElementById(id);
       if (!el) return;
       el.addEventListener(id === "filter-search" ? "input" : "change", renderJobs);
     });
 
-    document.querySelectorAll("[data-quick-recency]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const val = btn.getAttribute("data-quick-recency") || "ALL";
-        document.getElementById("filter-recency").value = val;
-        document.querySelectorAll("[data-quick-recency]").forEach((b) => b.classList.toggle("active", b === btn));
-        renderJobs();
-      });
-    });
-
-    document.getElementById("pill-h1b-only")?.addEventListener("click", (e) => {
-      const sel = document.getElementById("filter-sponsorship");
-      sel.value = sel.value === "H-1B Sponsor" ? "ALL" : "H-1B Sponsor";
-      e.currentTarget.classList.toggle("active", sel.value === "H-1B Sponsor");
-      renderJobs();
-    });
-
-    document.getElementById("pill-staffing-only")?.addEventListener("click", (e) => {
-      const sel = document.getElementById("filter-ats");
-      sel.value = sel.value === "Staffing" ? "ALL" : "Staffing";
-      e.currentTarget.classList.toggle("active", sel.value === "Staffing");
-      renderJobs();
-    });
-
-    document.getElementById("pill-dice-only")?.addEventListener("click", (e) => {
-      const sel = document.getElementById("filter-ats");
-      sel.value = sel.value === "Dice" ? "ALL" : "Dice";
-      e.currentTarget.classList.toggle("active", sel.value === "Dice");
-      renderJobs();
-    });
-
     document.getElementById("btn-reset-filters")?.addEventListener("click", () => {
-      document.getElementById("filter-search").value = "";
-      document.getElementById("filter-ats").value = "ALL";
-      document.getElementById("filter-recency").value = "ALL";
-      document.getElementById("filter-sponsorship").value = "ALL";
-      document.getElementById("filter-role-type").value = "ALL";
-      document.getElementById("filter-experience").value = "ALL";
-      document.getElementById("filter-work-mode").value = "ALL";
-      document.getElementById("filter-archetype").value = "ALL";
-      document.querySelectorAll("[data-quick-recency]").forEach((b) => b.classList.toggle("active", b.getAttribute("data-quick-recency") === "ALL"));
-      ["pill-h1b-only", "pill-staffing-only", "pill-dice-only"].forEach((id) => document.getElementById(id)?.classList.remove("active"));
+      const sEl = document.getElementById("filter-search");
+      if (sEl) sEl.value = "";
+      ["filter-ats", "filter-recency", "filter-sponsorship", "filter-role-type", "filter-experience", "filter-work-mode"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = "ALL";
+      });
       renderJobs();
     });
 
