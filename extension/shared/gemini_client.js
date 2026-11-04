@@ -6,7 +6,18 @@ import { analyzeJobKeywords, detectJobArchetype } from "./ats_analyzer.js";
 
 const GLA_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 const modelCooldownUntil = new Map();
+const geminiResponseCache = new Map();
 let preferCompanionRelayUntil = 0;
+
+function makeCacheKey(prompt, systemInstruction, jsonMode) {
+  const raw = `${jsonMode ? "J" : "T"}|${String(systemInstruction || "").slice(0, 120)}|${String(prompt || "")}`;
+  let h1 = 0x811c9dc5;
+  for (let i = 0; i < raw.length; i++) {
+    h1 ^= raw.charCodeAt(i);
+    h1 = Math.imul(h1, 0x01000193);
+  }
+  return `${raw.length}_${(h1 >>> 0).toString(36)}_${raw.slice(0, 48)}_${raw.slice(-48)}`;
+}
 
 function normalizeModelName(m) {
   return String(m || "gemini-3.5-flash").replace(/^models\//, "");
@@ -86,9 +97,15 @@ export async function callGemini({
   jsonMode = false,
   temperature = 0.35,
   maxOutputTokens = 4096,
-  timeoutMs = 12000,
+  timeoutMs = 5800,
   settings = {}
 }) {
+  const cacheKey = makeCacheKey(prompt, systemInstruction, jsonMode);
+  const cached = geminiResponseCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < 15 * 60 * 1000) {
+    return cached.value;
+  }
+
   const apiKey = (settings?.geminiApiKey || "").trim();
   if (!apiKey) {
     throw new Error("Missing Gemini API Key in Jobify Settings.");
@@ -116,7 +133,10 @@ export async function callGemini({
       errors,
       rawRequested
     });
-    if (fastRelay) return fastRelay;
+    if (fastRelay) {
+      geminiResponseCache.set(cacheKey, { ts: Date.now(), value: fastRelay });
+      return fastRelay;
+    }
     preferCompanionRelayUntil = 0;
   }
 
@@ -166,13 +186,15 @@ export async function callGemini({
         continue;
       }
 
-      return {
+      const out = {
         text,
         modelUsed: model,
         requestedModel: rawRequested,
         fellBack: model !== rawRequested,
         fallbackTrace: errors
       };
+      geminiResponseCache.set(cacheKey, { ts: Date.now(), value: out });
+      return out;
     } catch (err) {
       clearTimeout(timer);
       const isTimeout = err?.name === "AbortError";
@@ -190,6 +212,7 @@ export async function callGemini({
         });
         if (relayOut) {
           preferCompanionRelayUntil = Date.now() + 5 * 60 * 1000;
+          geminiResponseCache.set(cacheKey, { ts: Date.now(), value: relayOut });
           return relayOut;
         }
         break;

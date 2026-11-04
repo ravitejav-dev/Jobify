@@ -19,7 +19,7 @@ import {
   buildPureJsResumePdfBase64,
   formatCompanyResumeFileName
 } from "../extension/shared/pdf_generator.js";
-import { fetchPersonalizedRecommendations } from "../extension/shared/job_feeds.js";
+import { fetchPersonalizedRecommendations, STAFFING_AGENCIES_DIRECTORY } from "../extension/shared/job_feeds.js";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const EXT_DIR = path.join(ROOT, "extension");
@@ -1300,11 +1300,11 @@ async function main() {
       sidepanel: spAudit
     }, null, 2));
 
-    // 5c. Jobify Autonomous Platform (Tsenta + Jobright AI Edition at http://127.0.0.1:18765/) + Silent Background Pipeline Verification
+    // 5c. Jobify Autonomous Platform (Tsenta + Jobright AI Edition at http://127.0.0.1:18765/) + Multi-Platform & 128 Staffing Agencies + Silent Background Pipeline Verification
     const webAppCdp = await openTabAndConnect("http://127.0.0.1:18765/");
     let webAppAudit = null;
     for (let w = 0; w < 25; w++) {
-      await sleep(350);
+      await sleep(300);
       webAppAudit = await webAppCdp
         .eval(`({
           isWebAppAttr: document.documentElement.getAttribute("data-jobify-webapp") === "true",
@@ -1318,23 +1318,75 @@ async function main() {
           hasSidebarViews: Boolean(
             document.getElementById("web-sidebar-nav") &&
             document.querySelector(".web-nav-btn[data-web-view='dashboard']") &&
+            document.querySelector(".web-nav-btn[data-web-view='staffing']") &&
             document.querySelector(".web-nav-btn[data-web-view='tracker']") &&
             document.querySelector(".web-nav-btn[data-web-view='resume']") &&
             document.querySelector(".web-nav-btn[data-web-view='insider']") &&
             document.querySelector(".web-nav-btn[data-web-view='inbox']")
           ),
+          hasAllNewFilters: Boolean(
+            document.getElementById("filter-recency") &&
+            document.getElementById("filter-sponsorship") &&
+            document.getElementById("filter-role-type") &&
+            document.getElementById("filter-experience") &&
+            document.getElementById("filter-work-mode")
+          ),
           hasOrionDrawer: Boolean(document.getElementById("orion-copilot-drawer") && document.getElementById("orion-chat-input"))
         })`)
         .catch(() => null);
-      if (webAppAudit?.extensionConnected && webAppAudit?.renderedJobCards >= 4 && webAppAudit?.syncedAppliedCount >= 6) {
+      if (webAppAudit?.extensionConnected && webAppAudit?.renderedJobCards >= 20 && webAppAudit?.syncedAppliedCount >= 6) {
         break;
       }
     }
 
-    // Trigger Save to Tracker -> Tracker Auto-Apply (In Flight -> Filled -> Submitted) + Orion Copilot check
+    // Verify Multi-Platform Job Sources, All New Filters (2h/8h/12h/24h/48h, H-1B, Role Type, Experience), 128 Staffing Agencies View, and Silent Tracker Auto-Apply
     const autonomousFlowAudit = await webAppCdp.eval(`
       (async () => {
         const beforeApplied = Number(document.getElementById("stat-applied-count")?.textContent || 0);
+
+        // 0. Check multi-platform coverage + interactive filters + 128 Staffing Agencies API & View
+        const t0 = performance.now();
+        const jobsApi = await fetch("/api/jobs").then((r) => r.json());
+        const jobsApiLatencyMs = Math.round(performance.now() - t0);
+        const platformsPresent = {
+          workday: jobsApi.jobs.some((j) => /workday/i.test(j.ats)),
+          linkedin: jobsApi.jobs.some((j) => /linkedin/i.test(j.ats)),
+          dice: jobsApi.jobs.some((j) => /dice/i.test(j.ats)),
+          staffing: jobsApi.jobs.some((j) => /staffing/i.test(j.ats) || j.isStaffingAgency),
+          microsoft: jobsApi.jobs.some((j) => /microsoft/i.test(j.ats)),
+          greenhouse: jobsApi.jobs.some((j) => /greenhouse/i.test(j.ats)),
+          ashby: jobsApi.jobs.some((j) => /ashby/i.test(j.ats))
+        };
+
+        // Test interactive filters (2h, 8h, 12h, 24h, 48h, H-1B, Role Type, Experience)
+        const recSel = document.getElementById("filter-recency");
+        recSel.value = "2";
+        recSel.dispatchEvent(new Event("change"));
+        const count2h = document.querySelectorAll("#jobs-feed-container .job-card[data-job-id]").length;
+
+        recSel.value = "12";
+        recSel.dispatchEvent(new Event("change"));
+        const count12h = document.querySelectorAll("#jobs-feed-container .job-card[data-job-id]").length;
+
+        recSel.value = "48";
+        recSel.dispatchEvent(new Event("change"));
+        const count48h = document.querySelectorAll("#jobs-feed-container .job-card[data-job-id]").length;
+
+        document.getElementById("btn-reset-filters").click();
+
+        const expSel = document.getElementById("filter-experience");
+        expSel.value = "1-2";
+        expSel.dispatchEvent(new Event("change"));
+        const countExp12 = document.querySelectorAll("#jobs-feed-container .job-card[data-job-id]").length;
+        document.getElementById("btn-reset-filters").click();
+
+        // Check 128 Staffing Agencies view
+        document.querySelector(".web-nav-btn[data-web-view='staffing']").click();
+        await new Promise((r) => setTimeout(r, 250));
+        const staffingCardsCount = document.querySelectorAll("#staffing-cards-grid [data-staffing-card]").length;
+        document.querySelector(".web-nav-btn[data-web-view='dashboard']").click();
+        await new Promise((r) => setTimeout(r, 100));
+
         // 1. Click 📌 Save to Tracker on a live job card that isn't in tracker yet, then click ⚡ Auto-Apply inside the Tracker
         const saveCardBtn = Array.from(document.querySelectorAll(".btn-save-to-tracker")).find((b) => {
           const card = b.closest(".job-card");
@@ -1342,7 +1394,7 @@ async function main() {
           return comp && !document.getElementById("tsenta-apps-tbody")?.innerText?.includes(comp);
         }) || document.querySelector(".btn-save-to-tracker");
         if (saveCardBtn) saveCardBtn.click();
-        await new Promise((r) => setTimeout(r, 450));
+        await new Promise((r) => setTimeout(r, 350));
 
         // Find the newly saved row in #tsenta-apps-tbody and click its .btn-tracker-auto-apply button
         const trackerApplyBtn = document.querySelector("#tsenta-apps-tbody .btn-tracker-auto-apply");
@@ -1365,13 +1417,13 @@ async function main() {
         let finalSubmittedCount = 0;
         let finalAppliedCount = beforeApplied;
         for (let i = 0; i < 45; i++) {
-          await new Promise((r) => setTimeout(r, 350));
+          await new Promise((r) => setTimeout(r, 150));
           finalSubmittedCount = Number(document.getElementById("cnt-pipe-submitted")?.textContent || 0);
           finalAppliedCount = Number(document.getElementById("stat-applied-count")?.textContent || 0);
           const inFlightNow = Number(document.getElementById("cnt-pipe-inflight")?.textContent || 0);
           const filledNow = Number(document.getElementById("cnt-pipe-filled")?.textContent || 0);
           if (inFlightNow > 0 || filledNow > 0) sawInFlightOrFilled = true;
-          if (finalAppliedCount >= beforeApplied && inFlightNow === 0 && filledNow === 0 && i >= 4) {
+          if (finalAppliedCount >= beforeApplied && inFlightNow === 0 && filledNow === 0 && i >= 3) {
             break;
           }
         }
@@ -1380,7 +1432,7 @@ async function main() {
         // Click Receipt & Diff on the top row to verify Tsenta Submission Receipt & Resume Diff modal
         const receiptBtn = document.querySelector("#tsenta-apps-tbody .btn-view-receipt");
         if (receiptBtn) receiptBtn.click();
-        await new Promise((r) => setTimeout(r, 250));
+        await new Promise((r) => setTimeout(r, 180));
         const receiptModalText = document.getElementById("receipt-modal-content")?.innerText || "";
         const hasReceiptFields = receiptModalText.includes("What Just Got Sent") && receiptModalText.includes("Tailored Résumé Diff");
 
@@ -1392,6 +1444,10 @@ async function main() {
         }).then((r) => r.json());
 
         return {
+          jobsApiLatencyMs,
+          platformsPresent,
+          filterCounts: { count2h, count12h, count48h, countExp12 },
+          staffingCardsCount,
           hadSavedTrackerApplyBtn,
           sawInFlightOrFilled,
           beforeApplied,
@@ -1404,7 +1460,7 @@ async function main() {
       })()
     `, 35000);
 
-    console.log("7c. ✅ Jobify Autonomous Platform (Tsenta + Jobright AI Edition) + Silent Tracker Auto-Apply Pipeline Verified:", JSON.stringify({
+    console.log("7c. ✅ Jobify Autonomous Platform (Multi-Platform + 128 Staffing Agencies + Filters + Turbo Auto-Apply) Verified:", JSON.stringify({
       ...webAppAudit,
       autonomousFlow: autonomousFlowAudit
     }, null, 2));
@@ -1412,13 +1468,18 @@ async function main() {
       webAppCdp.exceptions.length > 0 ||
       !webAppAudit?.isWebAppAttr ||
       !webAppAudit?.extensionConnected ||
-      webAppAudit.liveJobsCount < 4 ||
-      webAppAudit.renderedJobCards < 4 ||
+      webAppAudit.liveJobsCount < 30 ||
+      webAppAudit.renderedJobCards < 30 ||
       webAppAudit.syncedAppliedCount < 6 ||
       !webAppAudit.hasCustomUrlLauncher ||
       !webAppAudit.floatingCopilotSuppressedOnWebApp ||
       !webAppAudit.hasSidebarViews ||
+      !webAppAudit.hasAllNewFilters ||
       !webAppAudit.hasOrionDrawer ||
+      !Object.values(autonomousFlowAudit?.platformsPresent || {}).every(Boolean) ||
+      !(autonomousFlowAudit?.filterCounts?.count2h >= 4 && autonomousFlowAudit.filterCounts.count2h < autonomousFlowAudit.filterCounts.count12h) ||
+      !(autonomousFlowAudit?.filterCounts?.countExp12 >= 4) ||
+      autonomousFlowAudit?.staffingCardsCount !== 128 ||
       !autonomousFlowAudit?.hadSavedTrackerApplyBtn ||
       !autonomousFlowAudit?.sawInFlightOrFilled ||
       autonomousFlowAudit.finalSubmittedCount < 8 ||
@@ -1551,11 +1612,14 @@ async function main() {
     );
     console.log(`11. ✅ Gemini AI Custom Application Question Answered (${qAns.answer.length} chars): "${qAns.answer.slice(0, 120)}..."`);
 
-    const liveJobs = await fetchPersonalizedRecommendations(DEFAULT_PROFILE, { category: "All", limit: 10 });
+    const liveJobs = await fetchPersonalizedRecommendations(DEFAULT_PROFILE, { category: "All", limit: 60 });
+    const filtered2hJobs = await fetchPersonalizedRecommendations(DEFAULT_PROFILE, { maxHoursAgo: 2, sponsorship: "H-1B Sponsor", limit: 40 });
     console.log(
-      `12. ✅ Live Curated ATS Feeds Fetched & Scored: ${liveJobs.length} top matches (e.g. #1 ${liveJobs[0]?.company} — ${liveJobs[0]?.title} [${liveJobs[0]?.matchScore}% Match])`
+      `12. ✅ Multi-Platform & 128 Staffing Agencies Feeds Verified: ${liveJobs.length} total matches, ${filtered2hJobs.length} ultra-fresh (<=2h H-1B) roles, ${STAFFING_AGENCIES_DIRECTORY.length} Staffing Agencies synced (e.g. #1 ${liveJobs[0]?.company} — ${liveJobs[0]?.title} [${liveJobs[0]?.matchScore}% Match])`
     );
-    if (liveJobs.length === 0) throw new Error("Live job feed returned 0 matches!");
+    if (liveJobs.length < 30 || filtered2hJobs.length < 4 || STAFFING_AGENCIES_DIRECTORY.length !== 128) {
+      throw new Error(`Multi-platform live job feed or 128 staffing agencies assertion failed: live=${liveJobs.length} 2h=${filtered2hJobs.length} agencies=${STAFFING_AGENCIES_DIRECTORY.length}`);
+    }
 
     console.log("\n🎉 ALL 19 END-TO-END, AUTO-SUBMIT & FROM-SCRATCH RESUME VERIFICATION GATES PASSED 100%!");
   } finally {

@@ -4459,7 +4459,7 @@
             hasEmbeddedAtsIframe: liveMeta.hasEmbeddedAtsIframe
           }
         : jobMeta || liveMeta;
-    const stepDelay = sequentialOneByOne ? 55 : 0;
+    const stepDelay = sequentialOneByOne ? 10 : 0;
 
     const reportStep = async (label) => {
       filledFieldsLog.push(label);
@@ -4488,11 +4488,11 @@
         if (docEl && docEl.scrollHeight > window.innerHeight * 1.4) {
           const origTop = window.scrollY;
           window.scrollTo({ top: Math.min(docEl.scrollHeight, origTop + window.innerHeight * 0.9), behavior: "instant" });
-          await sleep(80);
+          await sleep(30);
           window.scrollTo({ top: docEl.scrollHeight, behavior: "instant" });
-          await sleep(80);
+          await sleep(30);
           window.scrollTo({ top: origTop, behavior: "instant" });
-          await sleep(50);
+          await sleep(20);
         }
       } catch (_) {}
     }
@@ -4604,7 +4604,7 @@
           await reportStep(ctx.primaryLabel.split("|")[0].trim() || combo.id || "Dropdown");
         }
       }
-      await sleep(120);
+      await sleep(50);
     }
 
     // 6. Standard <input>, <select>, Radio Groups, Checkboxes & Cover Letter Textarea (One-by-One in DOM order)
@@ -4760,7 +4760,7 @@
       }
     }
 
-    // 7. Open-Ended Questions: Saved Vault Match + Clean Concise Gemini AI (skipping optional fluff boxes!)
+    // 7. Open-Ended Questions: Saved Vault Match + Parallel Concise Gemini AI (skipping optional fluff boxes!)
     const openQuestions = findOpenEndedFields(profile, meta, {
       skipOptionalExtras: !includeAllUnresolvedOpenEnded,
       onlyRequiredOpenEnded: onlyNeededCleanMode,
@@ -4797,42 +4797,40 @@
     if (pendingAiQuestions.length > 0) {
       if (typeof onProgress === "function") {
         onProgress(
-          `⚡ Filled ${filledCount} fields — answering ${pendingAiQuestions.length} required question(s) cleanly...`
+          `⚡ Filled ${filledCount} fields — answering ${pendingAiQuestions.length} required question(s) in parallel...`
         );
       }
-      const answerSingleQuestion = async (q) => {
-        try {
-          const resp = await Promise.race([
-            chrome.runtime.sendMessage({
-              type: "ANSWER_APPLICATION_QUESTION",
-              payload: {
-                questionCtx: {
-                  label: q.label,
-                  fieldType: q.fieldType,
-                  maxLength: q.maxLength
-                },
-                jobMeta: meta,
-                forceAi: true,
-                saveToVault: true
-              }
-            }),
-            sleep(12000).then(() => null)
-          ]);
-          if (resp?.ok && resp.answer) {
-            if (setNativeValue(q.element, resp.answer)) {
-              filledCount++;
-              await reportStep(`AI Answer: ${q.label.slice(0, 36)}`);
-            }
+      const batch = pendingAiQuestions.slice(0, 10);
+      const answers = await Promise.all(
+        batch.map(async (q) => {
+          try {
+            const resp = await Promise.race([
+              chrome.runtime.sendMessage({
+                type: "ANSWER_APPLICATION_QUESTION",
+                payload: {
+                  questionCtx: {
+                    label: q.label,
+                    fieldType: q.fieldType,
+                    maxLength: q.maxLength
+                  },
+                  jobMeta: meta,
+                  forceAi: true,
+                  saveToVault: true
+                }
+              }),
+              sleep(8500).then(() => null)
+            ]);
+            return { q, answer: resp?.ok ? resp.answer : null };
+          } catch (_) {
+            return { q, answer: null };
           }
-        } catch (_) {}
-      };
-
-      if (sequentialOneByOne) {
-        for (const q of pendingAiQuestions.slice(0, 10)) {
-          await answerSingleQuestion(q);
+        })
+      );
+      for (const { q, answer } of answers) {
+        if (answer && setNativeValue(q.element, answer)) {
+          filledCount++;
+          await reportStep(`AI Answer: ${q.label.slice(0, 36)}`);
         }
-      } else {
-        await Promise.all(pendingAiQuestions.slice(0, 8).map(answerSingleQuestion));
       }
     }
 

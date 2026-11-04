@@ -211,18 +211,39 @@ function withTimeout(promise, timeoutMs, fallbackValue = null) {
   });
 }
 
-async function waitForTabSettle(tabId, minWaitMs = 1300, maxWaitMs = 7000) {
-  await sleep(minWaitMs);
+async function waitForTabSettle(tabId, minWaitMs = 380, maxWaitMs = 5000) {
+  await sleep(Math.min(minWaitMs, 420));
   try {
     const t = await chrome.tabs.get(tabId);
     if (t?.status === "loading") {
       await waitForTabComplete(tabId, maxWaitMs);
+    } else if (minWaitMs > 500) {
+      await sleep(Math.min(220, minWaitMs - 420));
     }
   } catch (_) {}
 }
 
 async function ensureTabScripts(tabId) {
   if (!tabId) return false;
+  // Fast path: if top frame already has __JOBIFY_ADAPTERS__ and no embedded ATS iframes exist, skip redundant script re-injection
+  const quickCheck = await withTimeout(
+    chrome.scripting
+      .executeScript({
+        target: { tabId, frameIds: [0] },
+        func: () =>
+          Boolean(
+            window.__JOBIFY_ADAPTERS__ &&
+              !document.querySelector(
+                "iframe[src*='greenhouse'], iframe[src*='ashby'], iframe[src*='lever'], iframe[src*='workday'], iframe[src*='icims'], iframe[src*='smartrecruiters'], #grnhse_iframe"
+              )
+          )
+      })
+      .then((r) => Boolean(r?.[0]?.result)),
+    900,
+    false
+  );
+  if (quickCheck) return true;
+
   const allOk = await withTimeout(
     chrome.scripting
       .executeScript({
@@ -230,7 +251,7 @@ async function ensureTabScripts(tabId) {
         files: ["content/ats_adapters.js", "content/copilot_widget.js"]
       })
       .then(() => true),
-    3200,
+    2600,
     false
   );
   if (allOk) return true;
@@ -241,7 +262,7 @@ async function ensureTabScripts(tabId) {
         files: ["content/ats_adapters.js", "content/copilot_widget.js"]
       })
       .then(() => true),
-    2500,
+    2000,
     false
   );
   return Boolean(topOk);
@@ -272,30 +293,41 @@ async function installWindowOpenCaptureHook(tabId) {
         } catch (_) {}
       }
     }),
-    1200,
+    900,
     null
   );
 }
 
 async function buildAndSaveTailoredResume(jobMeta, state, preferredModel = null) {
+  const compLow = String(jobMeta.company || "").trim().toLowerCase();
+  const roleLow = String(jobMeta.title || "").trim().toLowerCase();
+  if (compLow && compLow !== "company" && compLow !== "target company") {
+    const existing = (state.tailoredResumes || []).find(
+      (r) =>
+        r.pdfBase64 &&
+        String(r.company || "").trim().toLowerCase() === compLow &&
+        (!roleLow || String(r.role || "").trim().toLowerCase() === roleLow) &&
+        r.createdAt &&
+        Date.now() - Date.parse(r.createdAt) < 20 * 60 * 1000
+    );
+    if (existing) {
+      return { record: existing, postScore: { totalScore: existing.atsScore || 98 } };
+    }
+  }
+
   const kw = analyzeJobKeywords(jobMeta.description || "", state.profile);
   const missingList = kw.missing.map((m) => m.keyword);
   let aiRes = null;
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      aiRes = await tailorResumeWithGemini(
-        jobMeta,
-        state.profile,
-        missingList,
-        state.settings,
-        preferredModel
-      );
-      if (aiRes?.tailored) break;
-    } catch (_) {
-      if (attempt === 1) await sleep(1000);
-    }
-  }
+  try {
+    aiRes = await tailorResumeWithGemini(
+      jobMeta,
+      state.profile,
+      missingList,
+      state.settings,
+      preferredModel
+    );
+  } catch (_) {}
 
   if (!aiRes?.tailored) {
     const prof = state.profile || {};
@@ -345,19 +377,14 @@ async function buildAndSaveCoverLetter(jobMeta, state, tone = "Concise & Technic
   let modelUsed = "fallback-template";
   let fellBack = false;
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const aiCl = await generateCoverLetterWithGemini(jobMeta, state.profile, tone, state.settings);
-      if (aiCl?.coverLetter?.trim()) {
-        coverLetterText = aiCl.coverLetter.trim();
-        modelUsed = aiCl.modelUsed || "gemini";
-        fellBack = Boolean(aiCl.fellBack);
-        break;
-      }
-    } catch (_) {
-      if (attempt === 1) await sleep(1000);
+  try {
+    const aiCl = await generateCoverLetterWithGemini(jobMeta, state.profile, tone, state.settings);
+    if (aiCl?.coverLetter?.trim()) {
+      coverLetterText = aiCl.coverLetter.trim();
+      modelUsed = aiCl.modelUsed || "gemini";
+      fellBack = Boolean(aiCl.fellBack);
     }
-  }
+  } catch (_) {}
 
   if (!coverLetterText) {
     const p = state.profile?.personal || {};
@@ -996,7 +1023,7 @@ async function executeMultiFrameValidationHeal(tabId, opts = {}) {
   };
 }
 
-async function waitForActionableJobScreen(tabId, topJobMeta = null, maxWaitMs = 6000) {
+async function waitForActionableJobScreen(tabId, topJobMeta = null, maxWaitMs = 5500) {
   const start = Date.now();
   let last = await inspectTabFrames(tabId, topJobMeta);
   while (Date.now() - start < maxWaitMs) {
@@ -1011,7 +1038,7 @@ async function waitForActionableJobScreen(tabId, topJobMeta = null, maxWaitMs = 
     ) {
       return last;
     }
-    await sleep(420);
+    await sleep(220);
     await ensureTabScripts(tabId);
     last = await inspectTabFrames(tabId, topJobMeta);
   }
@@ -1124,7 +1151,7 @@ async function inspectTabFrames(tabId, topJobMeta = null) {
 
 // Accurately verify whether a Submit click succeeded, triggered OTP, or was blocked by form validation
 async function waitForPostSubmitOutcome(tabId, preSubmitScreen, jobMeta, hadHtml5Invalid = false) {
-  await waitForTabSettle(tabId, 450, 3200);
+  await waitForTabSettle(tabId, 260, 2800);
   let formGoneStreak = 0;
   let lastScreen = null;
 
@@ -1154,7 +1181,7 @@ async function waitForPostSubmitOutcome(tabId, preSubmitScreen, jobMeta, hadHtml
       return { outcome: "validation_blocked", screen: s };
     }
 
-    await sleep(420);
+    await sleep(240);
   }
 
   if (lastScreen && !lastScreen.hasSubmitButton && !lastScreen.hasCandidateForm && !lastScreen.hasValidationErrors) {
@@ -1221,7 +1248,7 @@ async function executeStep2ApplyAndTransition(initialTabId, jobMeta, silentBackg
   await installWindowOpenCaptureHook(tabId);
   const applyExec = await executeAdapterAcrossTab(tabId, "clickApplyEntryButton", [], {
     topFrameFirst: true,
-    timeoutMs: 4800
+    timeoutMs: 4200
   });
 
   const bestApply =
@@ -1243,7 +1270,7 @@ async function executeStep2ApplyAndTransition(initialTabId, jobMeta, silentBackg
       tabId = childTab.id;
       switchedToChildTab = true;
       await notifyOpenerTabHandoff(prevTabId, tabId, silentBackground);
-      await waitForTabComplete(tabId, 10000);
+      await waitForTabComplete(tabId, 8000);
       await ensureTabScripts(tabId);
       await broadcastAutoApplyProgress(tabId, {
         stage: "clicking_apply",
@@ -1252,7 +1279,7 @@ async function executeStep2ApplyAndTransition(initialTabId, jobMeta, silentBackg
       });
     }
 
-    await sleep(380);
+    await sleep(210);
 
     try {
       const tInfo = await chrome.tabs.get(tabId);
