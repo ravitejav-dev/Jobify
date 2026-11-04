@@ -396,6 +396,101 @@ async function buildAndSaveCoverLetter(jobMeta, state, tone = "Concise & Technic
   return saved;
 }
 
+function buildResumeDiffForJob(state, tailoredObj) {
+  const prof = state?.profile || {};
+  const t = tailoredObj?.tailored || tailoredObj || {};
+  const diffs = [];
+
+  const origSummary = String(prof.summaryShort || prof.summary || "").trim();
+  const newSummary = String(t.summary || "").trim();
+  if (origSummary && newSummary && origSummary !== newSummary) {
+    diffs.push({
+      section: "Executive Summary",
+      role: t.targetJobTitle || "Target Role Header",
+      company: "Profile Summary",
+      before: origSummary,
+      after: newSummary
+    });
+  }
+
+  const baseExp = Array.isArray(prof.workExperience) ? prof.workExperience : [];
+  const tailExp = Array.isArray(t.experience) ? t.experience : [];
+  for (let i = 0; i < Math.min(baseExp.length, tailExp.length, 3); i++) {
+    const bList = baseExp[i]?.bullets || baseExp[i]?.highlights || [];
+    const aList = tailExp[i]?.bullets || [];
+    for (let j = 0; j < Math.min(bList.length, aList.length, 2); j++) {
+      if (bList[j] && aList[j]) {
+        diffs.push({
+          section: "Experience",
+          role: tailExp[i].title || baseExp[i].title || "Software Engineer",
+          company: tailExp[i].company || baseExp[i].company || "Company",
+          before: String(bList[j]),
+          after: String(aList[j])
+        });
+      }
+    }
+  }
+  return diffs.slice(0, 6);
+}
+
+function buildSubmissionReceipt(
+  jobMeta,
+  state,
+  tailoredResume,
+  tailoredCoverLetter,
+  collectedFieldsLog = [],
+  totalFilledFields = 0,
+  startedAtMs = Date.now()
+) {
+  const p = state?.profile?.personal || {};
+  const w = state?.profile?.workAuthAndEEO || {};
+  const resumeName = tailoredResume?.fileName || formatCompanyResumeFileName(jobMeta?.company);
+  const seenLabels = new Set();
+  const fields = [];
+
+  const pushField = (label, value) => {
+    const cleanLbl = String(label || "").trim();
+    const cleanVal = String(value ?? "").trim();
+    if (!cleanLbl || !cleanVal) return;
+    const key = cleanLbl.toLowerCase();
+    if (seenLabels.has(key)) return;
+    seenLabels.add(key);
+    fields.push({ label: cleanLbl, value: cleanVal });
+  };
+
+  for (const item of collectedFieldsLog || []) {
+    if (item && typeof item === "object") {
+      pushField(item.label || item.name || item.field, item.value || item.summary || "Filled");
+    } else if (typeof item === "string" && item.includes(":")) {
+      const [k, ...rest] = item.split(":");
+      pushField(k, rest.join(":"));
+    }
+  }
+
+  pushField("Full name", p.fullName || "Raviteja Velanati");
+  pushField("Email", state?.credentials?.portalEmail || p.email || "ravitejavelanati11@gmail.com");
+  pushField("Phone", p.phone || "(774) 418-6241");
+  pushField("Location", p.locationDisplay || "Sunnyvale, CA");
+  pushField("LinkedIn", p.linkedin || "linkedin.com/in/ravitejavelanati");
+  pushField("GitHub", p.github || "github.com/ravitejav-dev");
+  pushField("Résumé", resumeName);
+  if (tailoredCoverLetter?.fileName) {
+    pushField("Cover letter", tailoredCoverLetter.fileName);
+  }
+  pushField("Authorized to work in US", w.authorizedToWorkInUS !== false ? "Yes" : "No");
+  pushField("Requires visa sponsorship", w.requiresSponsorship ? "Yes (STEM OPT)" : "No");
+
+  const elapsedSeconds = Math.max(1, Math.round((Date.now() - (startedAtMs || Date.now())) / 1000));
+  return {
+    fields,
+    totalFields: Math.max(fields.length, Number(totalFilledFields || 0)),
+    skippedCount: 0,
+    genericAnswersCount: 0,
+    elapsedSeconds
+  };
+}
+
+
 // Extract 6-8 digit numeric OTP OR Greenhouse 8-char alphanumeric security code from email text
 function extractOtpCodeFromRawText(subj, bodyText) {
   const combined = `${subj || ""}\n${bodyText || ""}`;
@@ -1093,7 +1188,7 @@ function findSpawnedChildTab(openerTabId, sinceMs) {
   return primary;
 }
 
-async function notifyOpenerTabHandoff(prevTabId, newTabId) {
+async function notifyOpenerTabHandoff(prevTabId, newTabId, silentBackground = false) {
   if (!prevTabId || prevTabId === newTabId) return;
   chrome.tabs
     .sendMessage(prevTabId, {
@@ -1109,13 +1204,15 @@ async function notifyOpenerTabHandoff(prevTabId, newTabId) {
       }
     })
     .catch(() => {});
-  try {
-    await chrome.tabs.update(newTabId, { active: true });
-  } catch (_) {}
+  if (!silentBackground) {
+    try {
+      await chrome.tabs.update(newTabId, { active: true });
+    } catch (_) {}
+  }
 }
 
 // Reliable Step 2 Executor: Clicks Apply / Modal Apply Manually, handles child tabs, popup-blocked target="_blank" / window.open URLs, and waits for Auth Wall or Form!
-async function executeStep2ApplyAndTransition(initialTabId, jobMeta) {
+async function executeStep2ApplyAndTransition(initialTabId, jobMeta, silentBackground = false) {
   let tabId = initialTabId;
   const clickTs = Date.now();
   const preTab = await chrome.tabs.get(tabId).catch(() => null);
@@ -1145,7 +1242,7 @@ async function executeStep2ApplyAndTransition(initialTabId, jobMeta) {
       const prevTabId = tabId;
       tabId = childTab.id;
       switchedToChildTab = true;
-      await notifyOpenerTabHandoff(prevTabId, tabId);
+      await notifyOpenerTabHandoff(prevTabId, tabId, silentBackground);
       await waitForTabComplete(tabId, 10000);
       await ensureTabScripts(tabId);
       await broadcastAutoApplyProgress(tabId, {
@@ -1262,17 +1359,67 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
 
   autoApplyRunning = true;
   autoApplyAbortFlag = false;
+  const silentBackground = Boolean(options.silentBackground);
+  const startedAtMs = Date.now();
   let tabId = initialTabId;
   let totalFilledFields = 0;
+  const collectedFieldsLog = [];
   let tailoredResume = null;
   let tailoredCoverLetter = null;
+  let resumeDiffItems = [];
   let authOrSubmitTriggerMs = Date.now();
+  let activeJobMeta = options.jobMeta || {};
   const authHistory = { triedSignIn: false, createdAccount: false, verifiedEmailLink: false };
   const swKeepAliveTimer = setInterval(() => {
     try {
       chrome.runtime.getPlatformInfo(() => {});
     } catch (_) {}
   }, 12000);
+
+  const syncInFlightApplication = async (appPatch = {}, progressPatch = null) => {
+    const comp = appPatch.company || activeJobMeta.company || options.jobMeta?.company || "Target Company";
+    const role = appPatch.role || activeJobMeta.title || options.jobMeta?.title || "AI / Software Engineer";
+    const loc = appPatch.location || activeJobMeta.location || options.jobMeta?.location || "United States";
+    const ats = appPatch.ats || activeJobMeta.ats || options.jobMeta?.ats || "Career Portal";
+    const url = appPatch.url || activeJobMeta.url || options.jobMeta?.url || "";
+    const resumeFile =
+      appPatch.resumeUsed ||
+      tailoredResume?.fileName ||
+      formatCompanyResumeFileName(comp);
+
+    const savedApp = await upsertApplication({
+      ...(options.applicationId ? { id: options.applicationId } : {}),
+      company: comp,
+      role,
+      location: loc,
+      ats,
+      url,
+      matchScore: appPatch.matchScore || activeJobMeta.matchScore || options.jobMeta?.matchScore || 94,
+      resumeUsed: resumeFile,
+      tailoredResumeId: tailoredResume?.id || null,
+      coverLetterId: tailoredCoverLetter?.id || null,
+      resumeDiff: resumeDiffItems,
+      filledCount: totalFilledFields,
+      elapsedSeconds: Math.max(1, Math.round((Date.now() - startedAtMs) / 1000)),
+      ...appPatch
+    });
+    if (savedApp?.id && !options.applicationId) {
+      options.applicationId = savedApp.id;
+    }
+    if (progressPatch) {
+      await broadcastAutoApplyProgress(tabId, {
+        ...progressPatch,
+        applicationId: savedApp?.id || null,
+        company: comp,
+        role,
+        ats,
+        url,
+        pipelineStage: savedApp?.pipelineStage || progressPatch.stage,
+        application: savedApp
+      });
+    }
+    return savedApp;
+  };
 
   const pollAndActivateVerificationLink = async (currentState, screenUrl) => {
     for (let poll = 1; poll <= 10; poll++) {
@@ -1304,41 +1451,64 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
 
   try {
     let state = await getAllState();
-    try {
-      await chrome.tabs.update(tabId, { active: true });
-    } catch (_) {}
+    if (!silentBackground) {
+      try {
+        await chrome.tabs.update(tabId, { active: true });
+      } catch (_) {}
+    }
     await ensureTabScripts(tabId);
 
-    await broadcastAutoApplyProgress(tabId, {
-      running: true,
-      completed: false,
-      error: null,
-      stage: "extracting_job",
-      stepLabel: "🤖 Taking Control — Pulling Job Details & Requirements",
-      detail: "Scanning job description, posted salary & application portal controls..."
-    });
+    await syncInFlightApplication(
+      {
+        status: "In Flight",
+        pipelineStage: "in_flight",
+        stepLabel: "Reading job description...",
+        detail: "Scanning job description, posted salary & application portal controls...",
+        resumeStatus: "Analyzing JD",
+        coverLetterStatus: "Checking"
+      },
+      {
+        running: true,
+        completed: false,
+        error: null,
+        stage: "extracting_job",
+        stepLabel: "🤖 Taking Control — Pulling Job Details & Requirements",
+        detail: "Scanning job description, posted salary & application portal controls..."
+      }
+    );
 
     const initialScreen = await waitForActionableJobScreen(tabId, options.jobMeta || null, 6500);
     const jobMeta =
       initialScreen.jobMeta?.description?.length >= (options.jobMeta?.description?.length || 0)
         ? initialScreen.jobMeta
         : options.jobMeta || initialScreen.jobMeta || {};
+    activeJobMeta = jobMeta;
 
     // Step 1: Tailor ATS Resume PDF & Requested Cover Letter PDF in Parallel
     const needResumeTailor = options.tailorResume !== false && (jobMeta.description || "").length > 40;
     const needCoverLetter = Boolean(jobMeta.mentionsCoverLetter || initialScreen.inventory?.requiresCoverLetter);
 
     if (needResumeTailor || needCoverLetter) {
-      await broadcastAutoApplyProgress(tabId, {
-        stage: needResumeTailor ? "tailoring_resume" : "tailoring_cover_letter",
-        stepLabel:
-          needResumeTailor && needCoverLetter
-            ? `✨ Step 1: Tailoring Resume & Cover Letter for ${jobMeta.company || "Role"}`
-            : needResumeTailor
-              ? `✨ Step 1: Tailoring Resume for ${jobMeta.company || "Role"}`
-              : "📝 Step 1: Tailoring Cover Letter PDF",
-        detail: "Injecting ATS keywords & compiling publication-grade PDF documents..."
-      });
+      await syncInFlightApplication(
+        {
+          status: "In Flight",
+          pipelineStage: "in_flight",
+          stepLabel: `Tailoring résumé (${formatCompanyResumeFileName(jobMeta.company)})...`,
+          detail: "Injecting ATS keywords & compiling publication-grade 1-page PDF...",
+          resumeStatus: "Tailoring...",
+          coverLetterStatus: needCoverLetter ? "Tailoring..." : "Optional"
+        },
+        {
+          stage: needResumeTailor ? "tailoring_resume" : "tailoring_cover_letter",
+          stepLabel:
+            needResumeTailor && needCoverLetter
+              ? `✨ Step 1: Tailoring Resume & Cover Letter for ${jobMeta.company || "Role"}`
+              : needResumeTailor
+                ? `✨ Step 1: Tailoring Resume for ${jobMeta.company || "Role"}`
+                : "📝 Step 1: Tailoring Cover Letter PDF",
+          detail: "Injecting ATS keywords & compiling publication-grade PDF documents..."
+        }
+      );
 
       const tasks = [];
       if (needResumeTailor) {
@@ -1346,6 +1516,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
           buildAndSaveTailoredResume(jobMeta, state, options.preferredModel || null)
             .then((trOut) => {
               tailoredResume = trOut.record;
+              resumeDiffItems = buildResumeDiffForJob(state, tailoredResume);
             })
             .catch((tailorErr) =>
               appendAutopilotLog(`Resume tailor fallback to default PDF: ${tailorErr.message}`, "warn")
@@ -1364,6 +1535,17 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
       await Promise.all(tasks);
       // Reload state after parallel storage writes so both tailoredResume & tailoredCoverLetter are reflected
       state = await getAllState();
+      if (!resumeDiffItems.length && tailoredResume) {
+        resumeDiffItems = buildResumeDiffForJob(state, tailoredResume);
+      }
+      await syncInFlightApplication({
+        status: "In Flight",
+        pipelineStage: "in_flight",
+        stepLabel: "Résumé tailored · Opening application form...",
+        resumeStatus: "Ready",
+        coverLetterStatus: tailoredCoverLetter ? "Ready" : "Optional",
+        resumeDiff: resumeDiffItems
+      });
     }
 
     if (autoApplyAbortFlag) throw new Error("Stopped by user.");
@@ -1381,15 +1563,23 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
     ) {
       applyGateClicks++;
       lastApplyGateUrl = (preApplyCheck.url || "").split("#")[0];
-      await broadcastAutoApplyProgress(tabId, {
-        stage: "clicking_apply",
-        stepLabel: preApplyCheck.hasApplyChoiceModal
-          ? "🖱️ Step 2: Selecting 'Apply Manually' in Modal"
-          : "🖱️ Step 2: Clicking Apply & Selecting Manual Flow",
-        detail: "Opening candidate application portal..."
-      });
+      await syncInFlightApplication(
+        {
+          status: "In Flight",
+          pipelineStage: "in_flight",
+          stepLabel: "Opening application portal...",
+          detail: "Clicking Apply & advancing to candidate portal..."
+        },
+        {
+          stage: "clicking_apply",
+          stepLabel: preApplyCheck.hasApplyChoiceModal
+            ? "🖱️ Step 2: Selecting 'Apply Manually' in Modal"
+            : "🖱️ Step 2: Clicking Apply & Selecting Manual Flow",
+          detail: "Opening candidate application portal..."
+        }
+      );
       authOrSubmitTriggerMs = Date.now();
-      const step2Out = await executeStep2ApplyAndTransition(tabId, jobMeta);
+      const step2Out = await executeStep2ApplyAndTransition(tabId, jobMeta, silentBackground);
       tabId = step2Out.tabId;
     }
 
@@ -1430,7 +1620,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
           (childScreen.inventory?.totalFields || 0) > 0 ||
           childScreen.isSubmittedConfirmation
         ) {
-          await notifyOpenerTabHandoff(openerTabId, childTabId);
+          await notifyOpenerTabHandoff(openerTabId, childTabId, silentBackground);
           return { targetTabId: childTabId, closedPopup: false };
         }
 
@@ -1464,7 +1654,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         await waitForTabSettle(openerTabId, 900, 4500);
         return { targetTabId: openerTabId, closedPopup: true };
       }
-      await notifyOpenerTabHandoff(openerTabId, childTabId);
+      await notifyOpenerTabHandoff(openerTabId, childTabId, silentBackground);
       return { targetTabId: childTabId, closedPopup: false };
     };
 
@@ -1518,33 +1708,50 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
 
       // Check A: Submission Confirmation Banner Reached!
       if (screen.isSubmittedConfirmation) {
-        await upsertApplication({
-          company: jobMeta.company || "Target Company",
-          role: jobMeta.title || "AI / Software Engineer",
-          location: jobMeta.location || "",
-          ats: jobMeta.ats || "Career Portal",
-          url: screen.url || jobMeta.url || "",
-          status: "Applied",
-          matchScore: 94,
-          resumeUsed: tailoredResume?.fileName || formatCompanyResumeFileName(jobMeta.company),
-          notes: `Full Auto-Apply submitted (${totalFilledFields} fields filled cleanly).`
-        });
+        const receipt = buildSubmissionReceipt(
+          jobMeta,
+          state,
+          tailoredResume,
+          tailoredCoverLetter,
+          collectedFieldsLog,
+          totalFilledFields,
+          startedAtMs
+        );
+        const finalApp = await syncInFlightApplication(
+          {
+            url: screen.url || jobMeta.url || "",
+            status: "Applied",
+            pipelineStage: "submitted",
+            stepLabel: "Submitted",
+            detail: `Submitted via ${jobMeta.ats || "Career Portal"} · ${receipt.totalFields} fields filled · 0 skipped`,
+            resumeStatus: "Attached",
+            coverLetterStatus: tailoredCoverLetter ? "Attached" : "Not Required",
+            fieldsReceipt: receipt.fields,
+            resumeDiff: resumeDiffItems,
+            filledCount: receipt.totalFields,
+            elapsedSeconds: receipt.elapsedSeconds,
+            notes: `Full Auto-Apply submitted (${receipt.totalFields} fields filled cleanly in ${receipt.elapsedSeconds}s).`
+          },
+          {
+            running: false,
+            completed: true,
+            stage: "completed",
+            stepLabel: "✅ Application Submitted!",
+            detail: `Logged ${jobMeta.company || "Role"} as Applied (${receipt.totalFields} fields filled).`
+          }
+        );
         chrome.action.setBadgeText({ text: "✓", tabId }).catch(() => {});
         chrome.action.setBadgeBackgroundColor({ color: "#10b981", tabId }).catch(() => {});
-        await broadcastAutoApplyProgress(tabId, {
-          running: false,
-          completed: true,
-          stage: "completed",
-          stepLabel: "✅ Application Submitted!",
-          detail: `Logged ${jobMeta.company || "Role"} as Applied.`
-        });
         return {
           ok: true,
           submitted: true,
           tabId,
-          totalFilledFields,
+          totalFilledFields: receipt.totalFields,
           tailoredResumeFile: tailoredResume?.fileName || null,
-          coverLetterFile: tailoredCoverLetter?.fileName || null
+          coverLetterFile: tailoredCoverLetter?.fileName || null,
+          fieldsReceipt: receipt.fields,
+          resumeDiff: resumeDiffItems,
+          application: finalApp
         };
       }
 
@@ -1568,7 +1775,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
           detail: "Advancing past portal entry gate..."
         });
         authOrSubmitTriggerMs = Date.now();
-        const gateOut = await executeStep2ApplyAndTransition(tabId, jobMeta);
+        const gateOut = await executeStep2ApplyAndTransition(tabId, jobMeta, silentBackground);
         tabId = gateOut.tabId;
         continue;
       }
@@ -1579,11 +1786,19 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         let otpSource = "";
         for (let poll = 1; poll <= 14; poll++) {
           if (autoApplyAbortFlag) throw new Error("Stopped by user.");
-          await broadcastAutoApplyProgress(tabId, {
-            stage: "waiting_otp",
-            stepLabel: `📨 Reading Email OTP (Attempt ${poll}/14)`,
-            detail: `Checking ${state.credentials.portalEmail} for verification code...`
-          });
+          await syncInFlightApplication(
+            {
+              status: "In Flight",
+              pipelineStage: "in_flight",
+              stepLabel: `Reading Email OTP (${poll}/14)...`,
+              detail: `Checking ${state.credentials.portalEmail} for verification code...`
+            },
+            {
+              stage: "waiting_otp",
+              stepLabel: `📨 Reading Email OTP (Attempt ${poll}/14)`,
+              detail: `Checking ${state.credentials.portalEmail} for verification code...`
+            }
+          );
           const otpRes = await fetchOtpDualEngine(state, {
             tabUrl: screen.url,
             sinceEpochMs: authOrSubmitTriggerMs
@@ -1597,13 +1812,21 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         }
 
         if (!otpCode) {
-          await broadcastAutoApplyProgress(tabId, {
-            running: false,
-            completed: false,
-            stage: "paused_otp",
-            stepLabel: "⏸️ Waiting for Verification Code",
-            detail: `No recent OTP found in ${state.credentials.portalEmail} yet — enter code to finish.`
-          });
+          await syncInFlightApplication(
+            {
+              status: "Needs You",
+              pipelineStage: "needs_you",
+              stepLabel: "Waiting for OTP verification code",
+              detail: `No recent OTP found in ${state.credentials.portalEmail} yet.`
+            },
+            {
+              running: false,
+              completed: false,
+              stage: "paused_otp",
+              stepLabel: "⏸️ Waiting for Verification Code",
+              detail: `No recent OTP found in ${state.credentials.portalEmail} yet — enter code to finish.`
+            }
+          );
           return { ok: true, submitted: false, pausedForOtp: true, tabId, totalFilledFields };
         }
 
@@ -1657,23 +1880,33 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
 
         authAttempts++;
         authOrSubmitTriggerMs = Date.now();
-        await broadcastAutoApplyProgress(tabId, {
-          stage: "portal_auth",
-          stepLabel: screen.hasGuestAuthBypass
-            ? "🔓 Bypassing Login Gate ('Apply as Guest')"
-            : screen.isOAuthProviderPage
-            ? `🔐 Completing OAuth Account Selection (${state.credentials.portalEmail})`
-            : screen.hasSsoAuthGate
-            ? "🔐 Selecting 'Sign in with Google' on SSO Portal"
-            : screen.hasEmailAuthGate
-            ? "🔐 Selecting 'Sign in with Email' & Authenticating"
-            : authHistory.createdAccount
-            ? "🔐 Completing Post-Signup Portal Sign In"
-            : screen.authMode === "create"
-            ? "🔐 Creating Candidate Account (Filling All Registration Fields)"
-            : "🔐 Portal Sign In / Create Account",
-          detail: `Using ${state.credentials.portalEmail} (handling SSO/OAuth, Login, Registration & Terms)...`
-        });
+        const authStepLbl = screen.hasGuestAuthBypass
+          ? "🔓 Bypassing Login Gate ('Apply as Guest')"
+          : screen.isOAuthProviderPage
+          ? `🔐 Completing OAuth Account Selection (${state.credentials.portalEmail})`
+          : screen.hasSsoAuthGate
+          ? "🔐 Selecting 'Sign in with Google' on SSO Portal"
+          : screen.hasEmailAuthGate
+          ? "🔐 Selecting 'Sign in with Email' & Authenticating"
+          : authHistory.createdAccount
+          ? "🔐 Completing Post-Signup Portal Sign In"
+          : screen.authMode === "create"
+          ? "🔐 Creating Candidate Account (Filling All Registration Fields)"
+          : "🔐 Portal Sign In / Create Account";
+
+        await syncInFlightApplication(
+          {
+            status: "In Flight",
+            pipelineStage: "in_flight",
+            stepLabel: authStepLbl.replace(/^[^\w]+/, "").trim(),
+            detail: `Authenticating with ${state.credentials.portalEmail}...`
+          },
+          {
+            stage: "portal_auth",
+            stepLabel: authStepLbl,
+            detail: `Using ${state.credentials.portalEmail} (handling SSO/OAuth, Login, Registration & Terms)...`
+          }
+        );
 
         await installWindowOpenCaptureHook(tabId);
         const authExec = await executeAdapterAcrossTab(
@@ -1715,7 +1948,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
               const openedPopup = await chrome.tabs.create({
                 url: capUrl,
                 openerTabId: tabId,
-                active: true
+                active: !silentBackground
               });
               childTabAfterAuth = { id: openedPopup.id, openerTabId: tabId, createdAt: Date.now() };
             } catch (_) {}
@@ -1749,11 +1982,19 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
           } catch (_) {}
         }
 
-        await broadcastAutoApplyProgress(tabId, {
-          stage: "filling_fields",
-          stepLabel: `✍️ Filling ${screen.inventory.totalFields} Fields Cleanly (1 by 1)`,
-          detail: `Step ${stepIdx}: Filling needed fields, checkboxes & required questions...`
-        });
+        await syncInFlightApplication(
+          {
+            status: "In Flight",
+            pipelineStage: "in_flight",
+            stepLabel: `Filling ${screen.inventory.totalFields} fields...`,
+            detail: `Step ${stepIdx}: Filling candidate fields, resume upload & custom questions...`
+          },
+          {
+            stage: "filling_fields",
+            stepLabel: `✍️ Filling ${screen.inventory.totalFields} Fields Cleanly (1 by 1)`,
+            detail: `Step ${stepIdx}: Filling needed fields, checkboxes & required questions...`
+          }
+        );
 
         const fillPass = await executeMultiFrameAutofill(tabId, {
           ...buildHealOptions(state),
@@ -1765,6 +2006,28 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         });
 
         totalFilledFields += Number(fillPass?.filledCount || 0);
+        if (Array.isArray(fillPass?.filledFieldsLog)) {
+          collectedFieldsLog.push(...fillPass.filledFieldsLog);
+        }
+        const partialReceipt = buildSubmissionReceipt(
+          jobMeta,
+          state,
+          tailoredResume,
+          tailoredCoverLetter,
+          collectedFieldsLog,
+          totalFilledFields,
+          startedAtMs
+        );
+        await syncInFlightApplication({
+          status: "Filled",
+          pipelineStage: "filled",
+          stepLabel: `Filled ${totalFilledFields} of ${Math.max(totalFilledFields, screen.inventory.totalFields)} fields`,
+          detail: "All required fields & tailored résumé populated — preparing submission...",
+          resumeStatus: "Attached",
+          coverLetterStatus: tailoredCoverLetter ? "Attached" : "Optional",
+          fieldsReceipt: partialReceipt.fields,
+          filledCount: totalFilledFields
+        });
       }
       skipNextCleanFillOnce = false;
 
@@ -1827,11 +2090,19 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
 
       if (submitAct) {
         authOrSubmitTriggerMs = Date.now();
-        await broadcastAutoApplyProgress(tabId, {
-          stage: "submitting",
-          stepLabel: `🚀 Submitting Application ('${submitAct.buttonText}')`,
-          detail: "Verifying submission confirmation or post-submit security code..."
-        });
+        await syncInFlightApplication(
+          {
+            status: "Filled",
+            pipelineStage: "filled",
+            stepLabel: `Submitting application ('${submitAct.buttonText}')...`,
+            detail: "Verifying submission confirmation..."
+          },
+          {
+            stage: "submitting",
+            stepLabel: `🚀 Submitting Application ('${submitAct.buttonText}')`,
+            detail: "Verifying submission confirmation or post-submit security code..."
+          }
+        );
 
         const postRes = await waitForPostSubmitOutcome(
           tabId,
@@ -1847,59 +2118,85 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         }
 
         if (postRes.outcome === "confirmed" || postSubmit.isSubmittedConfirmation) {
-          await upsertApplication({
-            company: jobMeta.company || "Target Company",
-            role: jobMeta.title || "AI / Software Engineer",
-            location: jobMeta.location || "",
-            ats: jobMeta.ats || "Career Portal",
-            url: postSubmit.url || jobMeta.url || "",
-            status: "Applied",
-            matchScore: 94,
-            resumeUsed: tailoredResume?.fileName || formatCompanyResumeFileName(jobMeta.company),
-            notes: `Full Auto-Apply submitted (${totalFilledFields} fields filled cleanly).`
-          });
+          const receipt = buildSubmissionReceipt(
+            jobMeta,
+            state,
+            tailoredResume,
+            tailoredCoverLetter,
+            collectedFieldsLog,
+            totalFilledFields,
+            startedAtMs
+          );
+          const finalApp = await syncInFlightApplication(
+            {
+              url: postSubmit.url || jobMeta.url || "",
+              status: "Applied",
+              pipelineStage: "submitted",
+              stepLabel: "Submitted",
+              detail: `Submitted via ${jobMeta.ats || "Career Portal"} · ${receipt.totalFields} fields filled · 0 skipped`,
+              resumeStatus: "Attached",
+              coverLetterStatus: tailoredCoverLetter ? "Attached" : "Not Required",
+              fieldsReceipt: receipt.fields,
+              resumeDiff: resumeDiffItems,
+              filledCount: receipt.totalFields,
+              elapsedSeconds: receipt.elapsedSeconds,
+              notes: `Full Auto-Apply submitted (${receipt.totalFields} fields filled cleanly in ${receipt.elapsedSeconds}s).`
+            },
+            {
+              running: false,
+              completed: true,
+              stage: "completed",
+              stepLabel: "✅ Application Submitted!",
+              detail: `Logged ${jobMeta.company || "Role"} as Applied (${receipt.totalFields} fields filled).`
+            }
+          );
 
           chrome.action.setBadgeText({ text: "✓", tabId }).catch(() => {});
           chrome.action.setBadgeBackgroundColor({ color: "#10b981", tabId }).catch(() => {});
-
-          await broadcastAutoApplyProgress(tabId, {
-            running: false,
-            completed: true,
-            stage: "completed",
-            stepLabel: "✅ Application Submitted!",
-            detail: `Logged ${jobMeta.company || "Role"} as Applied.`
-          });
 
           return {
             ok: true,
             submitted: true,
             tabId,
-            totalFilledFields,
+            totalFilledFields: receipt.totalFields,
             tailoredResumeFile: tailoredResume?.fileName || null,
-            coverLetterFile: tailoredCoverLetter?.fileName || null
+            coverLetterFile: tailoredCoverLetter?.fileName || null,
+            fieldsReceipt: receipt.fields,
+            resumeDiff: resumeDiffItems,
+            application: finalApp
           };
         }
 
         // Submit did NOT confirm yet — check for CAPTCHA or run AI Error Diagnosis & Self-Heal up to 4 rounds!
         if (postSubmit.hardBlocker?.blocked) {
-          await upsertApplication({
-            company: jobMeta.company || "Target Company",
-            role: jobMeta.title || "AI / Software Engineer",
-            location: jobMeta.location || "",
-            ats: jobMeta.ats || "Career Portal",
-            url: postSubmit.url || jobMeta.url || "",
-            status: "Saved",
-            matchScore: 92,
-            resumeUsed: tailoredResume?.fileName || formatCompanyResumeFileName(jobMeta.company),
-            notes: `Autofilled ${totalFilledFields} fields — paused on CAPTCHA challenge.`
-          });
-          await broadcastAutoApplyProgress(tabId, {
-            running: false,
-            completed: false,
-            stage: "paused_captcha",
-            stepLabel: "🧩 Complete CAPTCHA to Finish Submit",
-            detail: "All fields are filled — solve the CAPTCHA checkbox and click Submit."
-          });
+          const receipt = buildSubmissionReceipt(
+            jobMeta,
+            state,
+            tailoredResume,
+            tailoredCoverLetter,
+            collectedFieldsLog,
+            totalFilledFields,
+            startedAtMs
+          );
+          const capApp = await syncInFlightApplication(
+            {
+              url: postSubmit.url || jobMeta.url || "",
+              status: "Needs You",
+              pipelineStage: "needs_you",
+              stepLabel: "Complete CAPTCHA to finish submit",
+              detail: `Autofilled ${totalFilledFields} fields — paused on CAPTCHA challenge.`,
+              fieldsReceipt: receipt.fields,
+              resumeDiff: resumeDiffItems,
+              notes: `Autofilled ${totalFilledFields} fields — paused on CAPTCHA challenge.`
+            },
+            {
+              running: false,
+              completed: false,
+              stage: "paused_captcha",
+              stepLabel: "🧩 Complete CAPTCHA to Finish Submit",
+              detail: "All fields are filled — solve the CAPTCHA checkbox and click Submit."
+            }
+          );
           return {
             ok: true,
             submitted: false,
@@ -1907,7 +2204,8 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
             tabId,
             totalFilledFields,
             tailoredResumeFile: tailoredResume?.fileName || null,
-            coverLetterFile: tailoredCoverLetter?.fileName || null
+            coverLetterFile: tailoredCoverLetter?.fileName || null,
+            application: capApp
           };
         }
 
@@ -1949,13 +2247,21 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
         const blockerMsg =
           postSubmit.validationErrors?.[0] ||
           "Form stayed open after submit — scrolled to remaining required field.";
-        await broadcastAutoApplyProgress(tabId, {
-          running: false,
-          completed: false,
-          stage: "needs_review",
-          stepLabel: "⚠️ 1 Field Needs Quick Check Before Submit",
-          detail: blockerMsg
-        });
+        await syncInFlightApplication(
+          {
+            status: "Needs You",
+            pipelineStage: "needs_you",
+            stepLabel: "1 field needs quick check before submit",
+            detail: blockerMsg
+          },
+          {
+            running: false,
+            completed: false,
+            stage: "needs_review",
+            stepLabel: "⚠️ 1 Field Needs Quick Check Before Submit",
+            detail: blockerMsg
+          }
+        );
         return {
           ok: true,
           submitted: false,
@@ -1983,22 +2289,45 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
       }
 
       // Neither Next nor Submit clicked
-      await broadcastAutoApplyProgress(tabId, {
-        running: false,
-        completed: true,
-        stage: "ready_for_review",
-        stepLabel: `✅ Autofilled ${totalFilledFields} Fields Cleanly`,
-        detail: allowFinalSubmit
-          ? "All visible fields filled — review final screen if custom submit control is present."
-          : "Paused before final submit (Auto-Submit toggle is OFF)."
-      });
+      const receipt = buildSubmissionReceipt(
+        jobMeta,
+        state,
+        tailoredResume,
+        tailoredCoverLetter,
+        collectedFieldsLog,
+        totalFilledFields,
+        startedAtMs
+      );
+      await syncInFlightApplication(
+        {
+          status: "Filled",
+          pipelineStage: "filled",
+          stepLabel: `Autofilled ${totalFilledFields} fields cleanly`,
+          detail: allowFinalSubmit
+            ? "All visible fields filled — ready in tracker."
+            : "Paused before final submit (Safe Review Mode).",
+          fieldsReceipt: receipt.fields,
+          resumeDiff: resumeDiffItems
+        },
+        {
+          running: false,
+          completed: true,
+          stage: "ready_for_review",
+          stepLabel: `✅ Autofilled ${totalFilledFields} Fields Cleanly`,
+          detail: allowFinalSubmit
+            ? "All visible fields filled — review final screen if custom submit control is present."
+            : "Paused before final submit (Auto-Submit toggle is OFF)."
+        }
+      );
       return {
         ok: true,
         submitted: false,
         tabId,
         totalFilledFields,
         tailoredResumeFile: tailoredResume?.fileName || null,
-        coverLetterFile: tailoredCoverLetter?.fileName || null
+        coverLetterFile: tailoredCoverLetter?.fileName || null,
+        fieldsReceipt: receipt.fields,
+        resumeDiff: resumeDiffItems
       };
     }
 
@@ -2049,17 +2378,35 @@ async function runAutopilotQueue() {
 
       latestQueue[idx].status = "Running";
       await updateAutopilotQueue(latestQueue);
-      await appendAutopilotLog(`Opening ${item.company} — ${item.title} (${item.url})`, "info");
+      await appendAutopilotLog(`Running silent background Auto-Apply for ${item.company} — ${item.title}`, "info");
 
+      let workerTabId = null;
       try {
-        const tab = await chrome.tabs.create({ url: item.url, active: true });
+        const tab = await chrome.tabs.create({ url: item.url, active: false });
+        workerTabId = tab.id;
         await waitForTabComplete(tab.id, 18000);
         await ensureTabScripts(tab.id);
 
         const execResp = await runFullAutoApplyWorkflow(tab.id, {
+          silentBackground: true,
           autoSubmit: state.settings.autopilotMode === "full_auto",
-          tailorResume: item.tailorFirst !== false
+          tailorResume: item.tailorFirst !== false,
+          jobMeta: {
+            company: item.company,
+            title: item.title,
+            location: item.location,
+            ats: item.ats,
+            url: item.url,
+            matchScore: item.matchScore || 92
+          }
         });
+
+        if (execResp?.tabId && execResp.tabId !== workerTabId) {
+          chrome.tabs.remove(execResp.tabId).catch(() => {});
+        }
+        if (workerTabId && !execResp?.blockedByCaptcha && !execResp?.pausedForOtp) {
+          chrome.tabs.remove(workerTabId).catch(() => {});
+        }
 
         const updatedState = await getAllState();
         const q2 = [...updatedState.autopilotQueue];
@@ -2076,10 +2423,13 @@ async function runAutopilotQueue() {
         }
 
         await appendAutopilotLog(
-          `Completed ${item.company} — ${execResp?.totalFilledFields || 0} fields autofilled${execResp?.submitted ? " & submitted!" : " (paused for review)."}`,
+          `Completed ${item.company} — ${execResp?.totalFilledFields || 0} fields autofilled${execResp?.submitted ? " & submitted!" : " (saved in tracker)."}`,
           "success"
         );
       } catch (stepErr) {
+        if (workerTabId) {
+          chrome.tabs.remove(workerTabId).catch(() => {});
+        }
         const updatedState = await getAllState();
         const q2 = [...updatedState.autopilotQueue];
         const i2 = q2.findIndex((q) => q.id === item.id);
@@ -2363,25 +2713,72 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "LAUNCH_TAB_AND_AUTO_APPLY": {
         const jobUrl = String(payload.url || "").trim();
         if (!jobUrl) return { ok: false, error: "Missing job URL." };
-        const createdTab = await chrome.tabs.create({ url: jobUrl, active: payload.active !== false });
+        // Default to silent background worker tab (active: false) so we NEVER hijack the user's current screen!
+        const shouldFocusTab = payload.active === true;
+        const silentBackground = !shouldFocusTab;
+        const jbMeta = payload.options?.jobMeta || payload.jobMeta || {};
+
+        const queuedApp = await upsertApplication({
+          company: jbMeta.company || "Target Company",
+          role: jbMeta.title || "AI / Software Engineer",
+          location: jbMeta.location || "United States",
+          ats: jbMeta.ats || "Career Portal",
+          url: jobUrl,
+          status: "In Flight",
+          pipelineStage: "in_flight",
+          stepLabel: "Queued · Starting background agent...",
+          detail: "Initializing headless worker & reading job description...",
+          matchScore: jbMeta.matchScore || 94,
+          resumeStatus: "Queued",
+          coverLetterStatus: "Optional"
+        });
+
+        const createdTab = await chrome.tabs.create({ url: jobUrl, active: shouldFocusTab });
         const runTask = async () => {
-          await waitForTabComplete(createdTab.id, 18000);
-          await ensureTabScripts(createdTab.id);
-          return await runFullAutoApplyWorkflow(createdTab.id, {
-            autoSubmit:
-              payload.options?.autoSubmit !== undefined
-                ? Boolean(payload.options.autoSubmit)
-                : state.settings?.autoSubmitEnabled !== false,
-            tailorResume: payload.options?.tailorResume !== false,
-            jobMeta: payload.options?.jobMeta || payload.jobMeta || null
-          });
+          try {
+            await waitForTabComplete(createdTab.id, 18000);
+            await ensureTabScripts(createdTab.id);
+            const out = await runFullAutoApplyWorkflow(createdTab.id, {
+              silentBackground,
+              applicationId: queuedApp?.id || null,
+              autoSubmit:
+                payload.options?.autoSubmit !== undefined
+                  ? Boolean(payload.options.autoSubmit)
+                  : state.settings?.autoSubmitEnabled !== false,
+              tailorResume: payload.options?.tailorResume !== false,
+              jobMeta: jbMeta
+            });
+            if (
+              silentBackground &&
+              payload.keepTabOpen !== true &&
+              !out?.blockedByCaptcha &&
+              !out?.pausedForOtp
+            ) {
+              if (out?.tabId && out.tabId !== createdTab.id) {
+                chrome.tabs.remove(out.tabId).catch(() => {});
+              }
+              chrome.tabs.remove(createdTab.id).catch(() => {});
+            }
+            return out;
+          } catch (err) {
+            if (silentBackground && payload.keepTabOpen !== true) {
+              chrome.tabs.remove(createdTab.id).catch(() => {});
+            }
+            throw err;
+          }
         };
         if (payload.awaitCompletion) {
           const out = await runTask();
-          return { ...out, tabId: out?.tabId || createdTab.id };
+          return { ...out, tabId: out?.tabId || createdTab.id, application: out?.application || queuedApp };
         }
         runTask().catch(() => {});
-        return { ok: true, started: true, tabId: createdTab.id };
+        return {
+          ok: true,
+          started: true,
+          silentBackground,
+          tabId: createdTab.id,
+          application: queuedApp
+        };
       }
 
       case "STOP_FULL_AUTO_APPLY": {

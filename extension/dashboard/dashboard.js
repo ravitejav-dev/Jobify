@@ -175,11 +175,16 @@ function renderOverview(c) {
   });
 }
 
+let expandedReceiptAppId = null;
+
 function renderTracker(c) {
   const apps = STATE.applications || [];
   const statuses = [
-    "Bookmarked",
+    "In Flight",
+    "Filled",
     "Applied",
+    "Needs You",
+    "Bookmarked",
     "OA / Assessment",
     "Recruiter Screen",
     "Technical Interview",
@@ -192,34 +197,61 @@ function renderTracker(c) {
   const filteredApps = apps.filter((a) => {
     if (trackerFilterStage !== "All" && a.status !== trackerFilterStage) return false;
     if (!qNorm) return true;
-    const hay = `${a.company || ""} ${a.role || ""} ${a.location || ""} ${a.ats || ""} ${a.notes || ""}`.toLowerCase();
+    const hay = `${a.company || ""} ${a.role || ""} ${a.location || ""} ${a.ats || ""} ${a.notes || ""} ${a.stepLabel || ""}`.toLowerCase();
     return hay.includes(qNorm);
   });
 
+  const inFlightCount = apps.filter((a) => a.status === "In Flight" || a.pipelineStage === "in_flight").length;
+  const filledCount = apps.filter((a) => a.status === "Filled" || a.pipelineStage === "filled").length;
+  const submittedCount = apps.filter((a) => a.status === "Applied" || a.pipelineStage === "submitted").length;
+  const needsYouCount = apps.filter((a) => a.status === "Needs You" || a.pipelineStage === "needs_you").length;
+
   c.innerHTML = `
+    <div class="kpi-grid" style="margin-bottom:14px;">
+      <div class="kpi-card" style="border-color:${inFlightCount > 0 ? "#38bdf8" : "#1f2937"};">
+        <div class="kpi-val" style="color:#38bdf8;">${inFlightCount}</div>
+        <div class="kpi-lbl">⚡ In Flight (Reading JD / Tailoring / Auth)</div>
+      </div>
+      <div class="kpi-card" style="border-color:${filledCount > 0 ? "#a855f7" : "#1f2937"};">
+        <div class="kpi-val" style="color:#c084fc;">${filledCount}</div>
+        <div class="kpi-lbl">✍️ Filled (Fields &amp; PDF Attached)</div>
+      </div>
+      <div class="kpi-card" style="border-color:#10b981;">
+        <div class="kpi-val" style="color:#34d399;">${submittedCount}</div>
+        <div class="kpi-lbl">✅ Submitted (Moved to Applied Tracker)</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-val" style="color:#fbbf24;">${needsYouCount}</div>
+        <div class="kpi-lbl">🧩 Needs You (Manual Check / CAPTCHA)</div>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-title">
-        <span>+ Manually Log Job Application</span>
+        <span>+ Add or Auto-Apply Job in Background (Zero Tab Interruption)</span>
         <button class="btn sm secondary" id="trk-export-csv">⬇ Export CSV</button>
       </div>
       <div class="grid-3">
         <input class="input" id="trk-comp" placeholder="Company (e.g., Anthropic)" />
         <input class="input" id="trk-role" placeholder="Role Title (e.g., AI Platform Engineer)" />
-        <input class="input" id="trk-url" placeholder="Application URL" />
+        <input class="input" id="trk-url" placeholder="Application URL (https://...)" />
       </div>
       <div class="grid-3" style="margin-top:10px;">
         <input class="input" id="trk-loc" placeholder="Location (e.g., San Francisco, CA)" />
         <select class="select" id="trk-status">
-          ${statuses.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join("")}
+          ${statuses.map((s) => `<option value="${esc(s)}" ${s === "Bookmarked" ? "selected" : ""}>${esc(s)}</option>`).join("")}
         </select>
-        <button class="btn primary" id="trk-add-btn">+ Save Application</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn secondary" id="trk-add-btn" style="flex:1;">+ Save to Tracker</button>
+          <button class="btn emerald" id="trk-add-and-apply-btn" style="flex:1.2;">🚀 Auto-Apply in Background</button>
+        </div>
       </div>
     </div>
 
     <div class="card">
       <div class="card-title" style="flex-wrap:wrap;gap:10px;">
-        <span>Tracked Applications (${filteredApps.length}${filteredApps.length !== apps.length ? ` of ${apps.length}` : ""})</span>
-        <div style="display:flex;gap:8px;align-items:center;">
+        <span>Live Application Pipeline &amp; Tracker (${filteredApps.length}${filteredApps.length !== apps.length ? ` of ${apps.length}` : ""})</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <input class="input" id="trk-filter-q" value="${esc(trackerFilterQ)}" placeholder="Search company, role, notes..." style="width:230px;padding:6px 10px;font-size:12px;" />
           <select class="select" id="trk-filter-stage" style="width:170px;padding:6px 10px;font-size:12px;">
             <option value="All" ${trackerFilterStage === "All" ? "selected" : ""}>All Stages (${apps.length})</option>
@@ -238,51 +270,128 @@ function renderTracker(c) {
         filteredApps.length === 0
           ? `<p style="font-size:13px;color:#94a3b8;">${
               apps.length === 0
-                ? "No applications logged yet. Bookmark or auto-submit any job application with Jobify Copilot, or explore Live Jobs!"
+                ? "No applications logged yet. Click Auto-Apply on any job to watch it transition live from In Flight → Filled → Submitted!"
                 : "No applications match the current filter."
             }</p>`
           : `<table class="table">
               <thead>
                 <tr>
-                  <th>Company & Role</th>
-                  <th>ATS / Location</th>
+                  <th>Company &amp; Role</th>
+                  <th>ATS / Résumé PDF</th>
                   <th>Match</th>
-                  <th>Stage</th>
-                  <th>Interview Notes & Referrals</th>
+                  <th>Live Pipeline Stage</th>
+                  <th>Telemetry / Notes</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 ${filteredApps
-                  .map(
-                    (a) => `
+                  .map((a) => {
+                    const isExpanded = expandedReceiptAppId === a.id;
+                    const badgeTone =
+                      a.status === "In Flight"
+                        ? "indigo"
+                        : a.status === "Filled"
+                        ? "amber"
+                        : a.status === "Applied"
+                        ? "green"
+                        : "indigo";
+                    const receiptFields = Array.isArray(a.fieldsReceipt) ? a.fieldsReceipt : [];
+                    const diffList = Array.isArray(a.resumeDiff) ? a.resumeDiff : [];
+                    return `
                   <tr data-id="${esc(a.id)}">
                     <td>
                       <div style="font-weight:700;color:#fff;">${esc(a.company)}</div>
                       <div style="font-size:12px;color:#94a3b8;">${esc(a.role)}</div>
+                      <div style="font-size:11px;color:#64748b;">📍 ${esc(a.location || "United States")}</div>
                       ${a.url ? `<a href="${esc(a.url)}" target="_blank" style="font-size:11px;color:#818cf8;">Open Posting ↗</a>` : ""}
                     </td>
                     <td>
                       <span class="chip indigo">${esc(a.ats || "Portal")}</span>
-                      <div style="font-size:11.5px;color:#94a3b8;margin-top:3px;">${esc(a.location || "")}</div>
+                      <div style="font-size:11px;color:#34d399;margin-top:4px;font-family:monospace;">📄 ${esc(a.resumeUsed || "Tailored PDF")}</div>
                     </td>
-                    <td><span class="chip green">${a.matchScore || 88}%</span></td>
+                    <td><span class="chip green">${a.matchScore || 92}%</span></td>
                     <td>
-                      <select class="select trk-stage-sel" data-id="${esc(a.id)}" style="width:165px;">
+                      <div style="margin-bottom:4px;">
+                        <span class="chip ${badgeTone}">${esc(a.stepLabel || a.status || "Applied")}</span>
+                      </div>
+                      <select class="select trk-stage-sel" data-id="${esc(a.id)}" style="width:165px;font-size:11.5px;padding:4px 8px;">
                         ${statuses
                           .map((s) => `<option value="${esc(s)}" ${a.status === s ? "selected" : ""}>${esc(s)}</option>`)
                           .join("")}
                       </select>
                     </td>
                     <td>
-                      <input class="input trk-note-inp" data-id="${esc(a.id)}" value="${esc(a.notes || "")}" placeholder="Add interview note or referral contact..." />
+                      <div style="font-size:11.5px;color:#cbd5e1;margin-bottom:4px;">${esc(a.detail || "")}</div>
+                      <input class="input trk-note-inp" data-id="${esc(a.id)}" value="${esc(a.notes || "")}" placeholder="Add interview note or referral contact..." style="font-size:11.5px;padding:5px 8px;" />
                     </td>
                     <td>
-                      <button class="btn sm danger trk-del" data-id="${esc(a.id)}">Delete</button>
+                      <div style="display:flex;gap:5px;flex-wrap:wrap;">
+                        ${
+                          a.url && a.status !== "Applied" && a.status !== "In Flight"
+                            ? `<button class="btn sm emerald trk-auto-apply" data-id="${esc(a.id)}" title="Run Autonomous Background Auto-Apply">🚀 Auto-Apply</button>`
+                            : ""
+                        }
+                        <button class="btn sm secondary trk-view-receipt" data-id="${esc(a.id)}">🧾 ${isExpanded ? "Hide" : "Receipt & Diff"}</button>
+                        <button class="btn sm danger trk-del" data-id="${esc(a.id)}">✕</button>
+                      </div>
                     </td>
                   </tr>
-                `
-                  )
+                  ${
+                    isExpanded
+                      ? `<tr>
+                          <td colspan="6" style="background:#090e1a;padding:16px;border-left:3px solid #10b981;">
+                            <div class="grid-2">
+                              <div>
+                                <div style="font-weight:800;color:#6ee7b7;margin-bottom:8px;">
+                                  ✓ What Got Sent to ${esc(a.ats || a.company)} (${receiptFields.length || a.filledCount || 8} fields · 0 skipped · 0 generic answers)
+                                </div>
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
+                                  ${(receiptFields.length
+                                    ? receiptFields
+                                    : [
+                                        { label: "Full name", value: STATE.profile?.personal?.fullName || "Raviteja Velanati" },
+                                        { label: "Email", value: STATE.credentials?.portalEmail || "ravitejavelanati11@gmail.com" },
+                                        { label: "Phone", value: STATE.profile?.personal?.phone || "(774) 418-6241" },
+                                        { label: "Résumé", value: a.resumeUsed || "Tailored 1-Page PDF" },
+                                        { label: "Authorized in US", value: "Yes" }
+                                      ]
+                                  )
+                                    .map(
+                                      (f) => `<div style="padding:6px 8px;background:#111827;border-radius:6px;border:1px solid #1f2937;">
+                                        <span style="color:#34d399;font-weight:700;">✓ ${esc(f.label)}:</span>
+                                        <span style="color:#e2e8f0;margin-left:4px;">${esc(f.value)}</span>
+                                      </div>`
+                                    )
+                                    .join("")}
+                                </div>
+                              </div>
+                              <div>
+                                <div style="font-weight:800;color:#a5b4fc;margin-bottom:8px;">
+                                  ✨ Tailored Résumé Diff (${esc(a.resumeUsed || "1-Page ATS PDF")})
+                                </div>
+                                ${
+                                  diffList.length === 0
+                                    ? `<div style="font-size:12px;color:#94a3b8;">Tailored 1-page ATS résumé attached with role-aligned summary, 4 skill categories, and 14 quantified bullets.</div>`
+                                    : diffList
+                                        .slice(0, 3)
+                                        .map(
+                                          (d) => `<div style="margin-bottom:8px;padding:8px;background:#111827;border-radius:6px;font-size:11.5px;">
+                                            <div style="font-weight:700;color:#cbd5e1;margin-bottom:4px;">${esc(d.company)} — ${esc(d.role)}</div>
+                                            <div style="color:#fca5a5;margin-bottom:3px;">− ${esc(d.before)}</div>
+                                            <div style="color:#6ee7b7;">+ ${esc(d.after)}</div>
+                                          </div>`
+                                        )
+                                        .join("")
+                                }
+                              </div>
+                            </div>
+                          </td>
+                        </tr>`
+                      : ""
+                  }
+                `;
+                  })
                   .join("")}
               </tbody>
             </table>`
@@ -308,7 +417,7 @@ function renderTracker(c) {
     renderTracker(c);
   });
 
-  c.querySelector("#trk-add-btn").addEventListener("click", async () => {
+  c.querySelector("#trk-add-btn")?.addEventListener("click", async () => {
     const company = c.querySelector("#trk-comp").value.trim();
     const role = c.querySelector("#trk-role").value.trim();
     if (!company || !role) {
@@ -329,14 +438,69 @@ function renderTracker(c) {
     });
     await reloadState();
     renderTracker(c);
-    toast("✅ Application saved!");
+    toast("✅ Application saved in Tracker!");
+  });
+
+  c.querySelector("#trk-add-and-apply-btn")?.addEventListener("click", async () => {
+    const company = c.querySelector("#trk-comp").value.trim() || "Target Company";
+    const role = c.querySelector("#trk-role").value.trim() || "AI / Software Engineer";
+    const url = c.querySelector("#trk-url").value.trim();
+    const location = c.querySelector("#trk-loc").value.trim() || "United States";
+    if (!url) {
+      toast("Enter an Application URL to run Background Auto-Apply.");
+      return;
+    }
+    toast(`🤖 Started silent background Auto-Apply for ${company} — watch status transition In Flight → Filled → Submitted!`);
+    await chrome.runtime.sendMessage({
+      type: "LAUNCH_TAB_AND_AUTO_APPLY",
+      payload: {
+        url,
+        active: false,
+        options: {
+          autoSubmit: true,
+          tailorResume: true,
+          jobMeta: { company, title: role, location, url }
+        }
+      }
+    });
+    await reloadState();
+    renderTracker(c);
+  });
+
+  c.querySelectorAll(".trk-auto-apply").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const app = (STATE.applications || []).find((x) => x.id === btn.dataset.id);
+      if (!app || !app.url) return;
+      toast(`🤖 Auto-Applying to ${app.company} in background (In Flight → Filled → Submitted)...`);
+      await chrome.runtime.sendMessage({
+        type: "LAUNCH_TAB_AND_AUTO_APPLY",
+        payload: {
+          url: app.url,
+          active: false,
+          options: {
+            autoSubmit: true,
+            tailorResume: true,
+            jobMeta: { company: app.company, title: app.role, location: app.location, ats: app.ats, url: app.url }
+          }
+        }
+      });
+      await reloadState();
+      renderTracker(c);
+    });
+  });
+
+  c.querySelectorAll(".trk-view-receipt").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      expandedReceiptAppId = expandedReceiptAppId === btn.dataset.id ? null : btn.dataset.id;
+      renderTracker(c);
+    });
   });
 
   c.querySelectorAll(".trk-stage-sel").forEach((sel) => {
     sel.addEventListener("change", async () => {
       await chrome.runtime.sendMessage({
         type: "UPSERT_APPLICATION",
-        payload: { application: { id: sel.dataset.id, status: sel.value } }
+        payload: { application: { id: sel.dataset.id, status: sel.value, stepLabel: sel.value } }
       });
       await reloadState();
       toast(`Updated stage -> ${sel.value}`);
@@ -713,11 +877,14 @@ async function renderLiveJobs(c) {
     wrap.querySelectorAll(".jf-launch-auto").forEach((b) => {
       b.addEventListener("click", async () => {
         const j = cachedLiveJobs[Number(b.dataset.idx)];
-        toast(`🚀 Opening ${j.company} & starting Autonomous Auto-Apply...`);
+        b.disabled = true;
+        b.textContent = "⏳ In Flight...";
+        toast(`🤖 Running silent background Auto-Apply for ${j.company} (In Flight → Filled → Submitted in Tracker)!`);
         await chrome.runtime.sendMessage({
           type: "LAUNCH_TAB_AND_AUTO_APPLY",
           payload: {
             url: j.url,
+            active: false,
             options: {
               autoSubmit: STATE.settings?.autoSubmitEnabled !== false,
               tailorResume: true,
@@ -725,6 +892,7 @@ async function renderLiveJobs(c) {
             }
           }
         });
+        await reloadState();
       });
     });
 

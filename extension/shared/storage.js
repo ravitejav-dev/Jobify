@@ -200,6 +200,7 @@ export async function upsertApplication(appEntry) {
     return apps[idx];
   } else {
     const created = {
+      ...appEntry,
       id: appEntry.id || `app_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       company: appEntry.company || "Unknown Company",
       role: appEntry.role || "Software / AI Engineer",
@@ -208,8 +209,17 @@ export async function upsertApplication(appEntry) {
       ats: appEntry.ats || "Career Portal",
       url: appEntry.url || "",
       status: appEntry.status || "Bookmarked",
-      matchScore: appEntry.matchScore ?? null,
+      pipelineStage: appEntry.pipelineStage || (appEntry.status === "Applied" ? "submitted" : "saved"),
+      stepLabel: appEntry.stepLabel || (appEntry.status === "Applied" ? "Submitted" : appEntry.status || "Bookmarked"),
+      detail: appEntry.detail || appEntry.notes || "",
+      matchScore: appEntry.matchScore ?? 92,
       resumeUsed: appEntry.resumeUsed || formatCompanyResumeFileName(appEntry.company),
+      resumeStatus: appEntry.resumeStatus || (appEntry.status === "Applied" ? "Attached" : "Ready"),
+      coverLetterStatus: appEntry.coverLetterStatus || "Optional",
+      fieldsReceipt: Array.isArray(appEntry.fieldsReceipt) ? appEntry.fieldsReceipt : [],
+      resumeDiff: Array.isArray(appEntry.resumeDiff) ? appEntry.resumeDiff : [],
+      filledCount: Number(appEntry.filledCount || 0),
+      elapsedSeconds: Number(appEntry.elapsedSeconds || 0),
       notes: appEntry.notes || "",
       referrals: appEntry.referrals || [],
       createdAt: now,

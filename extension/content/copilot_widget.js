@@ -1649,10 +1649,44 @@
       {
         source: "jobify-extension",
         type: "JOBIFY_EXT_READY",
-        payload: { connected: true, version: "2.3.0" }
+        payload: { connected: true, version: "2.4.0" }
       },
       "*"
     );
+
+    if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== "local") return;
+        if (changes.jobify_auto_apply_session?.newValue) {
+          window.postMessage(
+            {
+              source: "jobify-extension",
+              type: "JOBIFY_EXT_PROGRESS",
+              payload: changes.jobify_auto_apply_session.newValue
+            },
+            "*"
+          );
+        }
+        if (
+          changes.jobify_applications?.newValue ||
+          changes.jobify_tailored_resumes?.newValue ||
+          changes.jobify_autopilot_queue?.newValue
+        ) {
+          window.postMessage(
+            {
+              source: "jobify-extension",
+              type: "JOBIFY_EXT_STATE_CHANGED",
+              payload: {
+                applications: changes.jobify_applications?.newValue || null,
+                tailoredResumes: changes.jobify_tailored_resumes?.newValue || null,
+                autopilotQueue: changes.jobify_autopilot_queue?.newValue || null
+              }
+            },
+            "*"
+          );
+        }
+      });
+    }
 
     window.addEventListener("message", async (event) => {
       if (event.source !== window) return;
@@ -1676,7 +1710,7 @@
       try {
         if (data.type === "JOBIFY_WEB_PING") {
           document.documentElement.setAttribute("data-jobify-extension-connected", "true");
-          reply({ ok: true, connected: true, version: "2.3.0" });
+          reply({ ok: true, connected: true, version: "2.4.0" });
           return;
         }
         if (data.type === "JOBIFY_WEB_GET_STATE") {
@@ -1687,7 +1721,7 @@
         if (data.type === "JOBIFY_WEB_AUTO_APPLY") {
           const res = await safeSendMessage({
             type: "LAUNCH_TAB_AND_AUTO_APPLY",
-            payload: data.payload || {}
+            payload: { active: false, ...(data.payload || {}) }
           });
           reply(res);
           return;
@@ -1695,6 +1729,54 @@
         if (data.type === "JOBIFY_WEB_TAILOR_RESUME") {
           const res = await safeSendMessage({
             type: "TAILOR_RESUME",
+            payload: data.payload || {}
+          });
+          reply(res);
+          return;
+        }
+        if (data.type === "JOBIFY_WEB_GENERATE_COVER_LETTER") {
+          const res = await safeSendMessage({
+            type: "GENERATE_COVER_LETTER",
+            payload: data.payload || {}
+          });
+          reply(res);
+          return;
+        }
+        if (data.type === "JOBIFY_WEB_UPSERT_APPLICATION") {
+          const res = await safeSendMessage({
+            type: "UPSERT_APPLICATION",
+            payload: data.payload || {}
+          });
+          reply(res);
+          return;
+        }
+        if (data.type === "JOBIFY_WEB_DELETE_APPLICATION") {
+          const res = await safeSendMessage({
+            type: "DELETE_APPLICATION",
+            payload: data.payload || {}
+          });
+          reply(res);
+          return;
+        }
+        if (data.type === "JOBIFY_WEB_GET_RESUME_PDF") {
+          const res = await safeSendMessage({
+            type: "GET_RESUME_PDF_BYTES",
+            payload: data.payload || {}
+          });
+          reply(res);
+          return;
+        }
+        if (data.type === "JOBIFY_WEB_GENERATE_OUTREACH") {
+          const res = await safeSendMessage({
+            type: "GENERATE_NETWORK_OUTREACH",
+            payload: data.payload || {}
+          });
+          reply(res);
+          return;
+        }
+        if (data.type === "JOBIFY_WEB_ANSWER_QUESTION") {
+          const res = await safeSendMessage({
+            type: "ANSWER_APPLICATION_QUESTION",
             payload: data.payload || {}
           });
           reply(res);

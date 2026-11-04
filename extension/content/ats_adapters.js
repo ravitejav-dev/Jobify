@@ -5274,12 +5274,12 @@
     const p = profile.personal || {};
     const meta = options.topJobMeta || extractJobMetadata(document);
 
-    // 1. Run clean autofill pass first (catches newly-errored open questions, required custom controls & dropdowns without touching optional fields)
+    // 1. Run clean deterministic autofill pass first (catches required custom controls & dropdowns without duplicating AI open-ended calls before DIAGNOSE_FORM_ERRORS)
     const baseFill = await runFrameAutofill({
       ...options,
       skipApplyGate: true,
       onlyNeededCleanMode: true,
-      fillOpenEndedWithAI: true,
+      fillOpenEndedWithAI: false,
       includeAllUnresolvedOpenEnded: false
     });
     let healedCount = baseFill?.filledCount || 0;

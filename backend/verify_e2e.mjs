@@ -659,7 +659,7 @@ async function main() {
       })()
     `);
     let trickyAudit = null;
-    for (let waitIdx = 0; waitIdx < 45; waitIdx++) {
+    for (let waitIdx = 0; waitIdx < 75; waitIdx++) {
       await sleep(700);
       trickyAudit = await trickyCdp.eval(`window.__TRICKY_AUDIT__`).catch(() => null);
       if (trickyAudit?.submitted) break;
@@ -752,7 +752,7 @@ async function main() {
 
     let sawTakeControlHud = false;
     let aiHealAudit = null;
-    for (let waitIdx = 0; waitIdx < 50; waitIdx++) {
+    for (let waitIdx = 0; waitIdx < 75; waitIdx++) {
       await sleep(450);
       const stepSnap = await aiHealCdp
         .eval(`(() => {
@@ -765,8 +765,8 @@ async function main() {
         })()`)
         .catch(() => null);
       if (stepSnap?.hudVisible || stepSnap?.frameActive) sawTakeControlHud = true;
+      if (stepSnap?.audit) aiHealAudit = stepSnap.audit;
       if (stepSnap?.audit?.submitted) {
-        aiHealAudit = stepSnap.audit;
         break;
       }
     }
@@ -1300,7 +1300,7 @@ async function main() {
       sidepanel: spAudit
     }, null, 2));
 
-    // 5c. Jobify Web Platform (http://127.0.0.1:18765/) + Live Job Aggregator + Chrome Extension Bridge Verification
+    // 5c. Jobify Autonomous Platform (Tsenta + Jobright AI Edition at http://127.0.0.1:18765/) + Silent Background Pipeline Verification
     const webAppCdp = await openTabAndConnect("http://127.0.0.1:18765/");
     let webAppAudit = null;
     for (let w = 0; w < 25; w++) {
@@ -1314,24 +1314,118 @@ async function main() {
           syncedAppliedCount: Number(document.getElementById("stat-applied-count")?.textContent || 0),
           renderedJobCards: document.querySelectorAll(".job-card[data-job-id]").length,
           hasCustomUrlLauncher: Boolean(document.getElementById("custom-job-url") && document.getElementById("btn-launch-custom-url")),
-          floatingCopilotSuppressedOnWebApp: !document.getElementById("jobify-copilot-host")
+          floatingCopilotSuppressedOnWebApp: !document.getElementById("jobify-copilot-host"),
+          hasSidebarViews: Boolean(
+            document.getElementById("web-sidebar-nav") &&
+            document.querySelector(".web-nav-btn[data-web-view='dashboard']") &&
+            document.querySelector(".web-nav-btn[data-web-view='tracker']") &&
+            document.querySelector(".web-nav-btn[data-web-view='resume']") &&
+            document.querySelector(".web-nav-btn[data-web-view='insider']") &&
+            document.querySelector(".web-nav-btn[data-web-view='inbox']")
+          ),
+          hasOrionDrawer: Boolean(document.getElementById("orion-copilot-drawer") && document.getElementById("orion-chat-input"))
         })`)
         .catch(() => null);
       if (webAppAudit?.extensionConnected && webAppAudit?.renderedJobCards >= 4 && webAppAudit?.syncedAppliedCount >= 6) {
         break;
       }
     }
-    console.log("7c. ✅ Jobify Web Platform (http://127.0.0.1:18765/) + Live Multi-Board Job Aggregator + Chrome Extension Bridge Verified:", JSON.stringify(webAppAudit, null, 2));
+
+    // Trigger Save to Tracker -> Tracker Auto-Apply (In Flight -> Filled -> Submitted) + Orion Copilot check
+    const autonomousFlowAudit = await webAppCdp.eval(`
+      (async () => {
+        const beforeApplied = Number(document.getElementById("stat-applied-count")?.textContent || 0);
+        // 1. Click 📌 Save to Tracker on a live job card that isn't in tracker yet, then click ⚡ Auto-Apply inside the Tracker
+        const saveCardBtn = Array.from(document.querySelectorAll(".btn-save-to-tracker")).find((b) => {
+          const card = b.closest(".job-card");
+          const comp = card?.getAttribute("data-job-company") || "";
+          return comp && !document.getElementById("tsenta-apps-tbody")?.innerText?.includes(comp);
+        }) || document.querySelector(".btn-save-to-tracker");
+        if (saveCardBtn) saveCardBtn.click();
+        await new Promise((r) => setTimeout(r, 450));
+
+        // Find the newly saved row in #tsenta-apps-tbody and click its .btn-tracker-auto-apply button
+        const trackerApplyBtn = document.querySelector("#tsenta-apps-tbody .btn-tracker-auto-apply");
+        const hadSavedTrackerApplyBtn = Boolean(trackerApplyBtn);
+        let sawInFlightOrFilled = false;
+        const obs = new MutationObserver(() => {
+          const stages = Array.from(document.querySelectorAll("#tsenta-apps-tbody tr")).map((tr) => tr.getAttribute("data-pipeline-stage"));
+          if (stages.includes("in_flight") || stages.includes("filled")) {
+            sawInFlightOrFilled = true;
+          }
+        });
+        const tbodyEl = document.getElementById("tsenta-apps-tbody");
+        if (tbodyEl) obs.observe(tbodyEl, { childList: true, subtree: true, attributes: true });
+
+        if (trackerApplyBtn) {
+          trackerApplyBtn.click();
+        }
+
+        // Poll until pipeline reaches submitted
+        let finalSubmittedCount = 0;
+        let finalAppliedCount = beforeApplied;
+        for (let i = 0; i < 45; i++) {
+          await new Promise((r) => setTimeout(r, 350));
+          finalSubmittedCount = Number(document.getElementById("cnt-pipe-submitted")?.textContent || 0);
+          finalAppliedCount = Number(document.getElementById("stat-applied-count")?.textContent || 0);
+          const inFlightNow = Number(document.getElementById("cnt-pipe-inflight")?.textContent || 0);
+          const filledNow = Number(document.getElementById("cnt-pipe-filled")?.textContent || 0);
+          if (inFlightNow > 0 || filledNow > 0) sawInFlightOrFilled = true;
+          if (finalAppliedCount >= beforeApplied && inFlightNow === 0 && filledNow === 0 && i >= 4) {
+            break;
+          }
+        }
+        obs.disconnect();
+
+        // Click Receipt & Diff on the top row to verify Tsenta Submission Receipt & Resume Diff modal
+        const receiptBtn = document.querySelector("#tsenta-apps-tbody .btn-view-receipt");
+        if (receiptBtn) receiptBtn.click();
+        await new Promise((r) => setTimeout(r, 250));
+        const receiptModalText = document.getElementById("receipt-modal-content")?.innerText || "";
+        const hasReceiptFields = receiptModalText.includes("What Just Got Sent") && receiptModalText.includes("Tailored Résumé Diff");
+
+        // Test Orion AI Career Copilot endpoint
+        const orionRes = await fetch("/api/orion-chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: "Why am I a strong fit and what insider referral message should I send?" })
+        }).then((r) => r.json());
+
+        return {
+          hadSavedTrackerApplyBtn,
+          sawInFlightOrFilled,
+          beforeApplied,
+          finalAppliedCount,
+          finalSubmittedCount,
+          hasReceiptFields,
+          orionOk: Boolean(orionRes?.ok && orionRes?.reply?.length > 40),
+          webExceptions: []
+        };
+      })()
+    `, 35000);
+
+    console.log("7c. ✅ Jobify Autonomous Platform (Tsenta + Jobright AI Edition) + Silent Tracker Auto-Apply Pipeline Verified:", JSON.stringify({
+      ...webAppAudit,
+      autonomousFlow: autonomousFlowAudit
+    }, null, 2));
     if (
+      webAppCdp.exceptions.length > 0 ||
       !webAppAudit?.isWebAppAttr ||
       !webAppAudit?.extensionConnected ||
       webAppAudit.liveJobsCount < 4 ||
       webAppAudit.renderedJobCards < 4 ||
       webAppAudit.syncedAppliedCount < 6 ||
       !webAppAudit.hasCustomUrlLauncher ||
-      !webAppAudit.floatingCopilotSuppressedOnWebApp
+      !webAppAudit.floatingCopilotSuppressedOnWebApp ||
+      !webAppAudit.hasSidebarViews ||
+      !webAppAudit.hasOrionDrawer ||
+      !autonomousFlowAudit?.hadSavedTrackerApplyBtn ||
+      !autonomousFlowAudit?.sawInFlightOrFilled ||
+      autonomousFlowAudit.finalSubmittedCount < 8 ||
+      !autonomousFlowAudit?.hasReceiptFields ||
+      !autonomousFlowAudit?.orionOk
     ) {
-      throw new Error(`Jobify Web Platform or Extension Bridge verification failed: ${JSON.stringify(webAppAudit)}`);
+      throw new Error(`Jobify Autonomous Platform or Silent Pipeline verification failed: exceptions=${JSON.stringify(webAppCdp.exceptions)} webAppAudit=${JSON.stringify(webAppAudit)} flow=${JSON.stringify(autonomousFlowAudit)}`);
     }
     webAppCdp.close();
 

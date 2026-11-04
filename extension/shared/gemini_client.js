@@ -18,22 +18,20 @@ function supportsZeroThinkingBudget(model) {
 
 function buildCandidateChain(requestedModel, settings) {
   const rawReq = normalizeModelName(requestedModel || settings?.primaryModel || "gemini-3.5-flash");
-  if (settings?.enableSmartFallback === false) {
-    return [rawReq];
-  }
   const fastVerifiedOrder = [
-    "gemini-3.5-flash",
     "gemini-3-flash-preview",
-    "gemini-3.5-flash-lite",
     "gemini-flash-lite-latest"
   ];
-  const ordered = /^gemini-(3\.8|3\.6|3\.1-flash-lite|1\.5|2\.)/i.test(rawReq)
-    ? [...fastVerifiedOrder, rawReq]
+  if (settings?.enableSmartFallback === false) {
+    return /^gemini-3\.[5678]/i.test(rawReq) ? ["gemini-3-flash-preview"] : [rawReq];
+  }
+  const ordered = /^gemini-(3\.[5678]|3\.1-flash-lite|1\.5|2\.)/i.test(rawReq)
+    ? fastVerifiedOrder
     : [rawReq, ...fastVerifiedOrder];
   const unique = [...new Set(ordered)];
   const now = Date.now();
   const healthy = unique.filter((m) => (modelCooldownUntil.get(m) || 0) <= now);
-  return healthy.length > 0 ? healthy : unique;
+  return healthy;
 }
 
 function buildModelRequestBody({ prompt, systemInstruction, jsonMode, temperature, maxOutputTokens, model }) {
@@ -859,22 +857,35 @@ Candidate Profile Highlights:
 
 Output ONLY the body text of the cover letter starting with "Dear ${jobMeta.company ? jobMeta.company + " Hiring Team," : "Hiring Team,"}" and ending with "Best regards,\\nRaviteja Velanati".`;
 
-  const res = await callGemini({
-    prompt,
-    systemInstruction,
-    requestedModel: settings?.primaryModel || "gemini-3.5-flash",
-    jsonMode: false,
-    temperature: 0.45,
-    maxOutputTokens: 1500,
-    settings
-  });
+  try {
+    const res = await callGemini({
+      prompt,
+      systemInstruction,
+      requestedModel: settings?.primaryModel || "gemini-3.5-flash",
+      jsonMode: false,
+      temperature: 0.45,
+      maxOutputTokens: 1500,
+      timeoutMs: 9000,
+      settings
+    });
 
-  return {
-    coverLetter: res.text,
-    modelUsed: res.modelUsed,
-    requestedModel: res.requestedModel,
-    fellBack: res.fellBack
-  };
+    return {
+      coverLetter: res.text,
+      modelUsed: res.modelUsed,
+      requestedModel: res.requestedModel,
+      fellBack: res.fellBack
+    };
+  } catch (err) {
+    if (!settings?.geminiApiKey) throw err;
+    const comp = jobMeta?.company || "Hiring";
+    const role = jobMeta?.title || "AI & Platform Engineer";
+    return {
+      coverLetter: `Dear ${comp} Hiring Team,\n\nI am writing to apply for the ${role} role at ${comp}. As a Senior AI Solutions Engineer at GlobalLogic (Client: Google AI), I have spent the past 3.5+ years architecting production LLM evaluation frameworks, 13 full-stack sandboxed web applications for autonomous browser AI agents, and synthetic data pipelines across 48 user personas and 9 cloud services.\n\nIn my current work supporting Google AI's Novel AI & Responsible AI engineering workflows, I ranked #1 of 11 engineers in platform throughput across 2,000+ evaluation batches while cutting Docker/Kubernetes sandbox initialization latency by 70% and accelerating multi-modal pipeline synthesis by 10x with Python, TypeScript, React, FastAPI, and GCP.\n\nI would welcome the opportunity to bring this hands-on agentic systems and evaluation infrastructure experience to ${comp}.\n\nBest regards,\nRaviteja Velanati`,
+      modelUsed: "deterministic-cover-letter",
+      requestedModel: settings?.primaryModel || "gemini-3.5-flash",
+      fellBack: true
+    };
+  }
 }
 
 export async function answerApplicationQuestionWithGemini(questionCtx, jobMeta, profile, savedAnswers = [], settings = {}) {
@@ -913,26 +924,49 @@ ${JSON.stringify(savedAnswers.slice(0, 6), null, 2)}
 
 Write ONLY the exact answer to fill into the form field.`;
 
-  const res = await callGemini({
-    prompt,
-    systemInstruction,
-    requestedModel: settings?.primaryModel || "gemini-3.5-flash",
-    jsonMode: false,
-    temperature: 0.35,
-    maxOutputTokens: 800,
-    settings
-  });
+  try {
+    const res = await callGemini({
+      prompt,
+      systemInstruction,
+      requestedModel: settings?.primaryModel || "gemini-3.5-flash",
+      jsonMode: false,
+      temperature: 0.35,
+      maxOutputTokens: 800,
+      timeoutMs: 7500,
+      settings
+    });
 
-  let answer = res.text.replace(/^["']|["']$/g, "").trim();
-  if (maxChars && answer.length > maxChars) {
-    answer = answer.slice(0, maxChars - 3).trim() + "...";
+    let answer = res.text.replace(/^["']|["']$/g, "").trim();
+    if (maxChars && answer.length > maxChars) {
+      answer = answer.slice(0, maxChars - 3).trim() + "...";
+    }
+
+    return {
+      answer,
+      modelUsed: res.modelUsed,
+      fellBack: res.fellBack
+    };
+  } catch (err) {
+    if (!settings?.geminiApiKey) throw err;
+    const lbl = String(questionCtx?.label || "").toLowerCase();
+    const comp = jobMeta?.company || "your engineering team";
+    let fallbackAns = `At GlobalLogic (Client: Google AI), I architected 13 full-stack sandboxed web applications for autonomous browser AI agents and built a 48-persona synthetic data pipeline across 9 cloud services with 100% QA accuracy, making me ready to contribute immediately to ${comp}.`;
+    if (questionCtx.options?.length) {
+      fallbackAns = questionCtx.options[0];
+    } else if (/pod|team|org|group/i.test(lbl)) {
+      fallbackAns = `Agentic AI & Evaluation Infrastructure Pod — I specialize in building autonomous browser-agent sandboxes, LLM evaluation pipelines, and distributed Kubernetes/Python services.`;
+    } else if (/why|excited|interest|motivat/i.test(lbl)) {
+      fallbackAns = `I spend every day building agentic AI evaluation infrastructure, sandboxed web environments, and synthetic data pipelines for Google AI workflows, and I am eager to scale ${comp}'s core AI platform and evaluation systems.`;
+    }
+    if (maxChars && fallbackAns.length > maxChars) {
+      fallbackAns = fallbackAns.slice(0, maxChars - 3).trim() + "...";
+    }
+    return {
+      answer: fallbackAns,
+      modelUsed: "deterministic-question-fallback",
+      fellBack: true
+    };
   }
-
-  return {
-    answer,
-    modelUsed: res.modelUsed,
-    fellBack: res.fellBack
-  };
 }
 
 export async function generateNetworkOutreachWithGemini(company, role, jobUrl, profile, settings = {}) {
@@ -949,20 +983,33 @@ Return JSON with:
   "recruiterNote": "Short 60-90 word direct note to technical recruiter at ${company}"
 }`;
 
-  const res = await callGemini({
-    prompt,
-    systemInstruction,
-    requestedModel: settings?.primaryModel || "gemini-3.5-flash",
-    jsonMode: true,
-    temperature: 0.4,
-    maxOutputTokens: 1000,
-    settings
-  });
+  try {
+    const res = await callGemini({
+      prompt,
+      systemInstruction,
+      requestedModel: settings?.primaryModel || "gemini-3.5-flash",
+      jsonMode: true,
+      temperature: 0.4,
+      maxOutputTokens: 1000,
+      timeoutMs: 7500,
+      settings
+    });
 
-  return {
-    outreach: parseJsonResponse(res.text),
-    modelUsed: res.modelUsed
-  };
+    return {
+      outreach: parseJsonResponse(res.text),
+      modelUsed: res.modelUsed
+    };
+  } catch (err) {
+    if (!settings?.geminiApiKey) throw err;
+    return {
+      outreach: {
+        linkedinNote: `Hi! I'm Raviteja, a Senior AI Solutions Engineer at GlobalLogic (supporting Google AI) working on autonomous agent sandboxes & LLM evals. Notice you're at ${company}—would love to connect regarding the ${role} role!`,
+        referralDm: `Hi there — thanks for connecting! I'm applying for the ${role} position at ${company} (${jobUrl || "career portal"}). Over the past 2+ years supporting Google AI, I've built 13 full-stack browser-agent evaluation sandboxes and a 48-persona synthetic data pipeline across 9 cloud services. Would you be open to sharing a quick referral or pointer to the hiring team?`,
+        recruiterNote: `Hi — I just submitted my application for the ${role} role at ${company}. I bring 3.5+ years of production AI/platform engineering experience (currently Senior AI Solutions Engineer at GlobalLogic supporting Google AI, ranked #1 of 11 in platform throughput). Happy to share my tailored 1-page resume anytime!`
+      },
+      modelUsed: "deterministic-outreach-fallback"
+    };
+  }
 }
 
 export async function diagnoseFormErrorsWithGemini(
@@ -996,7 +1043,8 @@ export async function diagnoseFormErrorsWithGemini(
     const repairs = [];
     for (const f of fields) {
       const lbl = `${f.label || ""} ${f.helperText || ""} ${f.placeholder || ""}`.toLowerCase();
-      const err = `${f.errorMessage || ""} ${pageErrors.join(" ")}`.toLowerCase();
+      const fieldErr = String(f.errorMessage || "").toLowerCase();
+      const err = `${fieldErr} ${pageErrors.join(" ")}`.toLowerCase();
       const opts = Array.isArray(f.options) ? f.options.filter(Boolean) : [];
       const cur = String(f.currentValue || "").trim();
 
@@ -1049,8 +1097,8 @@ export async function diagnoseFormErrorsWithGemini(
         continue;
       }
 
-      if (/salary|compensation|pay|remuneration/i.test(lbl) || /digits?\s*only|numeric|valid\s*number|no\s*\$|leading\s*\$|format\s+currency/i.test(err)) {
-        const num = Number(jobMeta?.compensation?.midpoint || jobMeta?.compensation?.targetAnnual || eeo?.desiredSalaryTarget || 165000);
+      if (/salary|compensation|pay|remuneration/i.test(lbl) || /leading\s*\$|format\s+currency/i.test(fieldErr)) {
+        const num = Number(jobMeta?.compensation?.midpoint || jobMeta?.compensation?.targetAnnual || eeo?.desiredSalaryTarget || 195000);
         const val = /leading\s*\$|with\s*\$|format\s+currency/i.test(err) ? `$${num.toLocaleString("en-US")}` : String(num);
         repairs.push({ refId: f.refId, action: "fill_text", value: val, reason: "Repaired compensation format" });
         continue;
@@ -1153,6 +1201,7 @@ Return JSON with this exact structure:
   ]
 }`;
 
+  const fallbackDiag = buildDeterministicFallback();
   try {
     const res = await callGemini({
       prompt,
@@ -1161,15 +1210,33 @@ Return JSON with this exact structure:
       jsonMode: true,
       temperature: 0.15,
       maxOutputTokens: 3000,
-      timeoutMs: 14000,
+      timeoutMs: 7500,
       settings
     });
     const parsed = parseJsonResponse(res.text);
     if (parsed && Array.isArray(parsed.repairs) && parsed.repairs.length > 0) {
+      const byRef = new Map();
+      for (const r of fallbackDiag.repairs) {
+        if (r?.refId) byRef.set(r.refId, r);
+      }
+      for (const r of parsed.repairs) {
+        if (!r?.refId) continue;
+        const fMeta = fields.find((x) => x.refId === r.refId);
+        const fErr = `${fMeta?.errorMessage || ""} ${pageErrors.join(" ")}`.toLowerCase();
+        const fLbl = `${fMeta?.label || ""} ${fMeta?.helperText || ""}`.toLowerCase();
+        let val = String(r.value ?? "").trim();
+        if (/phone|mobile|tel/i.test(fLbl) && /10\s*digit|no\s*(spaces|parentheses|dashes)/i.test(fErr)) {
+          val = val.replace(/\D+/g, "").slice(-10) || p.phoneDigits || "7748108481";
+        } else if (/salary|compensation/i.test(fLbl) && /leading\s*\$|comma/i.test(fErr) && !/^\$\d{2,3},\d{3}$/.test(val)) {
+          const num = Number(val.replace(/[^\d]/g, "")) || Number(jobMeta?.compensation?.midpoint || 195000);
+          val = `$${num.toLocaleString("en-US")}`;
+        }
+        byRef.set(r.refId, { ...r, value: val });
+      }
       return {
         diagnosis: {
-          analysisSummary: String(parsed.analysisSummary || "AI diagnosed and repaired form errors."),
-          repairs: parsed.repairs
+          analysisSummary: String(parsed.analysisSummary || fallbackDiag.analysisSummary || "AI diagnosed and repaired form errors."),
+          repairs: Array.from(byRef.values())
         },
         modelUsed: res.modelUsed
       };
@@ -1177,7 +1244,7 @@ Return JSON with this exact structure:
   } catch (_) {}
 
   return {
-    diagnosis: buildDeterministicFallback(),
+    diagnosis: fallbackDiag,
     modelUsed: "deterministic-doctor-fallback"
   };
 }
