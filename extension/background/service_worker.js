@@ -881,9 +881,11 @@ async function runAutofillPassAcrossFrames(tabId, opts) {
   let filledCount = 0;
   let openQuestionsCount = 0;
   let clickedApplyGate = false;
+  let submittedAuthWall = false;
   let requiresCoverLetter = false;
   let bestMeta = null;
   const filledFieldsLog = [];
+  const savedDomainPasswords = [];
 
   for (const entry of results || []) {
     const r = entry?.result;
@@ -891,9 +893,24 @@ async function runAutofillPassAcrossFrames(tabId, opts) {
     filledCount += Number(r.filledCount || 0);
     openQuestionsCount += Number(r.openQuestionsCount || 0);
     if (r.clickedApplyGate) clickedApplyGate = true;
+    if (r.submittedAuthWall) submittedAuthWall = true;
     if (r.requiresCoverLetter) requiresCoverLetter = true;
+    if (r.savedDomainPassword?.host && r.savedDomainPassword?.password) {
+      savedDomainPasswords.push(r.savedDomainPassword);
+    }
     if (Array.isArray(r.filledFieldsLog)) filledFieldsLog.push(...r.filledFieldsLog);
     if (r.jobMeta && (!bestMeta || r.filledCount > 0)) bestMeta = r.jobMeta;
+  }
+
+  if (savedDomainPasswords.length > 0) {
+    try {
+      const curState = await getAllState();
+      const nextMap = { ...(curState.credentials?.domainPasswords || {}) };
+      for (const item of savedDomainPasswords) {
+        nextMap[item.host] = item.password;
+      }
+      await updateCredentials({ domainPasswords: nextMap });
+    } catch (_) {}
   }
 
   return {
@@ -901,6 +918,7 @@ async function runAutofillPassAcrossFrames(tabId, opts) {
     filledFieldsLog,
     openQuestionsCount,
     clickedApplyGate,
+    submittedAuthWall,
     requiresCoverLetter,
     jobMeta: bestMeta
   };
@@ -922,10 +940,21 @@ async function executeMultiFrameAutofill(tabId, opts = {}) {
 
   let pass = await runAutofillPassAcrossFrames(tabId, opts);
 
-  if (pass.filledCount === 0 && pass.clickedApplyGate) {
-    await waitForTabComplete(tabId, 5500);
+  for (let followup = 0; followup < 2; followup++) {
+    const shouldFollowUp = pass.submittedAuthWall || (pass.filledCount === 0 && pass.clickedApplyGate);
+    if (!shouldFollowUp) break;
+    await waitForTabSettle(tabId, 1400, 6500);
     await ensureTabScripts(tabId);
-    pass = await runAutofillPassAcrossFrames(tabId, opts);
+    const nextPass = await runAutofillPassAcrossFrames(tabId, opts);
+    pass = {
+      filledCount: pass.filledCount + nextPass.filledCount,
+      filledFieldsLog: [...pass.filledFieldsLog, ...nextPass.filledFieldsLog],
+      openQuestionsCount: nextPass.openQuestionsCount,
+      clickedApplyGate: pass.clickedApplyGate || nextPass.clickedApplyGate,
+      submittedAuthWall: nextPass.submittedAuthWall,
+      requiresCoverLetter: pass.requiresCoverLetter || nextPass.requiresCoverLetter,
+      jobMeta: nextPass.jobMeta || pass.jobMeta
+    };
   }
 
   return { ok: true, ...pass };
@@ -1124,7 +1153,12 @@ async function inspectTabFrames(tabId, topJobMeta = null) {
     isStandaloneAuthWall:
       Boolean(authFrame) &&
       !hasApplyChoiceModal &&
-      !valid.some((v) => v.frameId !== authFrame.frameId && v.hasCandidateForm),
+      !valid.some(
+        (v) =>
+          v.frameId !== authFrame.frameId &&
+          v.hasCandidateForm &&
+          (authFrame.frameId === 0 || v.frameId !== 0)
+      ),
     hasGuestAuthBypass: Boolean(authFrame?.hasGuestAuthBypass || valid.some((v) => v.hasGuestAuthBypass)),
     hasSsoAuthGate: Boolean(authFrame?.hasSsoAuthGate || valid.some((v) => v.hasSsoAuthGate)),
     isOAuthProviderPage: Boolean(authFrame?.isOAuthProviderPage || valid.some((v) => v.isOAuthProviderPage)),
@@ -1945,13 +1979,34 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
 
         let needsVerifyLinkNow = false;
         let clickedSsoGate = false;
+        let ssoPopupUrl = "";
+        const domainPwUpdates = {};
         for (const entry of authExec || []) {
           const r = entry?.result;
           if (!r) continue;
+          if (r.savedDomainPassword?.host && r.savedDomainPassword?.password) {
+            domainPwUpdates[r.savedDomainPassword.host] = r.savedDomainPassword.password;
+          }
+          if (!r.handled) continue;
           if (r.createdAccount) authHistory.createdAccount = true;
           if (r.triedSignIn) authHistory.triedSignIn = true;
           if (r.needsEmailVerification) needsVerifyLinkNow = true;
-          if (r.action === "sso_provider_gate") clickedSsoGate = true;
+          if (r.clickedSsoGate || r.action === "sso_provider_gate") {
+            clickedSsoGate = true;
+            if (!ssoPopupUrl && /^https?:\/\//i.test(r.windowOpenUrl || r.href || "")) {
+              ssoPopupUrl = r.windowOpenUrl || r.href;
+            }
+          }
+        }
+
+        if (Object.keys(domainPwUpdates).length > 0) {
+          try {
+            const nextDomainPasswords = {
+              ...(state.credentials?.domainPasswords || {}),
+              ...domainPwUpdates
+            };
+            state.credentials = await updateCredentials({ domainPasswords: nextDomainPasswords });
+          } catch (_) {}
         }
 
         // Wait briefly in case clicking "Sign in with Google" spawns an OAuth popup window/tab
@@ -1969,7 +2024,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
             1200,
             null
           );
-          const capUrl = capturedRes?.[0]?.result || "";
+          const capUrl = capturedRes?.[0]?.result || ssoPopupUrl || "";
           if (/^https?:\/\//i.test(capUrl)) {
             try {
               const openedPopup = await chrome.tabs.create({
@@ -2499,7 +2554,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
 
       case "UPDATE_CREDENTIALS": {
-        const credentials = await updateCredentials(payload.credentials);
+        const credentials = await updateCredentials(payload?.credentials || payload || {});
         return { ok: true, credentials };
       }
 

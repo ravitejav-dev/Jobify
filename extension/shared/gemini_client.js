@@ -30,19 +30,23 @@ function supportsZeroThinkingBudget(model) {
 function buildCandidateChain(requestedModel, settings) {
   const rawReq = normalizeModelName(requestedModel || settings?.primaryModel || "gemini-3.5-flash");
   const fastVerifiedOrder = [
+    "gemini-3.5-flash",
     "gemini-3-flash-preview",
-    "gemini-flash-lite-latest"
+    "gemini-flash-lite-latest",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite"
   ];
   if (settings?.enableSmartFallback === false) {
-    return /^gemini-3\.[5678]/i.test(rawReq) ? ["gemini-3-flash-preview"] : [rawReq];
+    return /^gemini-(1\.5|2\.)/i.test(rawReq) ? ["gemini-3.5-flash"] : [rawReq];
   }
-  const ordered = /^gemini-(3\.[5678]|3\.1-flash-lite|1\.5|2\.)/i.test(rawReq)
+  const ordered = /^gemini-(1\.5|2\.)/i.test(rawReq)
     ? fastVerifiedOrder
     : [rawReq, ...fastVerifiedOrder];
   const unique = [...new Set(ordered)];
   const now = Date.now();
   const healthy = unique.filter((m) => (modelCooldownUntil.get(m) || 0) <= now);
-  return healthy;
+  if (healthy.length > 0) return healthy;
+  return [...unique].sort((a, b) => (modelCooldownUntil.get(a) || 0) - (modelCooldownUntil.get(b) || 0));
 }
 
 function buildModelRequestBody({ prompt, systemInstruction, jsonMode, temperature, maxOutputTokens, model }) {
@@ -66,16 +70,24 @@ function buildModelRequestBody({ prompt, systemInstruction, jsonMode, temperatur
   return body;
 }
 
-async function tryCompanionRelay({ companionUrl, apiKey, chain, baseReqBody, errors, rawRequested }) {
+async function tryCompanionRelay({ companionUrl, apiKey, chain, baseReqBody, errors, rawRequested, timeoutMs, jsonMode = false }) {
   try {
     const relayResp = await fetch(`${companionUrl}/api/gemini-generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apiKey, models: chain, requestBody: baseReqBody })
+      body: JSON.stringify({
+        apiKey,
+        models: chain,
+        requestBody: baseReqBody,
+        timeoutSeconds: Math.max(8, Math.ceil((Number(timeoutMs) || 12000) / 1000))
+      })
     });
     if (relayResp.ok) {
       const relayData = await relayResp.json();
       if (relayData?.ok && relayData.text) {
+        if (jsonMode) {
+          parseJsonResponse(relayData.text);
+        }
         const reqName = rawRequested || chain[0];
         return {
           text: relayData.text,
@@ -131,7 +143,9 @@ export async function callGemini({
       chain,
       baseReqBody: baseRelayBody,
       errors,
-      rawRequested
+      rawRequested,
+      timeoutMs,
+      jsonMode
     });
     if (fastRelay) {
       geminiResponseCache.set(cacheKey, { ts: Date.now(), value: fastRelay });
@@ -186,6 +200,16 @@ export async function callGemini({
         continue;
       }
 
+      if (jsonMode) {
+        try {
+          parseJsonResponse(text);
+        } catch (jsonErr) {
+          errors.push(`${model}: Invalid JSON (${String(jsonErr?.message || "").slice(0, 80)})`);
+          modelCooldownUntil.set(model, Date.now() + 20000);
+          continue;
+        }
+      }
+
       const out = {
         text,
         modelUsed: model,
@@ -199,8 +223,8 @@ export async function callGemini({
       clearTimeout(timer);
       const isTimeout = err?.name === "AbortError";
       errors.push(`${model}: ${isTimeout ? "Timeout" : err.message}`);
-      modelCooldownUntil.set(model, Date.now() + 180000);
-      // If browser fetch failed immediately due to network/proxy (not model timeout), use Companion relay and cache for 5 min
+      modelCooldownUntil.set(model, Date.now() + (isTimeout ? 60000 : 30000));
+      // If browser fetch failed immediately due to network/proxy (not model timeout), try Companion relay first
       if (!isTimeout) {
         const relayOut = await tryCompanionRelay({
           companionUrl,
@@ -208,14 +232,15 @@ export async function callGemini({
           chain,
           baseReqBody: baseRelayBody,
           errors,
-          rawRequested
+          rawRequested,
+          timeoutMs,
+          jsonMode
         });
         if (relayOut) {
           preferCompanionRelayUntil = Date.now() + 5 * 60 * 1000;
           geminiResponseCache.set(cacheKey, { ts: Date.now(), value: relayOut });
           return relayOut;
         }
-        break;
       }
       continue;
     }
@@ -230,7 +255,20 @@ function parseJsonResponse(rawText) {
     .replace(/^```\s*/i, "")
     .replace(/\s*```$/i, "")
     .trim();
-  return JSON.parse(cleaned);
+  try {
+    return JSON.parse(cleaned);
+  } catch (firstErr) {
+    const firstBrace = cleaned.indexOf("{");
+    const lastBrace = cleaned.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      const sliced = cleaned
+        .slice(firstBrace, lastBrace + 1)
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ")
+        .replace(/,\s*([}\]])/g, "$1");
+      return JSON.parse(sliced);
+    }
+    throw firstErr;
+  }
 }
 
 export function cleanPostingJobTitle(rawTitle) {

@@ -4694,6 +4694,272 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
 </html>
 """
 
+UNIVERSAL_AUTH_GAUNTLET_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Senior AI Platform Engineer | Enterprise Career Portal</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 32px 20px 90px; }
+    .card { max-width: 680px; margin: 0 auto; background: #fff; border: 1px solid #cbd5e1; border-radius: 12px; padding: 28px; box-shadow: 0 6px 20px rgba(15,23,42,0.06); }
+    .row { margin-bottom: 14px; }
+    label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; }
+    input[type="text"], input[type="email"], input[type="password"], input[type="tel"], select {
+      width: 100%; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 7px; font-size: 14px; box-sizing: border-box;
+    }
+    .btn { background: #0284c7; color: #fff; border: none; padding: 11px 20px; border-radius: 8px; font-weight: 700; font-size: 14px; cursor: pointer; }
+    .err { display: none; background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+    /* Exact Workday 1px x 1px CSS clip honeypot */
+    .wd-beecatcher-wrap { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(1px, 1px, 1px, 1px); clip-path: polygon(0px 0px, 0px 0px, 0px 0px); }
+    .cf-wrap { position: relative; display: inline-block; width: 100%; margin-top: 10px; }
+    .cf-btn { width: 100%; padding: 11px; background: #0284c7; color: #fff; border: none; border-radius: 8px; font-weight: 700; }
+    .cf-overlay { position: absolute; inset: 0; opacity: 0; cursor: pointer; z-index: 5; }
+    .modal-bg { display: none; position: fixed; inset: 0; background: rgba(15,23,42,0.55); align-items: center; justify-content: center; z-index: 9999; }
+    .modal-card { background: #fff; padding: 24px; border-radius: 12px; width: 420px; }
+  </style>
+</head>
+<body>
+  <div class="card" id="gauntlet-root">
+    <div style="font-size:12px;font-weight:700;color:#0284c7;margin-bottom:4px;">ENTERPRISE CAREER PORTAL</div>
+    <h1 style="font-size:20px;margin:0 0 6px;">Senior AI Platform Engineer</h1>
+    <div style="font-size:13px;color:#475569;margin-bottom:18px;">San Francisco, CA • Full-Time • $190,000 - $230,000</div>
+    <div id="gauntlet-stage"></div>
+    <div id="gauntlet-app" data-automation-id="applyFlowPage" style="display:none;">
+      <h2 style="margin-top:0;">Candidate Application</h2>
+      <div class="row"><label for="g-fn">First Name *</label><input id="g-fn" name="first_name" type="text" required /></div>
+      <div class="row"><label for="g-ln">Last Name *</label><input id="g-ln" name="last_name" type="text" required /></div>
+      <div class="row"><label for="g-ph">Phone Number *</label><input id="g-ph" name="phone" type="tel" required /></div>
+      <div class="row"><label for="g-res">Resume / CV *</label><input id="g-res" name="resume" type="file" accept=".pdf" required /></div>
+      <button type="button" id="g-submit-app" data-automation-id="bottom-navigation-next-button" class="btn">Submit Application</button>
+    </div>
+    <div id="gauntlet-done" data-automation-id="thankYouMessage" style="display:none;color:#15803d;">
+      <h2>Application Submitted! Thank you for applying to Senior AI Platform Engineer.</h2>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const scenario = params.get("scenario") || "workday_beecatcher_dup";
+    const host = document.getElementById("gauntlet-stage");
+    window.__GAUNTLET_AUDIT__ = {
+      scenario,
+      beecatcherTriggered: false,
+      beecatcherFinalValue: "",
+      passwordFocusoutFired: false,
+      reusedClickFilterClicks: 0,
+      sawDuplicateAccountError: false,
+      switchedToSignInAfterDuplicate: false,
+      emailFirstStepCompleted: false,
+      emailFirstConsentChecked: false,
+      privacyModalOpened: false,
+      privacyModalAccepted: false,
+      passwordPolicyUpgraded: false,
+      upgradedPasswordUsed: "",
+      authCompleted: false,
+      candidateFormValues: null,
+      submitted: false
+    };
+
+    function transitionToCandidateForm() {
+      window.__GAUNTLET_AUDIT__.authCompleted = true;
+      host.style.display = "none";
+      document.getElementById("gauntlet-app").style.display = "block";
+    }
+
+    document.getElementById("g-submit-app").addEventListener("click", () => {
+      const fn = document.getElementById("g-fn").value.trim();
+      const ln = document.getElementById("g-ln").value.trim();
+      const ph = document.getElementById("g-ph").value.trim();
+      const rf = document.getElementById("g-res").files[0];
+      if (!fn || !ln || !ph || !rf) return;
+      window.__GAUNTLET_AUDIT__.candidateFormValues = { firstName: fn, lastName: ln, phone: ph, resumeName: rf.name };
+      window.__GAUNTLET_AUDIT__.submitted = true;
+      document.getElementById("gauntlet-app").style.display = "none";
+      document.getElementById("gauntlet-done").style.display = "block";
+    });
+
+    if (scenario === "workday_beecatcher_dup" || scenario === "manual_autofill_auth_wall") {
+      // Exact Workday DOM: starts on Create Account with 1px beecatcher honeypot + React focusout gate + single reused click_filter node!
+      let mode = "create";
+      host.innerHTML = `
+        <div data-automation-id="signInContent">
+          <h2 id="wd-hdr">Create Account</h2>
+          <div id="wd-err" data-automation-id="errorMessage" role="alert" class="err"></div>
+          <div class="row"><label for="wd-em">Email Address *</label><input id="wd-em" data-automation-id="email" type="text" autocomplete="email" /></div>
+          <div class="row"><label for="wd-pw">Password *</label><input id="wd-pw" data-automation-id="password" type="password" /></div>
+          <div class="row" id="wd-vpw-row"><label for="wd-vpw">Verify New Password *</label><input id="wd-vpw" data-automation-id="verifyPassword" type="password" /></div>
+          <div class="wd-beecatcher-wrap">
+            <label for="wd-bee">Enter website. This input is for robots only, do not enter if you're human.</label>
+            <input id="wd-bee" name="website" data-automation-id="beecatcher" type="text" tabindex="-1" />
+          </div>
+          <div class="row" id="wd-cb-row" style="position:relative;display:flex;align-items:center;gap:8px;">
+            <input id="wd-cb" type="checkbox" data-automation-id="createAccountCheckbox" aria-checked="false" style="opacity:0;position:absolute;width:16px;height:16px;" />
+            <label for="wd-cb" style="padding-left:22px;cursor:pointer;">Yes, I have read and consent to the terms and conditions *</label>
+          </div>
+          <div class="cf-wrap">
+            <button id="wd-sub-btn" type="submit" aria-hidden="true" tabindex="-1" data-automation-id="createAccountSubmitButton" class="cf-btn">Create Account</button>
+            <div id="wd-shared-cf" role="button" aria-label="Create Account" data-automation-id="click_filter" class="cf-overlay"></div>
+          </div>
+          <div style="margin-top:12px;font-size:13px;" id="wd-switch-wrap">
+            Already have an account?
+            <button type="button" id="wd-switch-btn" data-automation-id="signInLink" style="background:none;border:none;color:#0284c7;font-weight:700;cursor:pointer;">Sign In</button>
+          </div>
+        </div>
+      `;
+      const pwEl = document.getElementById("wd-pw");
+      const cbEl = document.getElementById("wd-cb");
+      cbEl.addEventListener("change", () => {
+        cbEl.setAttribute("aria-checked", cbEl.checked ? "true" : "false");
+      });
+      // Exact React 17/18/19 delegated onBlur listener (listens to focusout on root!)
+      host.addEventListener("focusout", (ev) => {
+        if (ev.target === pwEl && pwEl.value.length >= 8) {
+          window.__GAUNTLET_AUDIT__.passwordFocusoutFired = true;
+        }
+      });
+      document.getElementById("wd-switch-btn").addEventListener("click", () => {
+        mode = "signin";
+        window.__GAUNTLET_AUDIT__.switchedToSignInAfterDuplicate = true;
+        document.getElementById("wd-err").style.display = "none";
+        document.getElementById("wd-hdr").textContent = "Sign In";
+        document.getElementById("wd-vpw-row").style.display = "none";
+        document.getElementById("wd-cb-row").style.display = "none";
+        const sb = document.getElementById("wd-sub-btn");
+        sb.textContent = "Sign In";
+        sb.setAttribute("data-automation-id", "signInSubmitButton");
+        document.getElementById("wd-shared-cf").setAttribute("aria-label", "Sign In");
+        document.getElementById("wd-switch-wrap").style.display = "none";
+      });
+      document.getElementById("wd-shared-cf").addEventListener("click", () => {
+        window.__GAUNTLET_AUDIT__.reusedClickFilterClicks++;
+        const beeVal = document.getElementById("wd-bee").value;
+        window.__GAUNTLET_AUDIT__.beecatcherFinalValue = beeVal;
+        if (beeVal !== "") {
+          window.__GAUNTLET_AUDIT__.beecatcherTriggered = true;
+          return; // Exact Workday silent honeypot abort!
+        }
+        const em = document.getElementById("wd-em").value.trim();
+        const pw = pwEl.value;
+        if (mode === "create") {
+          const vpw = document.getElementById("wd-vpw").value;
+          // Exact Workday silent abort when React password onBlur/focusout hasn't validated yet
+          if (!window.__GAUNTLET_AUDIT__.passwordFocusoutFired || !em || !pw || pw !== vpw || !cbEl.checked) {
+            return;
+          }
+          if (scenario === "manual_autofill_auth_wall") {
+            transitionToCandidateForm();
+            return;
+          }
+          window.__GAUNTLET_AUDIT__.sawDuplicateAccountError = true;
+          const errEl = document.getElementById("wd-err");
+          errEl.textContent = "An account already exists with this email address. Please sign in.";
+          errEl.style.display = "block";
+        } else {
+          if (!em || !pw) return;
+          transitionToCandidateForm();
+        }
+      });
+    } else if (scenario === "oracle_email_first") {
+      host.innerHTML = `
+        <form id="ora-step1">
+          <h2>Verify Your Identity</h2>
+          <p style="font-size:13px;color:#475569;">Enter your email address and accept the candidate terms to continue.</p>
+          <div class="row"><label for="ora-email">Email Address *</label><input id="ora-email" name="email" type="email" required /></div>
+          <div class="row" style="display:flex;align-items:center;gap:8px;">
+            <input id="ora-agree" type="checkbox" required />
+            <label for="ora-agree" style="margin:0;">I Agree to the Candidate Privacy &amp; Terms *</label>
+          </div>
+          <button type="submit" id="ora-next" class="btn">Next</button>
+        </form>
+        <form id="ora-step2" style="display:none;">
+          <h2>Create Your Candidate Account</h2>
+          <div class="row"><label for="ora-em2">Email *</label><input id="ora-em2" type="email" required /></div>
+          <div class="row"><label for="ora-pw">Password *</label><input id="ora-pw" type="password" required /></div>
+          <div class="row"><label for="ora-pw2">Retype Password *</label><input id="ora-pw2" type="password" required /></div>
+          <button type="submit" class="btn">Register</button>
+        </form>
+      `;
+      document.getElementById("ora-step1").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const em = document.getElementById("ora-email").value.trim();
+        const ag = document.getElementById("ora-agree").checked;
+        if (!em || !ag) return;
+        window.__GAUNTLET_AUDIT__.emailFirstStepCompleted = true;
+        window.__GAUNTLET_AUDIT__.emailFirstConsentChecked = ag;
+        document.getElementById("ora-step1").style.display = "none";
+        document.getElementById("ora-em2").value = em;
+        document.getElementById("ora-step2").style.display = "block";
+      });
+      document.getElementById("ora-step2").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const pw = document.getElementById("ora-pw").value;
+        const pw2 = document.getElementById("ora-pw2").value;
+        if (!pw || pw !== pw2) return;
+        transitionToCandidateForm();
+      });
+    } else if (scenario === "sap_privacy_modal") {
+      host.innerHTML = `
+        <form id="sap-form">
+          <h2>Create an Account</h2>
+          <div id="sap-err" role="alert" class="err"></div>
+          <div class="row"><label for="sap-em">Email Address *</label><input id="sap-em" type="email" required /></div>
+          <div class="row"><label for="sap-pw">Password *</label><input id="sap-pw" type="password" required /></div>
+          <div class="row"><label for="sap-pw2">Retype Password *</label><input id="sap-pw2" type="password" required /></div>
+          <div class="row"><label for="sap-fn">First Name *</label><input id="sap-fn" type="text" required /></div>
+          <div class="row"><label for="sap-ln">Last Name *</label><input id="sap-ln" type="text" required /></div>
+          <div class="row">
+            <a href="#privacy" role="button" id="sap-open-privacy" style="color:#0284c7;font-weight:700;font-size:13px;">Read and accept the data privacy statement *</a>
+            <input id="sap-priv-cb" type="checkbox" disabled style="margin-left:8px;" />
+          </div>
+          <button type="submit" id="sap-submit" class="btn">Create Account</button>
+        </form>
+        <div id="sap-modal" class="modal-bg" role="dialog" aria-modal="true">
+          <div class="modal-card">
+            <h3 style="margin-top:0;">Data Privacy Consent Statement</h3>
+            <p style="font-size:13px;color:#475569;">Please accept our global applicant data privacy statement to create your account.</p>
+            <button type="button" id="sap-accept-btn" class="btn">Accept</button>
+          </div>
+        </div>
+      `;
+      document.getElementById("sap-open-privacy").addEventListener("click", (e) => {
+        e.preventDefault();
+        window.__GAUNTLET_AUDIT__.privacyModalOpened = true;
+        document.getElementById("sap-modal").style.display = "flex";
+      });
+      document.getElementById("sap-accept-btn").addEventListener("click", () => {
+        window.__GAUNTLET_AUDIT__.privacyModalAccepted = true;
+        const cb = document.getElementById("sap-priv-cb");
+        cb.disabled = false;
+        cb.checked = true;
+        document.getElementById("sap-modal").style.display = "none";
+      });
+      document.getElementById("sap-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const pw = document.getElementById("sap-pw").value;
+        const pw2 = document.getElementById("sap-pw2").value;
+        const privOk = document.getElementById("sap-priv-cb").checked;
+        const errEl = document.getElementById("sap-err");
+        if (!privOk) {
+          errEl.textContent = "You must read and accept the data privacy statement.";
+          errEl.style.display = "block";
+          return;
+        }
+        // Require >= 15 chars with uppercase, lowercase, digit, special char (forces auto-upgrade if Vault password is shorter!)
+        if (pw.length < 15 || pw !== pw2 || !/[A-Z]/.test(pw) || !/[a-z]/.test(pw) || !/\d/.test(pw) || !/[^A-Za-z0-9]/.test(pw)) {
+          errEl.textContent = "Password policy error: Password must be at least 15 characters and include uppercase, lowercase, number, and special character.";
+          errEl.style.display = "block";
+          return;
+        }
+        window.__GAUNTLET_AUDIT__.passwordPolicyUpgraded = true;
+        window.__GAUNTLET_AUDIT__.upgradedPasswordUsed = pw;
+        transitionToCandidateForm();
+      });
+    }
+  </script>
+</body>
+</html>
+"""
+
 
 class JobifyHandler(BaseHTTPRequestHandler):
     def _send_cors(self):
@@ -4794,6 +5060,8 @@ class JobifyHandler(BaseHTTPRequestHandler):
             return self._send_html(TRICKY_SUBMIT_SANDBOX_HTML)
         if path == "/sandbox/ai-error-heal":
             return self._send_html(AI_ERROR_HEAL_SANDBOX_HTML)
+        if path == "/sandbox/universal-auth-gauntlet":
+            return self._send_html(UNIVERSAL_AUTH_GAUNTLET_HTML)
         if path == "/api/sandbox-otp":
             return self._send_json(200, {"ok": True, **SANDBOX_OTP_STORE})
         return self._send_json(
@@ -4810,6 +5078,7 @@ class JobifyHandler(BaseHTTPRequestHandler):
                     f"http://127.0.0.1:{PORT}/sandbox/auto-apply",
                     f"http://127.0.0.1:{PORT}/sandbox/tricky-submit",
                     f"http://127.0.0.1:{PORT}/sandbox/ai-error-heal",
+                    f"http://127.0.0.1:{PORT}/sandbox/universal-auth-gauntlet",
                 ],
             },
         )
@@ -4881,9 +5150,11 @@ class JobifyHandler(BaseHTTPRequestHandler):
             raw_models = body.get("models") or [
                 "gemini-3.5-flash",
                 "gemini-3-flash-preview",
-                "gemini-3.5-flash-lite",
                 "gemini-flash-lite-latest",
+                "gemini-3.5-flash-lite",
+                "gemini-3.1-flash-lite",
             ]
+            timeout_s = max(8, min(45, int(body.get("timeoutSeconds") or 18)))
             now_s = time.time()
             base_req_body = body.get("requestBody") or {}
             cache_key = json.dumps(base_req_body, sort_keys=True)
@@ -4915,7 +5186,7 @@ class JobifyHandler(BaseHTTPRequestHandler):
                     method="POST",
                 )
                 try:
-                    with urllib.request.urlopen(req, timeout=6) as resp:
+                    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
                         data = json.loads(resp.read().decode("utf-8"))
                         parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
                         txt = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()

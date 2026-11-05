@@ -1138,7 +1138,28 @@
           safeSendMessage({ type: "OPEN_DASHBOARD", payload: { tab: "vault" } });
           return;
         }
-        const res = await window.__JOBIFY_ADAPTERS__.autofillPortalAuth(creds);
+        const screenNow = window.__JOBIFY_ADAPTERS__.inspectAutonomousScreenState?.(appState.profile, pageMeta);
+        if (screenNow?.isStandaloneAuthWall && window.__JOBIFY_ADAPTERS__.performAutonomousAuth) {
+          const authRes = await window.__JOBIFY_ADAPTERS__.performAutonomousAuth(creds, {}, appState.profile);
+          if (authRes?.savedDomainPassword?.host && authRes?.savedDomainPassword?.password) {
+            const nextDomainPw = {
+              ...(creds.domainPasswords || {}),
+              [authRes.savedDomainPassword.host]: authRes.savedDomainPassword.password
+            };
+            await safeSendMessage({
+              type: "UPDATE_CREDENTIALS",
+              payload: { credentials: { domainPasswords: nextDomainPw } }
+            });
+          }
+          showToast(
+            authRes?.handled
+              ? `🔐 Authenticating & continuing as ${creds.portalEmail}...`
+              : "No login fields detected",
+            authRes?.handled ? "success" : "warn"
+          );
+          return;
+        }
+        const res = await window.__JOBIFY_ADAPTERS__.autofillPortalAuth(creds, appState.profile);
         showToast(
           res.filled > 0 ? `🔐 Filled login for ${creds.portalEmail}` : "No login fields detected",
           res.filled > 0 ? "success" : "warn"

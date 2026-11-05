@@ -234,8 +234,13 @@ async function main() {
     await autoCdp.eval(`
       (async () => {
         const sr = document.getElementById("jobify-copilot-host").shadowRoot;
-        sr.getElementById("jb-pill").click();
-        await new Promise(r => setTimeout(r, 250));
+        if (!sr.getElementById("jb-drawer")?.classList.contains("open")) {
+          sr.getElementById("jb-pill")?.click();
+        }
+        for (let k = 0; k < 15; k++) {
+          if (sr.getElementById("jb-btn-full-auto")) break;
+          await new Promise(r => setTimeout(r, 150));
+        }
         sr.getElementById("jb-btn-full-auto").click();
       })()
     `);
@@ -1544,6 +1549,117 @@ async function main() {
     }
     webAppCdp.close();
 
+    // 7d. Universal Multi-Portal Login & Create-Account Hardening Gauntlet (Workday beecatcher + React focusout + click_filter reuse + duplicate recovery, Oracle Email-First + Consent Checkbox, SAP Privacy Modal + Password Policy Auto-Upgrade, and Manual Autofill Page Auth-Wall Continuation)
+    await dashCdp.eval(`chrome.runtime.sendMessage({ type: "STOP_FULL_AUTO_APPLY" })`).catch(() => {});
+    for (let wIdle = 0; wIdle < 40; wIdle++) {
+      const st = await dashCdp.eval(`chrome.runtime.sendMessage({ type: "GET_AUTO_APPLY_STATUS" })`).catch(() => null);
+      if (!st?.status?.running) break;
+      await sleep(300);
+    }
+
+    const runGauntletScenario = async (scenario, manualAutofill = false) => {
+      const url = `http://127.0.0.1:18765/sandbox/universal-auth-gauntlet?scenario=${scenario}`;
+      const cdp = await openTabAndConnect(url);
+      for (let i = 0; i < 20; i++) {
+        const ready = await cdp
+          .eval(`Boolean(document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-btn-autofill"))`)
+          .catch(() => false);
+        if (ready) break;
+        await sleep(250);
+      }
+      if (manualAutofill) {
+        const fillRes = await dashCdp.eval(
+          `chrome.runtime.sendMessage({ type: "RUN_TAB_AUTOFILL", payload: { tabId: ${cdp.tabId}, options: { fillOpenEndedWithAI: false } } })`,
+          45000
+        );
+        for (let w = 0; w < 15; w++) {
+          const readyDone = await cdp
+            .eval(`document.getElementById("g-fn")?.value === "Raviteja" && (document.getElementById("g-res")?.files?.length || 0) > 0`)
+            .catch(() => false);
+          if (readyDone) break;
+          await sleep(250);
+        }
+        const manualSnap = await cdp.eval(`({
+          fillOk: ${Boolean(fillRes?.ok)},
+          audit: window.__GAUNTLET_AUDIT__,
+          fn: document.getElementById("g-fn")?.value || "",
+          ln: document.getElementById("g-ln")?.value || "",
+          ph: document.getElementById("g-ph")?.value || "",
+          resName: document.getElementById("g-res")?.files?.[0]?.name || null
+        })`);
+        cdp.close();
+        return manualSnap;
+      }
+
+      for (let wIdle = 0; wIdle < 30; wIdle++) {
+        const st = await dashCdp.eval(`chrome.runtime.sendMessage({ type: "GET_AUTO_APPLY_STATUS" })`).catch(() => null);
+        if (!st?.status?.running) break;
+        await sleep(300);
+      }
+      const runRes = await dashCdp.eval(
+        `chrome.runtime.sendMessage({ type: "START_FULL_AUTO_APPLY", payload: { tabId: ${cdp.tabId}, options: { autoSubmit: true, tailorResume: false }, awaitCompletion: true } })`,
+        45000
+      );
+      const audit = await cdp.eval(`window.__GAUNTLET_AUDIT__`);
+      cdp.close();
+      return { runRes, audit };
+    };
+
+    // Temporarily set a 10-char password when testing sap_privacy_modal so the >=15-char policy auto-upgrade triggers deterministically
+    const wdDupOut = await runGauntletScenario("workday_beecatcher_dup", false);
+    const oracleOut = await runGauntletScenario("oracle_email_first", false);
+
+    const origVault = await swCdp.eval(`chrome.storage.local.get("jobify_credentials_vault").then(r => r.jobify_credentials_vault)`);
+    await swCdp.eval(`
+      chrome.storage.local.get("jobify_credentials_vault").then(async (r) => {
+        const next = { ...(r.jobify_credentials_vault || {}), portalPassword: "Short!99Aa", domainPasswords: {} };
+        await chrome.storage.local.set({ jobify_credentials_vault: next });
+      })
+    `);
+    const sapOut = await runGauntletScenario("sap_privacy_modal", false);
+    const savedVaultAfterSap = await swCdp.eval(`chrome.storage.local.get("jobify_credentials_vault").then(r => r.jobify_credentials_vault)`);
+    await swCdp.eval(`chrome.storage.local.set({ jobify_credentials_vault: ${JSON.stringify(origVault)} })`);
+
+    const manualAuthOut = await runGauntletScenario("manual_autofill_auth_wall", true);
+
+    console.log("7d. ✅ Universal Multi-Portal Login & Create-Account Hardening Gauntlet Verified (4 Scenarios):", JSON.stringify({
+      workdayBeecatcherAndDup: wdDupOut.audit,
+      oracleEmailFirst: oracleOut.audit,
+      sapPrivacyAndPwUpgrade: {
+        ...sapOut.audit,
+        persistedDomainPwLen: (savedVaultAfterSap?.domainPasswords?.["127.0.0.1"] || "").length
+      },
+      manualAutofillAuthWall: manualAuthOut
+    }, null, 2));
+
+    if (
+      !wdDupOut.audit?.submitted ||
+      wdDupOut.audit.beecatcherTriggered !== false ||
+      wdDupOut.audit.beecatcherFinalValue !== "" ||
+      wdDupOut.audit.passwordFocusoutFired !== true ||
+      wdDupOut.audit.reusedClickFilterClicks < 2 ||
+      wdDupOut.audit.sawDuplicateAccountError !== true ||
+      wdDupOut.audit.switchedToSignInAfterDuplicate !== true ||
+      wdDupOut.audit.candidateFormValues?.firstName !== "Raviteja" ||
+      !oracleOut.audit?.submitted ||
+      oracleOut.audit.emailFirstStepCompleted !== true ||
+      oracleOut.audit.emailFirstConsentChecked !== true ||
+      !sapOut.audit?.submitted ||
+      sapOut.audit.privacyModalOpened !== true ||
+      sapOut.audit.privacyModalAccepted !== true ||
+      sapOut.audit.passwordPolicyUpgraded !== true ||
+      !(sapOut.audit.upgradedPasswordUsed?.length >= 15) ||
+      savedVaultAfterSap?.domainPasswords?.["127.0.0.1"] !== sapOut.audit.upgradedPasswordUsed ||
+      manualAuthOut.audit?.authCompleted !== true ||
+      manualAuthOut.audit?.beecatcherTriggered !== false ||
+      manualAuthOut.audit?.passwordFocusoutFired !== true ||
+      manualAuthOut.fn !== "Raviteja" ||
+      manualAuthOut.ln !== "Velanati" ||
+      !manualAuthOut.resName?.endsWith(".pdf")
+    ) {
+      throw new Error(`Universal Multi-Portal Auth Gauntlet failed: ${JSON.stringify({ wdDupOut, oracleOut, sapOut, manualAuthOut })}`);
+    }
+
     dashCdp.close();
     swCdp.close();
     browserCdp.close();
@@ -1568,13 +1684,18 @@ async function main() {
         "We are hiring an AI Platform & Evaluation Engineer to architect autonomous browser AI agent sandboxes, multi-modal synthetic user state pipelines, red-teaming & adversarial safety evaluations, and real-time OpenTelemetry dashboards. Required skills: Python, TypeScript, React, LangGraph, Docker, Kubernetes, GCP, BigQuery, PyTorch, Playwright, RAG, Vector Databases, and CI/CD."
     };
 
-    const aiTailor = await tailorResumeWithGemini(
-      jobMeta,
-      DEFAULT_PROFILE,
-      ["Vector Databases", "Observability / Telemetry"],
-      runtimeSettings,
-      "gemini-3.5-flash"
-    );
+    let aiTailor = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await sleep(3500);
+      aiTailor = await tailorResumeWithGemini(
+        jobMeta,
+        DEFAULT_PROFILE,
+        ["Vector Databases", "Observability / Telemetry"],
+        runtimeSettings,
+        "gemini-3.5-flash"
+      );
+      if (aiTailor.modelUsed !== "deterministic-from-scratch") break;
+    }
     const tRes = aiTailor.tailored;
     const summaryWords = String(tRes.summary || "").trim().split(/\s+/).filter(Boolean).length;
     const hasFirstPerson = /\b(i|i'm|my|me)\b/i.test(tRes.summary || "");
@@ -1675,12 +1796,14 @@ async function main() {
       throw new Error(`Multi-platform live job feed or 128 staffing agencies assertion failed: live=${liveJobs.length} 2h=${filtered2hJobs.length} agencies=${STAFFING_AGENCIES_DIRECTORY.length}`);
     }
 
-    console.log("\n🎉 ALL 19 END-TO-END, AUTO-SUBMIT & FROM-SCRATCH RESUME VERIFICATION GATES PASSED 100%!");
+    console.log("\n🎉 ALL 20 END-TO-END, UNIVERSAL LOGIN/SIGNUP & FROM-SCRATCH RESUME VERIFICATION GATES PASSED 100%!");
   } finally {
     if (ChromeProc) ChromeProc.kill("SIGKILL");
     if (srv) srv.kill("SIGKILL");
-    await sleep(300);
-    fs.rmSync(USER_DATA_DIR, { recursive: true, force: true });
+    await sleep(600);
+    try {
+      fs.rmSync(USER_DATA_DIR, { recursive: true, force: true });
+    } catch (_) {}
   }
 }
 
