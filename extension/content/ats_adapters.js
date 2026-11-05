@@ -40,16 +40,92 @@
     ) {
       return "Ashby";
     }
-    if (u.includes("smartrecruiters.com")) return "SmartRecruiters";
-    if (u.includes("icims.com")) return "iCIMS";
-    if (u.includes("rippling.com")) return "Rippling";
+    if (u.includes("smartrecruiters.com") || doc.querySelector("oc-application, [class*='smartrecruiters']")) return "SmartRecruiters";
+    if (u.includes("icims.com") || doc.querySelector("#icims_content_iframe, iframe[src*='icims.com']")) return "iCIMS";
+    if (u.includes("rippling.com") || u.includes("ats.rippling.com")) return "Rippling";
     if (u.includes("bamboohr.com")) return "BambooHR";
     if (u.includes("workable.com")) return "Workable";
     if (u.includes("jobvite.com")) return "Jobvite";
+    if (u.includes("oraclecloud.com") && /hcmui|candidateexperience|recruiting/i.test(u)) return "Oracle Cloud HCM";
+    if (u.includes("successfactors.com") || u.includes("successfactors.eu") || u.includes("jobs2web.com")) return "SAP SuccessFactors";
+    if (u.includes("taleo.net")) return "Taleo";
+    if (u.includes("ultipro.com") || u.includes("recruiting.ultipro") || u.includes("ukg.net")) return "UKG";
+    if (u.includes("dayforcehcm.com") || u.includes("ceridian.com")) return "Dayforce";
+    if (u.includes("workforcenow.adp.com") || u.includes("myjobs.adp.com")) return "ADP";
+    if (u.includes("eightfold.ai") || doc.querySelector("[data-test-id*='eightfold' i], [class*='eightfold']")) return "Eightfold AI";
+    if (u.includes("phenompeople.com") || doc.querySelector("meta[name*='phenom' i], [data-ph-at-id]")) return "Phenom";
+    if (u.includes("avature.net")) return "Avature";
+    if (u.includes("applytojob.com") || u.includes("jazzhr.com")) return "JazzHR";
+    if (u.includes("breezy.hr")) return "Breezy HR";
+    if (u.includes("recruitee.com")) return "Recruitee";
+    if (u.includes("pinpointhq.com")) return "Pinpoint";
+    if (u.includes("dover.com") || u.includes("dover.io")) return "Dover";
+    if (u.includes("jobs.gem.com") || u.includes("gem.com/jobs")) return "Gem";
+    if (u.includes("teamtailor.com")) return "Teamtailor";
+    if (u.includes("personio.de") || u.includes("personio.com")) return "Personio";
+    if (u.includes("jobdiva.com")) return "JobDiva";
+    if (u.includes("ceipal.com")) return "Ceipal";
+    if (u.includes("bullhornstaffing.com") || u.includes("bullhorn.com")) return "Bullhorn";
+    if (u.includes("amazon.jobs")) return "Amazon Jobs";
+    if (u.includes("google.com/about/careers")) return "Google Careers";
+    if (u.includes("jobs.apple.com")) return "Apple Jobs";
+    if (u.includes("metacareers.com")) return "Meta Careers";
+    if (u.includes("careers.microsoft.com") || u.includes("jobs.careers.microsoft.com")) return "Microsoft Careers";
     if (u.includes("linkedin.com/jobs")) return "LinkedIn";
     if (u.includes("wellfound.com")) return "Wellfound";
     if (u.includes("indeed.com")) return "Indeed";
+    if (u.includes("dice.com")) return "Dice";
     return "Career Portal";
+  }
+
+  function extractJobPostingJsonLd(doc = document) {
+    try {
+      const scripts = Array.from(doc.querySelectorAll("script[type='application/ld+json']"));
+      for (const s of scripts) {
+        const raw = (s.textContent || "").trim();
+        if (!raw || !/JobPosting/i.test(raw)) continue;
+        let parsed = null;
+        try {
+          parsed = JSON.parse(raw);
+        } catch (_) {
+          continue;
+        }
+        const queue = Array.isArray(parsed) ? [...parsed] : [parsed];
+        while (queue.length > 0) {
+          const item = queue.shift();
+          if (!item || typeof item !== "object") continue;
+          if (Array.isArray(item["@graph"])) queue.push(...item["@graph"]);
+          const t = item["@type"];
+          const isJob = Array.isArray(t) ? t.some((x) => /JobPosting/i.test(String(x))) : /JobPosting/i.test(String(t || ""));
+          if (!isJob) continue;
+          const orgName =
+            typeof item.hiringOrganization === "string"
+              ? item.hiringOrganization
+              : item.hiringOrganization?.name || "";
+          const locObj = Array.isArray(item.jobLocation) ? item.jobLocation[0] : item.jobLocation;
+          const addr = locObj?.address || {};
+          const locStr = [addr.addressLocality, addr.addressRegion, addr.addressCountry]
+            .filter((x) => typeof x === "string" && x.trim())
+            .join(", ");
+          const rawDesc = String(item.description || "")
+            .replace(/<br\s*\/?>/gi, "\n")
+            .replace(/<\/(p|li|div|h[1-6])>/gi, "\n")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&nbsp;/gi, " ")
+            .replace(/&amp;/gi, "&")
+            .replace(/\s+\n/g, "\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+          return {
+            title: String(item.title || "").trim(),
+            company: String(orgName || "").trim(),
+            location: locStr || ( /TELECOMMUTE/i.test(String(item.jobLocationType || "")) ? "Remote" : "" ),
+            description: rawDesc
+          };
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 
   function extractCompensationFromJob(text = "") {
@@ -204,6 +280,7 @@
     }
 
     const ats = detectATSPlatform(url, doc);
+    const jsonLdJob = extractJobPostingJsonLd(doc);
 
     let company = "";
     const metaSite = doc.querySelector("meta[property='og:site_name']")?.content?.trim();
@@ -212,7 +289,9 @@
     );
     if (companyEl?.textContent?.trim()) {
       company = companyEl.textContent.trim();
-    } else if (metaSite && !/greenhouse|lever|workday|ashby|linkedin/i.test(metaSite)) {
+    } else if (jsonLdJob?.company) {
+      company = jsonLdJob.company;
+    } else if (metaSite && !/greenhouse|lever|workday|ashby|linkedin|smartrecruiters|icims|workable/i.test(metaSite)) {
       company = metaSite;
     } else {
       const ghForMatch = url.match(/[?&]for=([^&#]+)/i);
@@ -220,12 +299,16 @@
       const levMatch = url.match(/jobs\.lever\.co\/([^/?#]+)/i);
       const ashMatch = url.match(/jobs\.ashbyhq\.com\/([^/?#]+)/i);
       const wdMatch = url.match(/\/\/([^.]+)\.wd\d*\.myworkdayjobs\.com/i);
+      const srMatch = url.match(/jobs\.smartrecruiters\.com\/([^/?#]+)/i);
+      const wkMatch = url.match(/apply\.workable\.com\/([^/?#]+)/i);
       const rawSlug =
         ghForMatch?.[1] ||
         (ghMatch?.[1] !== "embed" ? ghMatch?.[1] : "") ||
         levMatch?.[1] ||
         ashMatch?.[1] ||
         wdMatch?.[1] ||
+        srMatch?.[1] ||
+        wkMatch?.[1] ||
         "";
       if (rawSlug) {
         const cleanKey = decodeURIComponent(rawSlug).toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -242,18 +325,19 @@
     }
 
     const titleEl = doc.querySelector(
-      "[data-jobify-title], h1.app-title, .job__title h1, .posting-headline h2, [data-automation-id='jobPostingHeader'], .job-details-jobs-unified-top-card__job-title, h1"
+      "[data-jobify-title], h1.app-title, .job__title h1, .posting-headline h2, [data-automation-id='jobPostingHeader'], .job-details-jobs-unified-top-card__job-title, [data-ph-at-id='job-title'], h1"
     );
     let title =
       titleEl?.textContent?.trim() ||
+      jsonLdJob?.title ||
       doc.title.split(/\s(?:[-|–—]|@)\s/)[0]?.trim() ||
       "Software / AI Engineer";
     title = title.replace(/\s+/g, " ").slice(0, 140);
 
     const locEl = doc.querySelector(
-      "[data-jobify-location], .job__location, .location, .posting-categories .location, [data-automation-id='locations'], [class*='location']"
+      "[data-jobify-location], .job__location, .location, .posting-categories .location, [data-automation-id='locations'], [data-ph-at-id='job-location'], [class*='location']"
     );
-    const locationStr = locEl?.textContent?.replace(/\s+/g, " ").trim().slice(0, 100) || "";
+    const locationStr = (locEl?.textContent?.replace(/\s+/g, " ").trim() || jsonLdJob?.location || "").slice(0, 100);
 
     const jdSelectors = [
       "[data-jobify-jd]",
@@ -263,6 +347,7 @@
       "[data-automation-id='jobPostingDescription']",
       ".posting-page .section-wrapper",
       ".jobs-description__content",
+      "[data-ph-at-id='jobdescription-text']",
       "[class*='job-description']",
       "[id*='job-description']",
       "main",
@@ -276,6 +361,9 @@
         break;
       }
     }
+    if (!description && jsonLdJob?.description?.length > 120) {
+      description = jsonLdJob.description;
+    }
     if (!description) {
       description = (doc.body?.innerText || "").slice(0, 12000);
     }
@@ -285,17 +373,19 @@
     const mentionsCoverLetter = doesJobMentionCoverLetter(description);
 
     const uLow = url.toLowerCase();
-    const hasPasswordInput = Array.from(doc.querySelectorAll("input[type='password']")).some(isVisibleAndEditable);
-    const hasFileUpload = Array.from(doc.querySelectorAll("input[type='file']")).some(isActionableFileInput);
+    const hasPasswordInput = queryAllDeep(doc, "input[type='password']").some(isVisibleAndEditable);
+    const hasFileUpload = queryAllDeep(doc, "input[type='file']").some(isActionableFileInput);
     const hasEmbeddedAtsIframe = Boolean(
-      doc.querySelector("iframe[src*='greenhouse.io'], iframe[src*='ashbyhq.com'], iframe[src*='lever.co'], iframe[src*='workday'], iframe[src*='icims.com'], #icims_content_iframe, #grnhse_iframe")
+      doc.querySelector("iframe[src*='greenhouse.io'], iframe[src*='ashbyhq.com'], iframe[src*='lever.co'], iframe[src*='workday'], iframe[src*='icims.com'], iframe[src*='smartrecruiters.com'], #icims_content_iframe, #grnhse_iframe")
     );
     const hasCandidateForm = hasFileUpload || hasEmbeddedAtsIframe || hasRealCandidateFormFields(doc);
     const isCareerUrl =
       ats !== "Career Portal" ||
-      /\/(jobs?|careers?|apply|application|positions?|openings?|postings?|talent|sandbox|login|signin|sign-in|register|signup|auth|oauth)\b/i.test(uLow);
+      Boolean(jsonLdJob) ||
+      /\/(jobs?|careers?|apply|application|positions?|openings?|postings?|requisitions?|opportunities|talent|sandbox|login|signin|sign-in|register|signup|auth|oauth)\b/i.test(uLow);
     const hasApplyElements =
       hasCandidateForm ||
+      Boolean(jsonLdJob) ||
       Boolean(doc.querySelector("[data-jobify-apply-btn], [data-automation-id='adventureButton'], [data-automation-id='jobPostingHeader']"));
     const hasNonPasswordAuthGate =
       !hasFileUpload &&
@@ -321,6 +411,7 @@
     const isGenericDirectoryTitle =
       !hasCandidateForm &&
       !isAuthWall &&
+      !jsonLdJob &&
       !uLow.includes("sandbox") &&
       /^(search(\s+for)?\s+jobs?|careers?(\s+at\s+.+)?|open\s+(roles|positions)|all\s+openings|job\s+(openings|search)|join\s+(our\s+team|us))$/i.test(
         title.trim()
@@ -603,23 +694,29 @@
 
   function isInHiddenAncestor(el) {
     if (!el || !el.isConnected) return true;
-    let cur = el.parentElement;
+    const nextAncestor = (node) => {
+      if (!node) return null;
+      if (node.parentElement) return node.parentElement;
+      const root = node.getRootNode?.();
+      return root && root instanceof ShadowRoot ? root.host : null;
+    };
+    let cur = nextAncestor(el);
     while (cur && cur !== document.documentElement) {
-      // Allow a pure single-child wrapper around <input type="file"> (e.g. <span style="display:none"><input type="file"></span>)
-      const isPureFileWrapper =
+      // Allow localized hidden dropzone wrappers around <input type="file"> (e.g. React-Dropzone, Workday, Lever, Rippling)
+      // while still rejecting hidden modals, hidden wizard steps/forms, or collapsed tabpanels containing other inputs.
+      const isLocalizedFileWrapper =
         el.type === "file" &&
-        cur === el.parentElement &&
-        cur.childElementCount === 1 &&
-        !(cur.innerText || "").trim();
-      if (!isPureFileWrapper) {
+        !cur.matches?.("form, fieldset, [role='dialog'], [role='tabpanel'], [aria-modal='true'], details:not([open])") &&
+        !cur.querySelector?.("input:not([type='file']):not([type='hidden']), select, textarea");
+      if (!isLocalizedFileWrapper) {
         if (cur.hidden) return true;
-        if (cur.getAttribute("aria-hidden") === "true" && cur.matches?.("[role='dialog'], [role='tabpanel']")) {
+        if (cur.getAttribute?.("aria-hidden") === "true" && cur.matches?.("[role='dialog'], [role='tabpanel']")) {
           return true;
         }
         const cs = window.getComputedStyle(cur);
         if (cs.display === "none" || cs.visibility === "hidden") return true;
       }
-      cur = cur.parentElement;
+      cur = nextAncestor(cur);
     }
     return false;
   }
@@ -674,30 +771,34 @@
     if (!el) return { primaryLabel: "", helperText: "", fullLabel: "" };
     const primaryParts = [];
     const helperParts = [];
+    const rootNode = el.getRootNode?.() || document;
+    const shadowHost = rootNode instanceof ShadowRoot ? rootNode.host : null;
 
     if (el.id) {
-      const explicitLabel = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      const explicitLabel =
+        rootNode.querySelector?.(`label[for="${CSS.escape(el.id)}"]`) ||
+        document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
       if (explicitLabel) primaryParts.push(explicitLabel.innerText || explicitLabel.textContent);
     }
-    const parentLabel = el.closest("label");
+    const parentLabel = el.closest("label") || shadowHost?.closest?.("label");
     if (parentLabel) primaryParts.push(parentLabel.innerText || parentLabel.textContent);
 
-    const ariaLabelledBy = el.getAttribute("aria-labelledby");
+    const ariaLabelledBy = el.getAttribute("aria-labelledby") || shadowHost?.getAttribute?.("aria-labelledby");
     if (ariaLabelledBy) {
       for (const id of ariaLabelledBy.split(/\s+/)) {
-        const ref = document.getElementById(id);
+        const ref = rootNode.getElementById?.(id) || document.getElementById(id);
         if (ref) primaryParts.push(ref.innerText || ref.textContent);
       }
     }
 
-    const ariaLabel = el.getAttribute("aria-label");
+    const ariaLabel = el.getAttribute("aria-label") || shadowHost?.getAttribute?.("aria-label") || shadowHost?.getAttribute?.("label");
     if (ariaLabel && !/^toggle flyout$/i.test(ariaLabel.trim())) {
       primaryParts.push(ariaLabel);
     }
 
-    const fieldContainer = el.closest(
-      ".ashby-application-form-field-entry, [class*='fieldEntry'], .text-input-wrapper, .select, .field, .form-group, .application-question, [data-automation-id*='formField'], fieldset"
-    );
+    const containerSelector =
+      ".ashby-application-form-field-entry, [class*='fieldEntry'], .text-input-wrapper, .select, .field, .form-group, .application-question, [data-automation-id*='formField'], [data-jobify-field], fieldset";
+    const fieldContainer = el.closest(containerSelector) || shadowHost?.closest?.(containerSelector);
     if (fieldContainer) {
       const lblEl = fieldContainer.querySelector(
         "label, legend, .ashby-application-form-question-title, .field-label, .label, h4, [data-automation-id='formLabel']"
@@ -1201,6 +1302,9 @@
     if ((/\bschool\b|university|college|institution|alma\s*mater/i.test(pLow)) && !/\?/i.test(pLow)) {
       return [edu0.school];
     }
+    if (/highest\s*(level\s*of\s*)?education|education\s*level/i.test(combinedLow)) {
+      return ["Master's Degree", "Master's", "Master of Science", "Graduate Degree", edu0.degree, "Bachelor's Degree"];
+    }
     if ((/\bdegree\b/i.test(pLow)) && !/\?/i.test(pLow)) {
       return [edu0.degree, "Master's Degree", "Master of Science", "M.S.", "Masters"];
     }
@@ -1209,6 +1313,26 @@
     }
     if (/\bgpa\b|grade\s*point/i.test(pLow)) {
       return [edu0.gpa];
+    }
+    if (
+      Boolean(el?.closest?.("[data-automation-id='skillsSection']")) ||
+      (/^(skills|technical\s*skills|key\s*skills|add\s*skills)\s*\*?$/i.test(pLow.trim()) || /type\s+to\s+add\s+skills/i.test(combinedLow))
+    ) {
+      const topSkills = [
+        ...(profile?.skills?.programming || []),
+        ...(profile?.skills?.aiAndML || []),
+        ...(profile?.skills?.webAndCloud || [])
+      ].filter(Boolean);
+      return topSkills.length > 0 ? topSkills.slice(0, 5) : ["Python", "TypeScript", "React", "Kubernetes", "PyTorch"];
+    }
+    if (/english\s*(proficiency|fluency|level|skill)|language\s*proficiency/i.test(combinedLow)) {
+      return ["Fluent", "Native or Bilingual", "Full Professional Proficiency", "Professional Working", "Advanced", "Yes"];
+    }
+    if (/currently\s*enrolled.*student|are\s+you\s+currently\s+a\s+(full[- ]time\s+)?student/i.test(combinedLow)) {
+      return ["No", "False"];
+    }
+    if (/willing\s+to\s+(undergo|submit\s+to|complete)\s+.*?(background\s*check|drug\s*(test|screen))/i.test(combinedLow)) {
+      return ["Yes", "I consent", "True"];
     }
 
     return null;
@@ -1462,9 +1586,19 @@
     });
     const dt = new DataTransfer();
     dt.items.add(file);
-    fileInput.files = dt.files;
+    try {
+      const nativeFilesSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "files")?.set;
+      if (nativeFilesSetter) {
+        nativeFilesSetter.call(fileInput, dt.files);
+      } else {
+        fileInput.files = dt.files;
+      }
+    } catch (_) {
+      fileInput.files = dt.files;
+    }
     fileInput.dispatchEvent(new Event("input", { bubbles: true }));
     fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    fileInput.dispatchEvent(new Event("blur", { bubbles: true }));
     highlightFilledElement(fileInput.parentElement || fileInput);
     return true;
   }
@@ -3374,67 +3508,144 @@
     return { filled: true, clickedVerify: false };
   }
 
-  function fillRepeaterCards(profile) {
+  async function fillRepeaterCards(profile) {
     let filled = 0;
-    const expContainers = document.querySelectorAll(
-      "[data-automation-id^='workExperience-'], [data-jobify-exp-index], .work-experience-card"
+
+    // Auto-expand empty Workday / career portal Work Experience & Education sections when an "Add" button is present
+    const tryAutoExpandEmptySection = async (sectionSelector, cardSelector, itemsList) => {
+      if (!Array.isArray(itemsList) || itemsList.length === 0) return;
+      const sec = document.querySelector(sectionSelector);
+      if (!sec || !isElementVisible(sec)) return;
+      if (sec.querySelectorAll(cardSelector).length > 0) return;
+      const addBtn = Array.from(
+        sec.querySelectorAll("[data-automation-id='Add'], [data-automation-id='add-button'], button, [role='button']")
+      ).find((b) => {
+        if (b.disabled || !isElementVisible(b)) return false;
+        const txt = (b.innerText || b.textContent || b.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
+        return b.dataset?.automationId === "Add" || b.dataset?.automationId === "add-button" || /^add(\s+(another|work\s*experience|education|entry))?$/i.test(txt);
+      });
+      if (addBtn) {
+        dispatchRealClick(addBtn);
+        await sleep(180);
+      }
+    };
+
+    await tryAutoExpandEmptySection(
+      "[data-automation-id='workExperienceSection'], [data-jobify-exp-section]",
+      "[data-automation-id^='workExperience-'], [data-jobify-exp-index], .work-experience-card",
+      profile.workExperience
     );
-    expContainers.forEach((card, idx) => {
+    await tryAutoExpandEmptySection(
+      "[data-automation-id='educationSection'], [data-jobify-edu-section]",
+      "[data-automation-id^='education-'], [data-jobify-edu-index], .education-card",
+      profile.education
+    );
+
+    const expContainers = Array.from(
+      document.querySelectorAll("[data-automation-id^='workExperience-'], [data-jobify-exp-index], .work-experience-card")
+    );
+    for (let idx = 0; idx < expContainers.length; idx++) {
+      const card = expContainers[idx];
       const exp = (profile.workExperience || [])[idx];
-      if (!exp) return;
-      const inputs = card.querySelectorAll("input, textarea, select");
-      inputs.forEach((inp) => {
-        if (!isVisibleAndEditable(inp)) return;
-        const lbl = getFieldLabelText(inp).toLowerCase();
-        if (/job\s*title|role|position/i.test(lbl)) {
+      if (!exp) continue;
+
+      if (exp.currentlyWorking !== undefined) {
+        const curCb = Array.from(card.querySelectorAll("input[type='checkbox']")).find((cb) =>
+          /currently\s*work|current\s*(role|position)/i.test(getFieldLabelText(cb))
+        );
+        if (curCb && isVisibleAndEditable(curCb) && Boolean(exp.currentlyWorking) !== curCb.checked) {
+          clickCheckboxOrRadioReliably(curCb);
+          filled++;
+          await sleep(60);
+        }
+      }
+
+      const inputs = Array.from(card.querySelectorAll("input, textarea, select"));
+      for (const inp of inputs) {
+        if (inp.type === "checkbox" || isComboboxInput(inp)) continue;
+        if (!isVisibleAndEditable(inp)) continue;
+        const lbl = `${getFieldLabelText(inp)} ${inp.dataset?.automationId || ""} ${inp.placeholder || ""}`.toLowerCase();
+        const sMonth = String(exp.startMonth || "05").padStart(2, "0");
+        const sYear = String(exp.startYear || "2024");
+        const eMonth = String(exp.endMonth || "05").padStart(2, "0");
+        const eYear = String(exp.endYear || "2026");
+
+        if (/datesectionmonth/i.test(lbl) || inp.placeholder === "MM") {
+          const isEnd = Boolean(inp.closest("[data-automation-id*='endDate' i]")) || /\bend\b|\bto\b/i.test(lbl);
+          if (isEnd && exp.currentlyWorking) continue;
+          if (setNativeValue(inp, isEnd ? eMonth : sMonth)) filled++;
+        } else if (/datesectionyear/i.test(lbl) || inp.placeholder === "YYYY") {
+          const isEnd = Boolean(inp.closest("[data-automation-id*='endDate' i]")) || /\bend\b|\bto\b/i.test(lbl);
+          if (isEnd && exp.currentlyWorking) continue;
+          if (setNativeValue(inp, isEnd ? eYear : sYear)) filled++;
+        } else if (/job\s*title|role|position/i.test(lbl)) {
           if (setNativeValue(inp, exp.title)) filled++;
         } else if (/company|employer|organization/i.test(lbl)) {
           if (setNativeValue(inp, exp.company)) filled++;
         } else if (/location|city/i.test(lbl)) {
           if (setNativeValue(inp, exp.location)) filled++;
         } else if (/start/i.test(lbl)) {
-          if (setNativeValue(inp, exp.startDateDisplay || `${exp.startMonth}/${exp.startYear}`)) filled++;
+          if (setNativeValue(inp, exp.startDateDisplay || `${sMonth}/${sYear}`)) filled++;
         } else if (/end/i.test(lbl) && !exp.currentlyWorking) {
-          if (setNativeValue(inp, exp.endDateDisplay || `${exp.endMonth}/${exp.endYear}`)) filled++;
-        } else if (/currently\s*work/i.test(lbl) && inp.type === "checkbox") {
-          if (Boolean(exp.currentlyWorking) !== inp.checked) {
-            inp.click();
-            filled++;
-          }
-        } else if (/description|responsibilit|summary|highlights/i.test(lbl) || inp.tagName === "TEXTAREA") {
+          if (setNativeValue(inp, exp.endDateDisplay || `${eMonth}/${eYear}`)) filled++;
+        } else if (/description|responsibilit|summary|highlights|role\s*description/i.test(lbl) || inp.tagName === "TEXTAREA") {
           const text = (exp.highlights || []).map((b) => `• ${b}`).join("\n");
-          if (setNativeValue(inp, text)) filled++;
+          if (text && setNativeValue(inp, text)) filled++;
         }
-      });
-    });
+      }
+    }
 
-    const eduContainers = document.querySelectorAll(
-      "[data-automation-id^='education-'], [data-jobify-edu-index], .education-card"
+    const eduContainers = Array.from(
+      document.querySelectorAll("[data-automation-id^='education-'], [data-jobify-edu-index], .education-card")
     );
-    eduContainers.forEach((card, idx) => {
+    for (let idx = 0; idx < eduContainers.length; idx++) {
+      const card = eduContainers[idx];
       const edu = (profile.education || [])[idx];
-      if (!edu) return;
-      const inputs = card.querySelectorAll("input, textarea, select");
-      inputs.forEach((inp) => {
-        if (!isVisibleAndEditable(inp)) return;
-        const lbl = getFieldLabelText(inp).toLowerCase();
-        if (/school|university|college|institution/i.test(lbl)) {
+      if (!edu) continue;
+
+      const combos = Array.from(
+        card.querySelectorAll("input[role='combobox'], button[aria-haspopup='listbox'], [role='combobox'], input[data-automation-id='searchBox']")
+      ).filter((c) => !c.disabled && !isInHiddenAncestor(c) && !hasComboboxSelection(c));
+      for (const cb of combos) {
+        const ctx = getFieldContext(cb);
+        const cLow = `${ctx.fullLabel} ${cb.dataset?.automationId || ""}`.toLowerCase();
+        let candidates = null;
+        if (/degree/i.test(cLow)) {
+          candidates = [edu.degree, edu.degreeShort, "Master's Degree", "Master of Science", "Masters", "Bachelor's Degree"];
+        } else if (/field|major|discipline/i.test(cLow)) {
+          candidates = [edu.fieldOfStudy, "Computer Science", "Software Engineering"];
+        } else if (/school|university|college|institution/i.test(cLow)) {
+          candidates = [edu.school];
+        }
+        if (candidates) {
+          if (await fillComboboxControl(cb, candidates, ctx, null, false)) filled++;
+        }
+      }
+
+      const inputs = Array.from(card.querySelectorAll("input, textarea, select"));
+      for (const inp of inputs) {
+        if (isComboboxInput(inp) || !isVisibleAndEditable(inp)) continue;
+        const lbl = `${getFieldLabelText(inp)} ${inp.dataset?.automationId || ""} ${inp.placeholder || ""}`.toLowerCase();
+        if (/datesectionyear/i.test(lbl) || inp.placeholder === "YYYY") {
+          const isEnd = Boolean(inp.closest("[data-automation-id*='endDate' i], [data-automation-id*='lastYearAttended' i]")) || /\bend\b|\bto\b|graduat|last\s*year/i.test(lbl);
+          if (setNativeValue(inp, isEnd ? String(edu.endYear || "2025") : String(edu.startYear || "2023"))) filled++;
+        } else if (/school|university|college|institution/i.test(lbl)) {
           if (setNativeValue(inp, edu.school)) filled++;
         } else if (/degree/i.test(lbl)) {
           if (inp.tagName === "SELECT") {
-            if (selectBestOption(inp, [edu.degree, edu.degreeShort, "Master's", "Bachelor's"])) filled++;
+            if (selectBestOption(inp, [edu.degree, edu.degreeShort, "Master's Degree", "Master's", "Bachelor's"])) filled++;
           } else if (setNativeValue(inp, edu.degree)) filled++;
         } else if (/field|major|discipline/i.test(lbl)) {
           if (setNativeValue(inp, edu.fieldOfStudy)) filled++;
-        } else if (/gpa/i.test(lbl)) {
+        } else if (/gpa|overall\s*result/i.test(lbl)) {
           if (setNativeValue(inp, edu.gpa)) filled++;
-        } else if (/start/i.test(lbl)) {
+        } else if (/start|first\s*year/i.test(lbl)) {
           if (setNativeValue(inp, edu.startYear)) filled++;
-        } else if (/end|graduat/i.test(lbl)) {
+        } else if (/end|graduat|last\s*year/i.test(lbl)) {
           if (setNativeValue(inp, edu.endYear)) filled++;
         }
-      });
-    });
+      }
+    }
 
     return filled;
   }
@@ -3533,8 +3744,9 @@
     const skipOptionalExtras = options.skipOptionalExtras !== false;
     const includeAllUnresolved = Boolean(options.includeAllUnresolved);
     const results = [];
-    const candidates = Array.from(
-      document.querySelectorAll("textarea, input[type='text'], input[type='url'], input:not([type])")
+    const candidates = queryAllDeep(
+      document,
+      "textarea, input[type='text'], input[type='url'], input:not([type])"
     );
     for (const el of candidates) {
       if (!isVisibleAndEditable(el)) continue;
@@ -3824,8 +4036,9 @@
       });
     }
 
-    const allEls = Array.from(
-      document.querySelectorAll("input, select, textarea, [role='combobox'], button[aria-haspopup='listbox']")
+    const allEls = queryAllDeep(
+      document,
+      "input, select, textarea, [role='combobox'], button[aria-haspopup='listbox']"
     );
 
     for (const el of allEls) {
@@ -3885,8 +4098,9 @@
         const gk = el.name || ctx.primaryLabel;
         if (seenRadioGroups.has(gk)) continue;
         seenRadioGroups.add(gk);
+        const radioScope = el.getRootNode?.() || document;
         const groupRadios = el.name
-          ? Array.from(document.querySelectorAll(`input[type='radio'][name="${CSS.escape(el.name)}"]`))
+          ? Array.from(radioScope.querySelectorAll(`input[type='radio'][name="${CSS.escape(el.name)}"]`))
           : [el];
         fields.push({
           index: fields.length + 1,
@@ -3900,7 +4114,7 @@
       }
 
       if (el.type === "checkbox") {
-        const cbGroup = resolveCheckboxGroup(el, document);
+        const cbGroup = resolveCheckboxGroup(el, el.getRootNode?.() || document);
         if (cbGroup) {
           if (seenCheckboxGroups.has(cbGroup.groupKey)) continue;
           seenCheckboxGroups.add(cbGroup.groupKey);
@@ -3959,7 +4173,7 @@
   }
 
   function countActionableFormControls() {
-    const inputs = Array.from(document.querySelectorAll("input, select, textarea")).filter((el) =>
+    const inputs = queryAllDeep(document, "input, select, textarea").filter((el) =>
       el.type === "file" ? isActionableFileInput(el) : isVisibleAndEditable(el)
     );
     const custom = scanCustomInteractiveGroups(document);
@@ -4153,12 +4367,13 @@
       return false;
     }
 
-    if (Array.from(doc.querySelectorAll("input[type='file']")).some(isActionableFileInput)) {
+    if (queryAllDeep(doc, "input[type='file']").some(isActionableFileInput)) {
       return true;
     }
 
-    const visibleInputs = Array.from(
-      doc.querySelectorAll("input, select, textarea, [role='combobox'], button[aria-haspopup='listbox'], button[aria-haspopup='true']")
+    const visibleInputs = queryAllDeep(
+      doc,
+      "input, select, textarea, [role='combobox'], button[aria-haspopup='listbox'], button[aria-haspopup='true']"
     ).filter((el) => {
       if (isTrapOrSystemInput(el) || el.disabled) return false;
       if (
@@ -4223,13 +4438,13 @@
   }
 
   function findApplyEntryCandidates(doc = document) {
-    return Array.from(
-      doc.querySelectorAll(
-        "[data-automation-id='adventureButton'], [data-uxi-element-id*='adventureButton' i], [data-automation-id*='applyButton' i], [data-jobify-apply-btn], a[href$='/application'], a[href*='/application?'], a.postings-btn[href*='/apply'], a[href*='/careers/apply/'], a[href*='/apply/'], [class*='apply-button' i], [id*='apply-button' i], button, a[role='button'], a[role='tab'], [role='button'], input[type='button'], input[type='submit'], a"
-      )
+    return queryAllDeep(
+      doc,
+      "[data-automation-id='adventureButton'], [data-uxi-element-id*='adventureButton' i], [data-automation-id*='applyButton' i], [data-jobify-apply-btn], a[href$='/application'], a[href*='/application?'], a.postings-btn[href*='/apply'], a[href*='/careers/apply/'], a[href*='/apply/'], [class*='apply-button' i], [id*='apply-button' i], button, a[role='button'], a[role='tab'], [role='button'], input[type='button'], input[type='submit'], a"
     ).filter((el) => {
       if (el.disabled || !isElementVisible(el)) return false;
       if (isHeaderOrNavButton(el)) return false;
+      if (el.closest(COOKIE_CONSENT_SELECTOR)) return false;
       if (el.closest("#jobify-copilot-host")) return false;
       const autoId = el.dataset?.automationId || "";
       if (/^(applyWithLinkedIn|useMyLastApplication|utilityButtonSignIn)$/i.test(autoId)) return false;
@@ -4442,7 +4657,7 @@
       (!findApplyModalChoiceButton(document) &&
         (hasRealCandidateFormFields(document) ||
           countActionableFormControls() > 0 ||
-          Array.from(document.querySelectorAll("input[type='password']")).some(isVisibleAndEditable)))
+          queryAllDeep(document, "input[type='password']").some(isVisibleAndEditable)))
     ) {
       return { hasControls: countActionableFormControls() > 0, clickedApplyGate: false };
     }
@@ -4480,12 +4695,11 @@
     return Boolean(b.disabled || b.getAttribute("aria-disabled") === "true" || b.getAttribute("data-disabled") === "true");
   }
 
-  // Find Next Step vs. Final Submit button on multi-page wizards and single-page forms
+  // Find Next Step vs. Final Submit button on multi-page wizards and single-page forms (including open Shadow DOMs)
   function findWizardButtons({ includeDisabled = false } = {}) {
-    const btns = Array.from(
-      document.querySelectorAll(
-        "[data-jobify-next], [data-jobify-submit], .ashby-application-form-submit-button, #submit_app, #btn-submit, .template-btn-submit, button[class*='submitButton' i], [data-uxi-element-id*='submit' i], [data-automation-id='bottom-navigation-next-button'], [data-automation-id='pageFooterNextButton'], button[type='submit'], input[type='submit'], button, [role='button']"
-      )
+    const btns = queryAllDeep(
+      document,
+      "[data-jobify-next], [data-jobify-submit], .ashby-application-form-submit-button, #submit_app, #btn-submit, .template-btn-submit, button[class*='submitButton' i], [data-uxi-element-id*='submit' i], [data-automation-id='bottom-navigation-next-button'], [data-automation-id='pageFooterNextButton'], button[type='submit'], input[type='submit'], button, [role='button']"
     ).filter(
       (b) =>
         (includeDisabled || !isButtonDisabledState(b)) &&
@@ -5071,15 +5285,15 @@
     }
 
     // 2. Multi-Entry Work Experience & Education Repeater Cards
-    const repeaterFilled = fillRepeaterCards(profile);
+    const repeaterFilled = await fillRepeaterCards(profile);
     if (repeaterFilled > 0) {
       filledCount += repeaterFilled;
       await reportStep(`Work & Education Cards (${repeaterFilled} fields)`);
     }
 
-    // 3. Attach Resume PDF & Cover Letter PDF (only when needed/available)
+    // 3. Attach Resume PDF & Cover Letter PDF (only when needed/available, including open Shadow DOMs)
     const hasAshbySystemResume = Boolean(document.getElementById("_systemfield_resume"));
-    const fileInputs = Array.from(document.querySelectorAll("input[type='file']")).filter((fi) => {
+    const fileInputs = queryAllDeep(document, "input[type='file']").filter((fi) => {
       if (!isActionableFileInput(fi)) return false;
       if (hasAshbySystemResume && fi.id !== "_systemfield_resume") {
         const ctx = getFieldContext(fi);
@@ -5130,10 +5344,9 @@
     // 5. React-Select & Custom ARIA Comboboxes (2 passes so conditional dropdowns like EEOC Race mount & get filled)
     const visitedCombos = new WeakSet();
     for (let comboPass = 0; comboPass < 2; comboPass++) {
-      const comboboxes = Array.from(
-        document.querySelectorAll(
-          "input[role='combobox'], button[aria-haspopup='listbox'], button[aria-haspopup='true'], [role='combobox'], input[data-automation-id='searchBox'], [data-automation-id='multiSelectContainer'] input"
-        )
+      const comboboxes = queryAllDeep(
+        document,
+        "input[role='combobox'], button[aria-haspopup='listbox'], button[aria-haspopup='true'], [role='combobox'], input[data-automation-id='searchBox'], [data-automation-id='multiSelectContainer'] input"
       ).filter((el) => {
         if (visitedCombos.has(el)) return false;
         if (isTrapOrSystemInput(el) || isInHiddenAncestor(el)) return false;
@@ -5163,7 +5376,7 @@
     }
 
     // 6. Standard <input>, <select>, Radio Groups, Checkboxes & Cover Letter Textarea (One-by-One in DOM order)
-    const allControls = Array.from(document.querySelectorAll("input, select, textarea"));
+    const allControls = queryAllDeep(document, "input, select, textarea");
     const handledRadioGroups = new Set();
     const handledCheckboxGroups = new Set();
 
@@ -5187,8 +5400,9 @@
       if (el.type === "radio") {
         const groupKey = el.name || ctx.primaryLabel;
         if (handledRadioGroups.has(groupKey)) continue;
+        const radioScope = el.getRootNode?.() || document;
         const radios = el.name
-          ? Array.from(document.querySelectorAll(`input[type='radio'][name="${CSS.escape(el.name)}"]`))
+          ? Array.from(radioScope.querySelectorAll(`input[type='radio'][name="${CSS.escape(el.name)}"]`))
           : [el];
         if (!forceOverwrite && radios.some((r) => r.checked)) {
           handledRadioGroups.add(groupKey);
@@ -5220,7 +5434,7 @@
       }
 
       if (el.type === "checkbox") {
-        const cbGroup = resolveCheckboxGroup(el, document);
+        const cbGroup = resolveCheckboxGroup(el, el.getRootNode?.() || document);
         if (cbGroup) {
           if (handledCheckboxGroups.has(cbGroup.groupKey)) continue;
           if (!forceOverwrite && cbGroup.checkboxes.some((c) => c.checked)) {
@@ -5472,8 +5686,9 @@
     }
 
     // 3. Comboboxes
-    const comboboxes = Array.from(
-      doc.querySelectorAll("input[role='combobox'], button[aria-haspopup='listbox'], [role='combobox']")
+    const comboboxes = queryAllDeep(
+      doc,
+      "input[role='combobox'], button[aria-haspopup='listbox'], [role='combobox']"
     ).filter((c) => {
       if (isTrapOrSystemInput(c) || isInHiddenAncestor(c) || c.disabled) return false;
       if (c.tagName !== "INPUT" && c.querySelector?.("input[role='combobox']")) return false;
@@ -5511,10 +5726,10 @@
       }
     }
 
-    // 4. Native <input>, <select>, <textarea>
+    // 4. Native <input>, <select>, <textarea> (including open Shadow DOM controls)
     const seenRadioNames = new Set();
     const seenCbGroups = new Set();
-    const allControls = Array.from(doc.querySelectorAll("input, select, textarea"));
+    const allControls = queryAllDeep(doc, "input, select, textarea");
 
     for (const el of allControls) {
       if (isTrapOrSystemInput(el) || el.disabled) continue;
@@ -5567,8 +5782,9 @@
         const gk = el.name || ctx.primaryLabel;
         if (seenRadioNames.has(gk)) continue;
         seenRadioNames.add(gk);
+        const radioScope = el.getRootNode?.() || doc;
         const radios = el.name
-          ? Array.from(doc.querySelectorAll(`input[type='radio'][name="${CSS.escape(el.name)}"]`))
+          ? Array.from(radioScope.querySelectorAll(`input[type='radio'][name="${CSS.escape(el.name)}"]`))
           : [el];
         const checkedRadio = radios.find((r) => r.checked);
         if (!checkedRadio || flagged) {
@@ -5590,7 +5806,7 @@
       }
 
       if (el.type === "checkbox") {
-        const cbGroup = resolveCheckboxGroup(el, doc);
+        const cbGroup = resolveCheckboxGroup(el, el.getRootNode?.() || doc);
         if (cbGroup) {
           if (seenCbGroups.has(cbGroup.groupKey)) continue;
           seenCbGroups.add(cbGroup.groupKey);
@@ -5691,7 +5907,9 @@
 
     for (const rep of repairs) {
       if (!rep?.refId) continue;
-      const el = document.querySelector(`[data-jobify-ref="${CSS.escape(rep.refId)}"]`);
+      const el =
+        document.querySelector(`[data-jobify-ref="${CSS.escape(rep.refId)}"]`) ||
+        queryAllDeep(document, `[data-jobify-ref="${CSS.escape(rep.refId)}"]`)[0];
       if (!el) continue;
       const info = fieldMap.get(rep.refId) || {};
       const valStr = String(rep.value ?? "").trim();
@@ -5745,8 +5963,9 @@
 
       if (info.kind === "radio_group") {
         if (el.tagName === "INPUT" && el.type === "radio") {
+          const radioScope = el.getRootNode?.() || document;
           const radios = el.name
-            ? Array.from(document.querySelectorAll(`input[type='radio'][name="${CSS.escape(el.name)}"]`))
+            ? Array.from(radioScope.querySelectorAll(`input[type='radio'][name="${CSS.escape(el.name)}"]`))
             : [el];
           const wrappers = radios.map((r) => ({ radio: r, innerText: getChoiceOptionLabel(r) || r.value }));
           const chosen = (valStr && findMatchingOptionElement(wrappers, [valStr])) || wrappers[0];
@@ -5771,7 +5990,7 @@
       }
 
       if (info.kind === "checkbox_group") {
-        const cbGroup = resolveCheckboxGroup(el, document);
+        const cbGroup = resolveCheckboxGroup(el, el.getRootNode?.() || document);
         if (cbGroup?.checkboxes?.length) {
           const wrappers = cbGroup.checkboxes.map((cb) => ({ cb, innerText: getChoiceOptionLabel(cb) || cb.value }));
           const chosen = (valStr && findMatchingOptionElement(wrappers, [valStr])) || wrappers[0];
@@ -5904,7 +6123,7 @@
       return Boolean(getControlValidationErrorText(el, null, true));
     };
 
-    const allControls = Array.from(document.querySelectorAll("input, select, textarea"));
+    const allControls = queryAllDeep(document, "input, select, textarea");
     for (const el of allControls) {
       if (isTrapOrSystemInput(el) || el.disabled) continue;
       if (el.type === "file" || el.type === "password") continue;

@@ -19,6 +19,7 @@ export const STORAGE_KEYS = {
   COVER_LETTERS: "jobify_cover_letters",
   AUTOPILOT_QUEUE: "jobify_autopilot_queue",
   AUTOPILOT_LOGS: "jobify_autopilot_logs",
+  INTERVIEW_PREPS: "jobify_interview_preps",
   AUTO_APPLY_SESSION: "jobify_auto_apply_session"
 };
 const KEYS = STORAGE_KEYS;
@@ -130,6 +131,7 @@ export async function ensureInitialized() {
   if (!existing[KEYS.APPLICATIONS]) patch[KEYS.APPLICATIONS] = [];
   if (!existing[KEYS.TAILORED_RESUMES]) patch[KEYS.TAILORED_RESUMES] = [];
   if (!existing[KEYS.COVER_LETTERS]) patch[KEYS.COVER_LETTERS] = [];
+  if (!existing[KEYS.INTERVIEW_PREPS]) patch[KEYS.INTERVIEW_PREPS] = [];
   if (!existing[KEYS.AUTOPILOT_QUEUE]) patch[KEYS.AUTOPILOT_QUEUE] = [];
   if (!existing[KEYS.AUTOPILOT_LOGS]) patch[KEYS.AUTOPILOT_LOGS] = [];
 
@@ -149,6 +151,7 @@ export async function getAllState() {
     applications: raw[KEYS.APPLICATIONS],
     tailoredResumes: raw[KEYS.TAILORED_RESUMES],
     coverLetters: raw[KEYS.COVER_LETTERS],
+    interviewPreps: raw[KEYS.INTERVIEW_PREPS] || [],
     autopilotQueue: raw[KEYS.AUTOPILOT_QUEUE],
     autopilotLogs: raw[KEYS.AUTOPILOT_LOGS]
   };
@@ -282,12 +285,19 @@ export async function deleteSavedAnswer(id) {
 export async function saveTailoredResume(item) {
   const state = await getAllState();
   const list = [...state.tailoredResumes];
+  const existingIdx = item?.id ? list.findIndex((x) => x.id === item.id) : -1;
   const record = {
+    ...(existingIdx >= 0 ? list[existingIdx] : {}),
     id: item.id || `tr_${Date.now()}`,
-    createdAt: new Date().toISOString(),
+    createdAt: existingIdx >= 0 ? list[existingIdx].createdAt : new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     ...item
   };
-  list.unshift(record);
+  if (existingIdx >= 0) {
+    list[existingIdx] = record;
+  } else {
+    list.unshift(record);
+  }
   await chrome.storage.local.set({ [KEYS.TAILORED_RESUMES]: list.slice(0, 30) });
   return record;
 }
@@ -295,14 +305,68 @@ export async function saveTailoredResume(item) {
 export async function saveCoverLetter(item) {
   const state = await getAllState();
   const list = [...state.coverLetters];
+  const existingIdx = item?.id ? list.findIndex((x) => x.id === item.id) : -1;
   const record = {
+    ...(existingIdx >= 0 ? list[existingIdx] : {}),
     id: item.id || `cl_${Date.now()}`,
-    createdAt: new Date().toISOString(),
+    createdAt: existingIdx >= 0 ? list[existingIdx].createdAt : new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     ...item
   };
-  list.unshift(record);
+  if (existingIdx >= 0) {
+    list[existingIdx] = record;
+  } else {
+    list.unshift(record);
+  }
   await chrome.storage.local.set({ [KEYS.COVER_LETTERS]: list.slice(0, 30) });
   return record;
+}
+
+export async function saveInterviewPrep(item) {
+  const state = await getAllState();
+  const list = [...(state.interviewPreps || [])];
+  const existingIdx = item?.id ? list.findIndex((x) => x.id === item.id) : -1;
+  const record = {
+    ...(existingIdx >= 0 ? list[existingIdx] : {}),
+    id: item.id || `ip_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    createdAt: existingIdx >= 0 ? list[existingIdx].createdAt : new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...item
+  };
+  if (existingIdx >= 0) {
+    list[existingIdx] = record;
+  } else {
+    list.unshift(record);
+  }
+  await chrome.storage.local.set({ [KEYS.INTERVIEW_PREPS]: list.slice(0, 30) });
+  return record;
+}
+
+export async function restoreStateBackup(backup = {}) {
+  if (!backup || typeof backup !== "object") {
+    throw new Error("Invalid backup payload");
+  }
+  const current = await getAllState();
+  const patch = {};
+  if (backup.profile && typeof backup.profile === "object") {
+    patch[KEYS.PROFILE] = { ...current.profile, ...backup.profile };
+  }
+  if (backup.settings && typeof backup.settings === "object") {
+    patch[KEYS.SETTINGS] = { ...current.settings, ...backup.settings };
+  }
+  if (backup.credentials && typeof backup.credentials === "object") {
+    patch[KEYS.CREDENTIALS] = { ...current.credentials, ...backup.credentials };
+  }
+  if (Array.isArray(backup.savedAnswers)) patch[KEYS.SAVED_ANSWERS] = backup.savedAnswers;
+  if (Array.isArray(backup.applications)) patch[KEYS.APPLICATIONS] = backup.applications;
+  if (Array.isArray(backup.tailoredResumes)) patch[KEYS.TAILORED_RESUMES] = backup.tailoredResumes.slice(0, 30);
+  if (Array.isArray(backup.coverLetters)) patch[KEYS.COVER_LETTERS] = backup.coverLetters.slice(0, 30);
+  if (Array.isArray(backup.interviewPreps)) patch[KEYS.INTERVIEW_PREPS] = backup.interviewPreps.slice(0, 30);
+  if (Array.isArray(backup.autopilotQueue)) patch[KEYS.AUTOPILOT_QUEUE] = backup.autopilotQueue;
+  if (Object.keys(patch).length > 0) {
+    await chrome.storage.local.set(patch);
+  }
+  return getAllState();
 }
 
 export async function updateAutopilotQueue(nextQueue) {

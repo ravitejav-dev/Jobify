@@ -506,7 +506,11 @@ async function main() {
         sr.getElementById("jb-btn-autofill").click();
       })()
     `);
-    await sleep(1800);
+    for (let w = 0; w < 45; w++) {
+      await sleep(250);
+      const done = await ghCdp.eval(`!document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-btn-autofill")?.disabled`).catch(() => false);
+      if (done) break;
+    }
 
     const gh = await ghCdp.eval(`({
       firstName: document.getElementById("first_name").value,
@@ -566,7 +570,11 @@ async function main() {
         sr.getElementById("jb-btn-autofill").click();
       })()
     `);
-    await sleep(1600);
+    for (let w = 0; w < 45; w++) {
+      await sleep(250);
+      const done = await wdCdp.eval(`!document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-btn-autofill")?.disabled`).catch(() => false);
+      if (done) break;
+    }
 
     const wd = await wdCdp.eval(`({
       portalEmail: document.getElementById("wd-email").value,
@@ -609,7 +617,11 @@ async function main() {
         sr.getElementById("jb-btn-autofill").click();
       })()
     `);
-    await sleep(1500);
+    for (let w = 0; w < 45; w++) {
+      await sleep(250);
+      const done = await lvCdp.eval(`!document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-btn-autofill")?.disabled`).catch(() => false);
+      if (done) break;
+    }
 
     const lv = await lvCdp.eval(`({
       fullName: document.querySelector("input[name='name']").value,
@@ -1200,7 +1212,8 @@ async function main() {
     await dashCdp.send("Page.bringToFront", {}).catch(() => {});
     const dashAudit = await dashCdp.eval(`
       (async () => {
-        const views = ["overview", "tracker", "resume", "cover", "jobs", "autopilot", "network", "vault"];
+        const bodyBgWhite = getComputedStyle(document.body).backgroundColor === "rgb(255, 255, 255)";
+        const views = ["overview", "tracker", "resume", "cover", "interview", "jobs", "autopilot", "network", "vault"];
         const rendered = {};
         for (const v of views) {
           const btn = document.querySelector(\`#main-nav [data-view="\${v}"]\`);
@@ -1208,6 +1221,15 @@ async function main() {
           await new Promise(r => setTimeout(r, 60));
           rendered[v] = document.getElementById("view-container").innerText.trim().length;
         }
+
+        // Check Overview Universal Any-Portal URL Launcher & Pipeline Conversion Funnel
+        document.querySelector('#main-nav [data-view="overview"]').click();
+        await new Promise(r => setTimeout(r, 40));
+        const hasOverviewLauncherAndFunnel = Boolean(
+          document.getElementById("ov-custom-url") &&
+          document.getElementById("btn-ov-launch-url") &&
+          document.querySelector(".funnel-grid")
+        );
 
         // Verify Resume & Cover Studios open clean (zero prefilled demo text)
         document.querySelector('#main-nav [data-view="resume"]').click();
@@ -1217,7 +1239,7 @@ async function main() {
         await new Promise(r => setTimeout(r, 40));
         const coverCompEmpty = (document.getElementById("cl-comp")?.value || "") === "";
 
-        // Explicitly audit Live Jobs view (#jobs): non-empty multi-platform cards + zero prefiltered selections + interactive filter & reset
+        // Explicitly audit Live Jobs view (#jobs): non-empty multi-platform cards + zero prefiltered selections + batch multi-select + interactive filter & reset
         document.querySelector('#main-nav [data-view="jobs"]').click();
         let hubLiveJobCards = 0;
         for (let i = 0; i < 30; i++) {
@@ -1227,6 +1249,11 @@ async function main() {
         }
         const hubInitialActiveFilterPills = document.querySelectorAll("#jf-active-chips .active-filter-pill").length;
         const hubResetHiddenInitially = getComputedStyle(document.getElementById("jf-reset")).display === "none";
+        const hasBatchMultiSelect = Boolean(
+          document.getElementById("jf-select-top5") &&
+          document.getElementById("btn-jf-batch-apply") &&
+          document.querySelectorAll(".jf-batch-chk").length >= 10
+        );
 
         const jfRec = document.getElementById("jf-recency");
         jfRec.value = "2";
@@ -1239,20 +1266,34 @@ async function main() {
         const hubResetJobCards = document.querySelectorAll('[data-hub-job-card="true"]').length;
         const hubActivePillsAfterReset = document.querySelectorAll("#jf-active-chips .active-filter-pill").length;
 
-        // Check Tracker filter controls
+        // Check Tracker filter controls + Kanban Board toggle + Receipt Modal trigger
         document.querySelector('#main-nav [data-view="tracker"]').click();
         await new Promise(r => setTimeout(r, 50));
         const hasTrackerFilters = Boolean(document.getElementById("trk-filter-q") && document.getElementById("trk-filter-stage"));
+        const hasReceiptBtns = document.querySelectorAll(".trk-view-receipt").length >= 1;
+        document.getElementById("btn-trk-view-kanban")?.click();
+        await new Promise(r => setTimeout(r, 60));
+        const kanbanCols = document.querySelectorAll("#trk-kanban-board .kanban-col").length;
+        document.getElementById("btn-trk-view-table")?.click();
+        await new Promise(r => setTimeout(r, 60));
+        const tableRestored = Boolean(document.querySelector("#view-container table.table"));
 
-        // Check Autopilot default mode = full_auto
+        // Check Autopilot default mode = full_auto + Bulk Multi-URL Enqueue
         document.querySelector('#main-nav [data-view="autopilot"]').click();
         await new Promise(r => setTimeout(r, 50));
         const autopilotMode = document.getElementById("ap-mode")?.value || null;
+        const hasAutopilotBulk = Boolean(document.getElementById("ap-bulk-urls") && document.getElementById("ap-add-bulk-btn"));
 
-        // Check Vault autoSubmitEnabled checkbox & masked secret inputs
+        // Check Vault autoSubmitEnabled, handsFree, dupGuard, Backup/Restore & masked secret inputs
         document.querySelector('#main-nav [data-view="vault"]').click();
         await new Promise(r => setTimeout(r, 50));
         const vaultAutoSubmitChecked = Boolean(document.getElementById("vc-auto-sub")?.checked);
+        const hasZeroTouchVaultControls = Boolean(
+          document.getElementById("vc-hands-free") &&
+          document.getElementById("vc-dup-guard")?.checked &&
+          document.getElementById("btn-export-backup") &&
+          document.getElementById("btn-import-backup")
+        );
         const vaultSecretsMasked =
           document.getElementById("vc-pass")?.type === "password" &&
           document.getElementById("vc-app-pass")?.type === "password" &&
@@ -1267,41 +1308,124 @@ async function main() {
           }
         });
 
+        // Check GENERATE_INTERVIEW_PREP RPC
+        const prepOut = await chrome.runtime.sendMessage({
+          type: "GENERATE_INTERVIEW_PREP",
+          payload: {
+            jobMeta: {
+              company: "Databricks",
+              title: "Staff AI Platform & Evaluation Engineer",
+              description: "Build Python, TypeScript, Kubernetes, and LLM agent evaluation harnesses at scale."
+            }
+          }
+        });
+
+        // Check Interactive Live Tailored Resume Editor Re-Compile (COMPILE_TAILORED_RESUME_PDF RPC) + Backup Restore
+        const curStateRes = await chrome.runtime.sendMessage({ type: "GET_ALL_STATE" });
+        const sampleTailored = curStateRes?.state?.tailoredResumes?.[0]?.tailored || {
+          targetJobTitle: "Staff AI Evaluation & Platform Engineer",
+          tailoredSummary: "Senior AI Solutions Engineer with 3.5+ years building autonomous evaluation sandboxes, Kubernetes microservices, and Python/TypeScript LLM pipelines.",
+          skillsOverride: {
+            languages: ["Python", "TypeScript", "JavaScript", "SQL", "C++"],
+            aiAndMl: ["LLM Evaluation", "LangGraph", "RAG", "RLHF", "Prompt Engineering"],
+            cloudAndSystems: ["Kubernetes", "Docker", "GCP", "AWS", "OpenTelemetry"],
+            frameworksAndTools: ["React", "Node.js", "FastAPI", "Playwright", "CI/CD"]
+          },
+          experience: curStateRes?.state?.profile?.experience || [],
+          projects: curStateRes?.state?.profile?.projects || []
+        };
+        const editedTailored = {
+          ...sampleTailored,
+          targetJobTitle: "Principal Agentic Systems & Evaluation Engineer"
+        };
+        const recompileRes = await chrome.runtime.sendMessage({
+          type: "COMPILE_TAILORED_RESUME_PDF",
+          payload: {
+            company: "Databricks",
+            role: "Principal Agentic Systems & Evaluation Engineer",
+            jobDescription: "Architect Python, TypeScript, Kubernetes, Docker, LangGraph, and LLM evaluation pipelines.",
+            tailored: editedTailored
+          }
+        });
+
+        const latestStateRes = await chrome.runtime.sendMessage({ type: "GET_ALL_STATE" });
+        const backupRestoreRes = await chrome.runtime.sendMessage({
+          type: "RESTORE_STATE_BACKUP",
+          payload: { backup: latestStateRes.state }
+        });
+
         return {
+          bodyBgWhite,
           rendered,
+          hasOverviewLauncherAndFunnel,
           zeroPrefilledStudios: resumeCompEmpty && coverCompEmpty,
           hubJobsAudit: {
             hubLiveJobCards,
             hubInitialActiveFilterPills,
             hubResetHiddenInitially,
+            hasBatchMultiSelect,
             hub2hJobCards,
             hubActivePillsWhenFiltered,
             hubResetJobCards,
             hubActivePillsAfterReset
           },
           hasTrackerFilters,
+          hasReceiptBtns,
+          kanbanCols,
+          tableRestored,
           autopilotMode,
+          hasAutopilotBulk,
           vaultAutoSubmitChecked,
+          hasZeroTouchVaultControls,
           vaultSecretsMasked,
-          clPdfOk: Boolean(clPdf?.ok && clPdf?.pdfBase64?.length > 200)
+          clPdfOk: Boolean(clPdf?.ok && clPdf?.pdfBase64?.length > 200),
+          interviewPrepOk: Boolean(
+            prepOut?.ok &&
+            prepOut?.prep?.elevatorPitch?.length > 40 &&
+            prepOut?.prep?.technicalQuestions?.length >= 2 &&
+            prepOut?.prep?.behavioralStories?.length >= 2 &&
+            prepOut?.prep?.questionsToAsk?.length >= 2
+          ),
+          interactiveResumeRecompileOk: Boolean(
+            recompileRes?.ok &&
+            recompileRes?.pdfBase64?.length > 500 &&
+            recompileRes?.fileName === "Raviteja_velanati_Databricks.pdf" &&
+            recompileRes?.record?.atsScore >= 75
+          ),
+          backupRestoreOk: Boolean(
+            backupRestoreRes?.ok &&
+            backupRestoreRes?.state?.applications?.length >= latestStateRes?.state?.applications?.length &&
+            backupRestoreRes?.state?.interviewPreps?.length >= 1
+          )
         };
       })()
-    `, 35000);
+    `, 45000);
     if (
       dashCdp.exceptions.length > 0 ||
+      !dashAudit.bodyBgWhite ||
+      !dashAudit.hasOverviewLauncherAndFunnel ||
       !dashAudit.zeroPrefilledStudios ||
       !(dashAudit.hubJobsAudit?.hubLiveJobCards >= 30) ||
       dashAudit.hubJobsAudit?.hubInitialActiveFilterPills !== 0 ||
       !dashAudit.hubJobsAudit?.hubResetHiddenInitially ||
+      !dashAudit.hubJobsAudit?.hasBatchMultiSelect ||
       !(dashAudit.hubJobsAudit?.hub2hJobCards >= 4 && dashAudit.hubJobsAudit.hub2hJobCards < dashAudit.hubJobsAudit.hubLiveJobCards) ||
       dashAudit.hubJobsAudit?.hubActivePillsWhenFiltered !== 1 ||
       dashAudit.hubJobsAudit?.hubResetJobCards !== dashAudit.hubJobsAudit?.hubLiveJobCards ||
       dashAudit.hubJobsAudit?.hubActivePillsAfterReset !== 0 ||
       !dashAudit.hasTrackerFilters ||
+      !dashAudit.hasReceiptBtns ||
+      dashAudit.kanbanCols !== 5 ||
+      !dashAudit.tableRestored ||
       dashAudit.autopilotMode !== "full_auto" ||
+      !dashAudit.hasAutopilotBulk ||
       !dashAudit.vaultAutoSubmitChecked ||
+      !dashAudit.hasZeroTouchVaultControls ||
       !dashAudit.vaultSecretsMasked ||
       !dashAudit.clPdfOk ||
+      !dashAudit.interviewPrepOk ||
+      !dashAudit.interactiveResumeRecompileOk ||
+      !dashAudit.backupRestoreOk ||
       Object.values(dashAudit.rendered).some((len) => len < 40)
     ) {
       throw new Error(`Dashboard UI sanity check failed: exceptions=${JSON.stringify(dashCdp.exceptions)} audit=${JSON.stringify(dashAudit)}`);
@@ -1348,19 +1472,20 @@ async function main() {
       throw new Error(`SidePanel UI sanity check failed: exceptions=${JSON.stringify(spCdp.exceptions)} audit=${JSON.stringify(spAudit)}`);
     }
     spCdp.close();
-    console.log("7b. ✅ All Extension UI Surfaces Verified (Dashboard 8 Views, Popup, SidePanel, Cover Letter PDF Re-Compiler — 0 JS Exceptions):", JSON.stringify({
+    console.log("7b. ✅ All Extension UI Surfaces Verified (White Career Hub 9 Views, Kanban, Live Resume Re-Compiler, Interview Prep, Popup, SidePanel — 0 JS Exceptions):", JSON.stringify({
       dashboard: dashAudit,
       popup: popupAudit,
       sidepanel: spAudit
     }, null, 2));
 
-    // 5c. Jobify Autonomous Platform (Tsenta + Jobright AI Edition at http://127.0.0.1:18765/) + Multi-Platform & 128 Staffing Agencies + Silent Background Pipeline Verification
+    // 5c. Jobify Autonomous Platform (Tsenta + Jobright AI Edition at http://127.0.0.1:18765/) + White Theme + Interview Prep + Multi-Platform & 128 Staffing Agencies + Silent Background Pipeline Verification
     const webAppCdp = await openTabAndConnect("http://127.0.0.1:18765/");
     let webAppAudit = null;
     for (let w = 0; w < 25; w++) {
       await sleep(300);
       webAppAudit = await webAppCdp
         .eval(`({
+          bodyBgWhite: getComputedStyle(document.body).backgroundColor === "rgb(255, 255, 255)",
           isWebAppAttr: document.documentElement.getAttribute("data-jobify-webapp") === "true",
           extensionConnected: document.documentElement.getAttribute("data-jobify-extension-connected") === "true",
           statusText: document.getElementById("ext-status-text")?.textContent || "",
@@ -1375,6 +1500,7 @@ async function main() {
             document.querySelector(".web-nav-btn[data-web-view='staffing']") &&
             document.querySelector(".web-nav-btn[data-web-view='tracker']") &&
             document.querySelector(".web-nav-btn[data-web-view='resume']") &&
+            document.querySelector(".web-nav-btn[data-web-view='interview']") &&
             document.querySelector(".web-nav-btn[data-web-view='insider']") &&
             document.querySelector(".web-nav-btn[data-web-view='inbox']")
           ),
@@ -1396,12 +1522,12 @@ async function main() {
       }
     }
 
-    // Verify Multi-Platform Job Sources, All New Filters (2h/8h/12h/24h/48h, H-1B, Role Type, Experience), 128 Staffing Agencies View, and Silent Tracker Auto-Apply
+    // Verify Multi-Platform Job Sources, All New Filters (2h/8h/12h/24h/48h, H-1B, Role Type, Experience), 128 Staffing Agencies View, Interview Studio, and Silent Tracker Auto-Apply
     const autonomousFlowAudit = await webAppCdp.eval(`
       (async () => {
         const beforeApplied = Number(document.getElementById("stat-applied-count")?.textContent || 0);
 
-        // 0. Check multi-platform coverage + interactive filters + 128 Staffing Agencies API & View
+        // 0. Check multi-platform coverage + interactive filters + 128 Staffing Agencies API & View + Interview Prep View
         const t0 = performance.now();
         const jobsApi = await fetch("/api/jobs").then((r) => r.json());
         const jobsApiLatencyMs = Math.round(performance.now() - t0);
@@ -1437,10 +1563,13 @@ async function main() {
         const countExp12 = document.querySelectorAll("#jobs-feed-container .job-card[data-job-id]").length;
         document.getElementById("btn-reset-filters").click();
 
-        // Check 128 Staffing Agencies view
+        // Check 128 Staffing Agencies view + AI Interview Prep Studio view
         document.querySelector(".web-nav-btn[data-web-view='staffing']").click();
         await new Promise((r) => setTimeout(r, 250));
         const staffingCardsCount = document.querySelectorAll("#staffing-cards-grid [data-staffing-card]").length;
+        document.querySelector(".web-nav-btn[data-web-view='interview']").click();
+        await new Promise((r) => setTimeout(r, 150));
+        const webInterviewRendered = Boolean(document.getElementById("web-btn-gen-prep") && document.getElementById("web-prep-comp"));
         document.querySelector(".web-nav-btn[data-web-view='dashboard']").click();
         await new Promise((r) => setTimeout(r, 100));
 
@@ -1505,6 +1634,7 @@ async function main() {
           platformsPresent,
           filterCounts: { count2h, count12h, count48h, countExp12 },
           staffingCardsCount,
+          webInterviewRendered,
           hadSavedTrackerApplyBtn,
           sawInFlightOrFilled,
           beforeApplied,
@@ -1517,12 +1647,13 @@ async function main() {
       })()
     `, 35000);
 
-    console.log("7c. ✅ Jobify Autonomous Platform (Multi-Platform + 128 Staffing Agencies + Filters + Turbo Auto-Apply) Verified:", JSON.stringify({
+    console.log("7c. ✅ Jobify Autonomous Platform (White Hub + Interview Studio + Multi-Platform + 128 Staffing Agencies + Turbo Auto-Apply) Verified:", JSON.stringify({
       ...webAppAudit,
       autonomousFlow: autonomousFlowAudit
     }, null, 2));
     if (
       webAppCdp.exceptions.length > 0 ||
+      !webAppAudit?.bodyBgWhite ||
       !webAppAudit?.isWebAppAttr ||
       !webAppAudit?.extensionConnected ||
       webAppAudit.liveJobsCount < 30 ||
@@ -1539,6 +1670,7 @@ async function main() {
       !(autonomousFlowAudit?.filterCounts?.count2h >= 4 && autonomousFlowAudit.filterCounts.count2h < autonomousFlowAudit.filterCounts.count12h) ||
       !(autonomousFlowAudit?.filterCounts?.countExp12 >= 4) ||
       autonomousFlowAudit?.staffingCardsCount !== 128 ||
+      !autonomousFlowAudit?.webInterviewRendered ||
       !autonomousFlowAudit?.hadSavedTrackerApplyBtn ||
       !autonomousFlowAudit?.sawInFlightOrFilled ||
       autonomousFlowAudit.finalSubmittedCount < 8 ||
@@ -1658,6 +1790,83 @@ async function main() {
       !manualAuthOut.resName?.endsWith(".pdf")
     ) {
       throw new Error(`Universal Multi-Portal Auth Gauntlet failed: ${JSON.stringify({ wdDupOut, oracleOut, sapOut, manualAuthOut })}`);
+    }
+
+    // 7e. Advanced Career Portal Stress Test (/sandbox/portal-advanced): JSON-LD JobPosting extraction + Open Shadow DOM custom elements + Localized hidden dropzone <input type="file"> + Empty Workday 'Add' repeater + MM/YYYY spinbuttons + Enterprise screening selects + Cookie banner exclusion
+    const advPortalCdp = await openTabAndConnect("http://127.0.0.1:18765/sandbox/portal-advanced");
+    for (let i = 0; i < 20; i++) {
+      const ready = await advPortalCdp
+        .eval(`Boolean(document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-btn-autofill"))`)
+        .catch(() => false);
+      if (ready) break;
+      await sleep(250);
+    }
+    const advPortalRun = await dashCdp.eval(
+      `chrome.runtime.sendMessage({ type: "START_FULL_AUTO_APPLY", payload: { tabId: ${advPortalCdp.tabId}, options: { autoSubmit: true, tailorResume: true }, awaitCompletion: true } })`,
+      60000
+    );
+    const advPortalAudit = await advPortalCdp.eval(`window.__PORTAL_ADV_AUDIT__`);
+    advPortalCdp.close();
+    console.log("7e. ✅ Zero-Touch Career Portal Stress Test Verified (JSON-LD + Open Shadow DOM + Hidden Dropzone PDF + Workday Add Repeater + Spinbuttons + Screening Selects):", JSON.stringify({
+      runOk: advPortalRun?.ok,
+      runSubmitted: advPortalRun?.submitted,
+      audit: advPortalAudit
+    }, null, 2));
+    if (
+      !advPortalAudit?.submitted ||
+      advPortalAudit.cookieClicked !== false ||
+      advPortalAudit.repeaterExpanded !== true ||
+      advPortalAudit.values?.firstName !== "Raviteja" ||
+      advPortalAudit.values?.lastName !== "Velanati" ||
+      advPortalAudit.values?.resumeName !== "Raviteja_velanati_Stripe.pdf" ||
+      !(advPortalAudit.values?.resumeBytes > 1000) ||
+      !(advPortalAudit.values?.weComp?.length > 2) ||
+      advPortalAudit.values?.weMm?.length !== 2 ||
+      advPortalAudit.values?.weYy?.length !== 4 ||
+      advPortalAudit.values?.eduLvl !== "Master's Degree" ||
+      advPortalAudit.values?.student !== "No" ||
+      advPortalAudit.values?.bgCheck !== "Yes"
+    ) {
+      throw new Error(`Zero-Touch Career Portal Stress Test (/sandbox/portal-advanced) failed: run=${JSON.stringify(advPortalRun)} audit=${JSON.stringify(advPortalAudit)}`);
+    }
+
+    // 7f. Concurrent Multi-Job FIFO Auto-Apply Execution Queue Verification (2 simultaneous LAUNCH_TAB_AND_AUTO_APPLY calls must execute sequentially without aborting Job #1)
+    const fifoConcurrentOut = await dashCdp.eval(`
+      Promise.all([
+        chrome.runtime.sendMessage({
+          type: "LAUNCH_TAB_AND_AUTO_APPLY",
+          payload: {
+            url: "http://127.0.0.1:18765/sandbox/greenhouse?fifo=1",
+            active: false,
+            awaitCompletion: true,
+            options: { autoSubmit: true, tailorResume: false, jobMeta: { company: "FIFO Greenhouse Corp", title: "Staff AI Engineer", ats: "Greenhouse" } }
+          }
+        }),
+        chrome.runtime.sendMessage({
+          type: "LAUNCH_TAB_AND_AUTO_APPLY",
+          payload: {
+            url: "http://127.0.0.1:18765/sandbox/lever?fifo=2",
+            active: false,
+            awaitCompletion: true,
+            options: { autoSubmit: true, tailorResume: false, jobMeta: { company: "FIFO Lever Labs", title: "Senior Platform Engineer", ats: "Lever" } }
+          }
+        })
+      ])
+    `, 75000);
+    console.log("7f. ✅ Concurrent Multi-Job FIFO Auto-Apply Execution Queue Verified (Both Jobs Completed Without Collision):", JSON.stringify(
+      fifoConcurrentOut.map((r) => ({ ok: r?.ok, submitted: r?.submitted, company: r?.application?.company, status: r?.application?.status })),
+      null,
+      2
+    ));
+    if (
+      !Array.isArray(fifoConcurrentOut) ||
+      fifoConcurrentOut.length !== 2 ||
+      !fifoConcurrentOut[0]?.ok ||
+      !fifoConcurrentOut[0]?.submitted ||
+      !fifoConcurrentOut[1]?.ok ||
+      !fifoConcurrentOut[1]?.submitted
+    ) {
+      throw new Error(`Concurrent Multi-Job FIFO Auto-Apply Queue failed: ${JSON.stringify(fifoConcurrentOut)}`);
     }
 
     dashCdp.close();

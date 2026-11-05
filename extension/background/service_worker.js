@@ -12,6 +12,8 @@ import {
   deleteSavedAnswer,
   saveTailoredResume,
   saveCoverLetter,
+  saveInterviewPrep,
+  restoreStateBackup,
   updateAutopilotQueue,
   appendAutopilotLog
 } from "../shared/storage.js";
@@ -19,6 +21,7 @@ import { analyzeJobKeywords, scoreResumeATS, evaluateJobMatch } from "../shared/
 import {
   tailorResumeWithGemini,
   generateCoverLetterWithGemini,
+  generateInterviewPrepWithGemini,
   answerApplicationQuestionWithGemini,
   generateNetworkOutreachWithGemini,
   diagnoseFormErrorsWithGemini
@@ -32,7 +35,11 @@ import { fetchPersonalizedRecommendations, buildNetworkCopilotPathways } from ".
 
 let autopilotRunning = false;
 let autoApplyRunning = false;
+let activeAutoApplyTabId = null;
 let autoApplyAbortFlag = false;
+let autoApplyExecutionChain = Promise.resolve();
+let pendingAutoApplyCount = 0;
+let autoApplyQueueGeneration = 0;
 let currentAutoApplyStatus = {
   running: false,
   stage: "idle",
@@ -40,8 +47,29 @@ let currentAutoApplyStatus = {
   detail: "",
   completed: false,
   error: null,
+  queuedCount: 0,
   updatedAt: 0
 };
+
+function enqueueAutoApplyTask(taskFn) {
+  const scheduledGen = autoApplyQueueGeneration;
+  const wasBusy = Boolean(autoApplyRunning || pendingAutoApplyCount > 0);
+  if (wasBusy) pendingAutoApplyCount++;
+
+  const runNext = async () => {
+    if (wasBusy) {
+      pendingAutoApplyCount = Math.max(0, pendingAutoApplyCount - 1);
+    }
+    if (scheduledGen !== autoApplyQueueGeneration) {
+      return { ok: false, aborted: true, error: "Queued Auto-Apply cancelled." };
+    }
+    return await taskFn();
+  };
+
+  const nextPromise = autoApplyExecutionChain.then(runNext, runNext);
+  autoApplyExecutionChain = nextPromise.catch(() => {});
+  return nextPromise;
+}
 
 const recentSpawnedTabs = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -97,6 +125,7 @@ async function broadcastAutoApplyProgress(tabId, patch) {
   currentAutoApplyStatus = {
     ...currentAutoApplyStatus,
     ...patch,
+    queuedCount: pendingAutoApplyCount,
     tabId: tabId || currentAutoApplyStatus.tabId || null,
     updatedAt: Date.now()
   };
@@ -1407,10 +1436,15 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
   if (!initialTabId) {
     return { ok: false, error: "No active job tab provided." };
   }
+  if (!options._fromQueue && autoApplyRunning && activeAutoApplyTabId && activeAutoApplyTabId !== initialTabId) {
+    return await enqueueAutoApplyTask(() =>
+      runFullAutoApplyWorkflow(initialTabId, { ...options, _fromQueue: true })
+    );
+  }
   if (autoApplyRunning) {
-    // Allow user to re-trigger cleanly if an earlier session was still running
+    // Same tab re-trigger: cleanly abort earlier pass on this tab and restart
     autoApplyAbortFlag = true;
-    for (let w = 0; w < 10 && autoApplyRunning; w++) {
+    for (let w = 0; w < 12 && autoApplyRunning; w++) {
       await sleep(100);
     }
     if (autoApplyRunning) {
@@ -1419,6 +1453,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
   }
 
   autoApplyRunning = true;
+  activeAutoApplyTabId = initialTabId;
   autoApplyAbortFlag = false;
   const silentBackground = Boolean(options.silentBackground);
   const startedAtMs = Date.now();
@@ -2427,6 +2462,7 @@ async function runFullAutoApplyWorkflow(initialTabId, options = {}) {
   } finally {
     clearInterval(swKeepAliveTimer);
     autoApplyRunning = false;
+    activeAutoApplyTabId = null;
   }
 }
 
@@ -2540,7 +2576,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sender?.tab?.id && currentAutoApplyStatus?.tabId && sender.tab.id !== currentAutoApplyStatus.tabId
             ? null
             : currentAutoApplyStatus;
-        return { ok: true, state, autoApplyStatus: scopedStatus };
+        return { ok: true, state, autoApplyStatus: scopedStatus, queueLength: pendingAutoApplyCount };
+      }
+
+      case "RESTORE_STATE_BACKUP": {
+        const nextState = await restoreStateBackup(payload.backup || payload);
+        return { ok: true, state: nextState };
       }
 
       case "UPDATE_PROFILE": {
@@ -2591,6 +2632,62 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           payload.preferredModel || null
         );
         return { ok: true, ...out };
+      }
+
+      case "COMPILE_TAILORED_RESUME_PDF": {
+        const tailored = payload.tailored;
+        if (!tailored || typeof tailored !== "object") {
+          return { ok: false, error: "Tailored resume payload is required." };
+        }
+        const comp = payload.company || payload.jobMeta?.company || "Target Company";
+        const role = payload.role || payload.jobMeta?.title || tailored.targetJobTitle || "AI / Software Engineer";
+        const jobDesc = payload.jobDescription || payload.jobMeta?.description || "";
+        const pdfOut = await generateTailoredResumePdf(tailored, state.profile, state.settings);
+        const postScore = scoreResumeATS(state.profile, jobDesc, tailored);
+        const fileName = formatCompanyResumeFileName(comp);
+        const saved = await saveTailoredResume({
+          ...(payload.recordId ? { id: payload.recordId } : {}),
+          company: comp,
+          role,
+          url: payload.url || payload.jobMeta?.url || "",
+          fileName,
+          modelUsed: payload.modelUsed || "interactive-studio",
+          fellBack: false,
+          pdfEngine: pdfOut.engine,
+          atsScore: postScore.totalScore,
+          tailored,
+          pdfBase64: pdfOut.pdfBase64
+        });
+        return {
+          ok: true,
+          record: saved,
+          postScore,
+          pdfBase64: pdfOut.pdfBase64,
+          fileName,
+          engine: pdfOut.engine
+        };
+      }
+
+      case "GENERATE_INTERVIEW_PREP": {
+        const jobMeta = payload.jobMeta || {};
+        const prepRes = await generateInterviewPrepWithGemini(jobMeta, state.profile, state.settings);
+        const saved = await saveInterviewPrep({
+          ...(payload.recordId ? { id: payload.recordId } : {}),
+          company: jobMeta.company || "Target Company",
+          role: jobMeta.title || "AI / Software Engineer",
+          location: jobMeta.location || "",
+          url: jobMeta.url || "",
+          modelUsed: prepRes.modelUsed,
+          fellBack: Boolean(prepRes.fellBack),
+          prep: prepRes.prep
+        });
+        return {
+          ok: true,
+          record: saved,
+          prep: prepRes.prep,
+          modelUsed: prepRes.modelUsed,
+          fellBack: Boolean(prepRes.fellBack)
+        };
       }
 
       case "GENERATE_COVER_LETTER": {
@@ -2766,6 +2863,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "STOP_AUTOPILOT": {
         autopilotRunning = false;
         autoApplyAbortFlag = true;
+        autoApplyQueueGeneration++;
+        pendingAutoApplyCount = 0;
         await chrome.alarms.clear("jobify_autopilot_schedule");
         await appendAutopilotLog("Autopilot stopped by user.", "warn");
         return { ok: true };
@@ -2789,7 +2888,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return await runFullAutoApplyWorkflow(targetTabId, mergedOptions);
         }
         runFullAutoApplyWorkflow(targetTabId, mergedOptions);
-        return { ok: true, started: true, tabId: targetTabId };
+        return {
+          ok: true,
+          started: true,
+          queued: Boolean(autoApplyRunning && activeAutoApplyTabId && activeAutoApplyTabId !== targetTabId),
+          queueLength: pendingAutoApplyCount,
+          tabId: targetTabId
+        };
       }
 
       case "LAUNCH_TAB_AND_AUTO_APPLY": {
@@ -2799,6 +2904,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const shouldFocusTab = payload.active === true;
         const silentBackground = !shouldFocusTab;
         const jbMeta = payload.options?.jobMeta || payload.jobMeta || {};
+        const isCurrentlyBusy = Boolean(autoApplyRunning || pendingAutoApplyCount > 0);
 
         const queuedApp = await upsertApplication({
           company: jbMeta.company || "Target Company",
@@ -2808,25 +2914,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           url: jobUrl,
           status: "In Flight",
           pipelineStage: "in_flight",
-          stepLabel: "Queued · Starting background agent...",
-          detail: "Initializing headless worker & reading job description...",
+          stepLabel: isCurrentlyBusy
+            ? `Queued (#${pendingAutoApplyCount + 1}) · Waiting for active worker...`
+            : "Queued · Starting background agent...",
+          detail: isCurrentlyBusy
+            ? "Queued in sequential FIFO worker pipeline — will start automatically."
+            : "Initializing headless worker & reading job description...",
           matchScore: jbMeta.matchScore || 94,
           resumeStatus: "Queued",
           coverLetterStatus: "Optional"
         });
 
-        const createdTab = await chrome.tabs.create({ url: jobUrl, active: shouldFocusTab });
+        // If user explicitly requested foreground tab focus, create tab immediately; otherwise create when FIFO slot starts so background tabs never pile up!
+        let preCreatedTab = shouldFocusTab ? await chrome.tabs.create({ url: jobUrl, active: true }) : null;
+
         const runTask = async () => {
+          const latestState = await getAllState();
+          const createdTab = preCreatedTab || (await chrome.tabs.create({ url: jobUrl, active: shouldFocusTab }));
           try {
             await waitForTabComplete(createdTab.id, 18000);
             await ensureTabScripts(createdTab.id);
             const out = await runFullAutoApplyWorkflow(createdTab.id, {
+              _fromQueue: true,
               silentBackground,
               applicationId: queuedApp?.id || null,
               autoSubmit:
                 payload.options?.autoSubmit !== undefined
                   ? Boolean(payload.options.autoSubmit)
-                  : state.settings?.autoSubmitEnabled !== false,
+                  : latestState.settings?.autoSubmitEnabled !== false,
               tailorResume: payload.options?.tailorResume !== false,
               jobMeta: jbMeta
             });
@@ -2841,7 +2956,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               }
               chrome.tabs.remove(createdTab.id).catch(() => {});
             }
-            return out;
+            return { ...out, tabId: out?.tabId || createdTab.id };
           } catch (err) {
             if (silentBackground && payload.keepTabOpen !== true) {
               chrome.tabs.remove(createdTab.id).catch(() => {});
@@ -2849,27 +2964,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             throw err;
           }
         };
+
         if (payload.awaitCompletion) {
-          const out = await runTask();
-          return { ...out, tabId: out?.tabId || createdTab.id, application: out?.application || queuedApp };
+          const out = await enqueueAutoApplyTask(runTask);
+          return { ...out, tabId: out?.tabId || preCreatedTab?.id || null, application: out?.application || queuedApp };
         }
-        runTask().catch(() => {});
+        enqueueAutoApplyTask(runTask).catch(() => {});
         return {
           ok: true,
           started: true,
+          queued: isCurrentlyBusy,
+          queueLength: pendingAutoApplyCount,
           silentBackground,
-          tabId: createdTab.id,
+          tabId: preCreatedTab?.id || null,
           application: queuedApp
         };
       }
 
       case "STOP_FULL_AUTO_APPLY": {
         autoApplyAbortFlag = true;
+        autoApplyQueueGeneration++;
+        pendingAutoApplyCount = 0;
         return { ok: true, stopping: true };
       }
 
       case "GET_AUTO_APPLY_STATUS": {
-        return { ok: true, status: currentAutoApplyStatus };
+        return { ok: true, status: currentAutoApplyStatus, queueLength: pendingAutoApplyCount };
       }
 
       case "FETCH_IMAP_OTP": {
@@ -2909,7 +3029,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           func: async (base64, fileName) => {
             const adapters = window.__JOBIFY_ADAPTERS__;
             if (!adapters) return 0;
-            const fileInputs = Array.from(document.querySelectorAll("input[type='file']")).filter((f) => !f.disabled);
+            const rawFileInputs = adapters.queryAllDeep
+              ? adapters.queryAllDeep(document, "input[type='file']")
+              : Array.from(document.querySelectorAll("input[type='file']"));
+            const fileInputs = rawFileInputs.filter((f) => !f.disabled);
             if (!fileInputs.length) return 0;
             const target =
               document.getElementById("_systemfield_resume") ||

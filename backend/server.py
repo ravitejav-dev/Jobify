@@ -2910,24 +2910,25 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
   <title>Jobify AI — Autonomous Job Discovery, ATS Resume Tailoring &amp; Background Auto-Apply</title>
   <style>
     :root {
-      --bg: #080d1a;
-      --sidebar: #0b1120;
-      --card: #11192e;
-      --card-hover: #16203a;
-      --border: #1e2d4a;
-      --text: #f8fafc;
-      --muted: #94a3b8;
-      --accent: #6366f1;
-      --accent-2: #06b6d4;
-      --green: #10b981;
-      --amber: #f59e0b;
-      --purple: #a855f7;
+      --bg: #ffffff;
+      --sidebar: #f8fafc;
+      --card: #ffffff;
+      --card-hover: #f8fafc;
+      --border: #e2e8f0;
+      --border-strong: #cbd5e1;
+      --text: #0f172a;
+      --muted: #64748b;
+      --accent: #4f46e5;
+      --accent-2: #0284c7;
+      --green: #059669;
+      --amber: #d97706;
+      --purple: #7c3aed;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: radial-gradient(circle at top right, #17153b 0%, var(--bg) 55%);
+      background: #ffffff;
       color: var(--text);
       min-height: 100vh;
       display: flex;
@@ -2937,8 +2938,8 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       position: sticky;
       top: 0;
       z-index: 60;
-      background: rgba(8, 13, 26, 0.92);
-      backdrop-filter: blur(14px);
+      background: rgba(255, 255, 255, 0.96);
+      backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
       padding: 12px 24px;
       display: flex;
@@ -2949,35 +2950,36 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     .brand { display: flex; align-items: center; gap: 12px; }
     .brand-logo {
       width: 36px; height: 36px; border-radius: 10px;
-      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      background: linear-gradient(135deg, #4f46e5, #7c3aed);
       display: flex; align-items: center; justify-content: center;
-      font-weight: 900; font-size: 18px; color: #fff;
-      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+      font-weight: 900; font-size: 18px; color: #ffffff;
+      box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);
     }
-    .brand-title { font-size: 17px; font-weight: 800; letter-spacing: -0.3px; }
+    .brand-title { font-size: 17px; font-weight: 800; letter-spacing: -0.3px; color: #0f172a; }
     .brand-sub { font-size: 11.5px; color: var(--muted); }
     .hdr-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .ext-pill {
       display: inline-flex; align-items: center; gap: 8px;
       padding: 6px 13px; border-radius: 999px; font-size: 12px; font-weight: 700;
-      background: rgba(16, 185, 129, 0.14); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35);
+      background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0;
     }
     .ext-pill.warn {
-      background: rgba(245, 158, 11, 0.14); color: #fbbf24; border-color: rgba(245, 158, 11, 0.35);
+      background: #fffbeb; color: #b45309; border-color: #fde68a;
     }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
     @keyframes pulseDot {
       0%, 100% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.45; transform: scale(1.25); }
     }
-    .dot-pulse { width: 8px; height: 8px; border-radius: 50%; background: #38bdf8; display: inline-block; animation: pulseDot 1.2s infinite; }
+    .dot-pulse { width: 8px; height: 8px; border-radius: 50%; background: #0284c7; display: inline-block; animation: pulseDot 1.2s infinite; }
 
     /* App Shell with Tsenta + Jobright Left Sidebar */
     .app-shell {
       display: grid;
-      grid-template-columns: 235px 1fr;
+      grid-template-columns: 240px 1fr;
       flex: 1;
       min-height: calc(100vh - 61px);
+      background: #ffffff;
     }
     @media (max-width: 1024px) {
       .app-shell { grid-template-columns: 1fr; }
@@ -3001,87 +3003,92 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     }
     .web-nav-btn {
       width: 100%; text-align: left; padding: 10px 12px; border-radius: 9px;
-      border: 1px solid transparent; background: transparent; color: #cbd5e1;
+      border: 1px solid transparent; background: transparent; color: #475569;
       font-size: 13px; font-weight: 600; cursor: pointer;
       display: flex; align-items: center; justify-content: space-between;
       transition: all 0.14s ease;
     }
-    .web-nav-btn:hover { background: rgba(99, 102, 241, 0.1); color: #fff; }
+    .web-nav-btn:hover { background: #f1f5f9; color: #0f172a; }
     .web-nav-btn.active {
-      background: linear-gradient(135deg, rgba(99, 102, 241, 0.22), rgba(6, 182, 212, 0.12));
-      border-color: rgba(99, 102, 241, 0.45);
-      color: #fff; font-weight: 700;
+      background: #eef2ff;
+      border-color: #c7d2fe;
+      color: #3730a3; font-weight: 700;
     }
     .nav-badge {
       font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 999px;
-      background: rgba(56, 189, 248, 0.16); color: #38bdf8;
+      background: #e0f2fe; color: #0369a1;
     }
-    .nav-badge.green { background: rgba(16, 185, 129, 0.18); color: #34d399; }
+    .nav-badge.green { background: #ecfdf5; color: #047857; }
 
     .main-workspace {
       padding: 22px 26px 60px;
       max-width: 1360px;
       width: 100%;
       margin: 0 auto;
+      background: #ffffff;
     }
 
     /* Hero Custom URL Auto-Apply Launcher */
     .hero-launcher {
-      background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(6, 182, 212, 0.09));
-      border: 1px solid rgba(99, 102, 241, 0.42);
+      background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
+      border: 1px solid #c7d2fe;
       border-radius: 15px;
       padding: 18px 22px;
       margin-bottom: 18px;
-      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+      box-shadow: 0 4px 14px rgba(79, 70, 229, 0.06);
     }
     .hero-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px; }
-    .hero-title { font-size: 16.5px; font-weight: 800; margin: 0; }
-    .hero-sub { font-size: 12.5px; color: var(--muted); margin: 2px 0 0; }
+    .hero-title { font-size: 16.5px; font-weight: 800; margin: 0; color: #0f172a; }
+    .hero-sub { font-size: 12.5px; color: #475569; margin: 2px 0 0; }
     .url-bar { display: flex; gap: 10px; flex-wrap: wrap; }
     .url-input {
       flex: 1; min-width: 260px; padding: 11px 15px; border-radius: 10px;
-      border: 1px solid var(--border); background: rgba(11, 17, 32, 0.9); color: #fff; font-size: 13.5px;
+      border: 1px solid #cbd5e1; background: #ffffff; color: #0f172a; font-size: 13.5px; outline: none;
     }
+    .url-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12); }
     .btn {
       padding: 9px 15px; border-radius: 9px; font-weight: 700; font-size: 13px;
-      cursor: pointer; border: 1px solid var(--border); background: var(--card); color: #fff;
+      cursor: pointer; border: 1px solid #cbd5e1; background: #f8fafc; color: #1e293b;
       display: inline-flex; align-items: center; gap: 7px; transition: all 0.15s ease;
     }
-    .btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .btn:hover { border-color: #6366f1; background: #f1f5f9; }
     .btn-sm { padding: 6px 11px; font-size: 12px; border-radius: 7px; }
     .btn-primary {
-      background: linear-gradient(135deg, var(--accent), #4f46e5);
-      border-color: transparent; color: #fff;
+      background: linear-gradient(135deg, #4f46e5, #7c3aed);
+      border-color: transparent; color: #ffffff;
     }
+    .btn-primary:hover { background: linear-gradient(135deg, #4338ca, #6d28d9); color: #ffffff; }
     .btn-emerald {
-      background: linear-gradient(135deg, #10b981, #059669);
-      border-color: transparent; color: #fff;
+      background: linear-gradient(135deg, #059669, #10b981);
+      border-color: transparent; color: #ffffff;
     }
+    .btn-emerald:hover { background: linear-gradient(135deg, #047857, #059669); color: #ffffff; }
 
     /* Live Telemetry Banner */
     .live-hud {
       display: none;
-      background: rgba(15, 23, 42, 0.96);
-      border: 1px solid var(--accent-2);
+      background: #f0f9ff;
+      border: 1px solid #7dd3fc;
       border-radius: 13px;
       padding: 14px 18px;
       margin-bottom: 18px;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      box-shadow: 0 8px 24px rgba(6, 182, 212, 0.15);
+      box-shadow: 0 4px 14px rgba(2, 132, 199, 0.08);
     }
     .live-hud.active { display: flex; }
-    .hud-step { font-size: 14.5px; font-weight: 800; color: #38bdf8; display: flex; align-items: center; gap: 8px; }
-    .hud-detail { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+    .hud-step { font-size: 14.5px; font-weight: 800; color: #0369a1; display: flex; align-items: center; gap: 8px; }
+    .hud-detail { font-size: 12.5px; color: #334155; margin-top: 3px; }
 
     /* Tsenta Live Applications & Tracker Table */
     .tsenta-panel {
-      background: var(--card);
+      background: #ffffff;
       border: 1px solid var(--border);
       border-radius: 14px;
       padding: 16px 18px;
       margin-bottom: 20px;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
     }
     .tsenta-hdr {
       display: flex; justify-content: space-between; align-items: center; gap: 12px;
@@ -3090,32 +3097,32 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     .tsenta-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
     .tsenta-tab {
       padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
-      border: 1px solid var(--border); background: rgba(15, 23, 42, 0.7); color: var(--muted);
+      border: 1px solid var(--border); background: #f8fafc; color: #475569;
       cursor: pointer; transition: all 0.14s ease;
     }
     .tsenta-tab.active {
-      background: rgba(99, 102, 241, 0.22); color: #fff; border-color: var(--accent);
+      background: #eef2ff; color: #3730a3; border-color: #c7d2fe;
     }
     .tsenta-table {
       width: 100%; border-collapse: collapse; font-size: 12.5px;
     }
     .tsenta-table th {
-      text-align: left; padding: 9px 10px; color: #94a3b8; font-weight: 700;
+      text-align: left; padding: 9px 10px; color: #475569; background: #f8fafc; font-weight: 700;
       border-bottom: 1px solid var(--border); font-size: 11.5px; text-transform: uppercase;
     }
     .tsenta-table td {
-      padding: 11px 10px; border-bottom: 1px solid rgba(255,255,255,0.05); vertical-align: middle;
+      padding: 11px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; color: #1e293b;
     }
-    .tsenta-table tr:hover td { background: rgba(255,255,255,0.02); }
+    .tsenta-table tr:hover td { background: #f8fafc; }
     .stage-pill {
       display: inline-flex; align-items: center; gap: 6px;
       padding: 4px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700;
     }
-    .stage-pill.in_flight { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35); }
-    .stage-pill.filled { background: rgba(168, 85, 247, 0.16); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.35); }
-    .stage-pill.submitted { background: rgba(16, 185, 129, 0.16); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); }
-    .stage-pill.needs_you { background: rgba(245, 158, 11, 0.16); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); }
-    .stage-pill.queued { background: rgba(148, 163, 184, 0.14); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); }
+    .stage-pill.in_flight { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+    .stage-pill.filled { background: #f3e8ff; color: #6d28d9; border: 1px solid #ddd6fe; }
+    .stage-pill.submitted { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+    .stage-pill.needs_you { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+    .stage-pill.queued { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; }
 
     /* Kanban Columns */
     .kanban-grid {
@@ -3123,15 +3130,15 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     }
     @media (max-width: 980px) { .kanban-grid { grid-template-columns: 1fr 1fr; } }
     .kanban-col {
-      background: rgba(11, 17, 32, 0.75); border: 1px solid var(--border);
+      background: #f8fafc; border: 1px solid var(--border);
       border-radius: 12px; padding: 12px; min-height: 180px;
     }
     .kanban-col-hdr {
       font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;
-      margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; color: #0f172a;
     }
     .kanban-card {
-      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      background: #ffffff; border: 1px solid var(--border); border-radius: 10px;
       padding: 10px 12px; margin-bottom: 8px; cursor: pointer; transition: border-color 0.14s ease;
     }
     .kanban-card:hover { border-color: var(--accent); }
@@ -3143,12 +3150,12 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     }
     .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     .search-in, .select-in {
-      padding: 9px 13px; border-radius: 9px; border: 1px solid var(--border);
-      background: var(--card); color: #fff; font-size: 13px; outline: none;
+      padding: 9px 13px; border-radius: 9px; border: 1px solid #cbd5e1;
+      background: #ffffff; color: #0f172a; font-size: 13px; outline: none;
     }
     .search-in:focus, .select-in:focus { border-color: var(--accent); }
     .web-filter-shell {
-      background: linear-gradient(180deg, rgba(17, 25, 44, 0.96), rgba(11, 17, 32, 0.96));
+      background: #f8fafc;
       border: 1px solid var(--border); border-radius: 14px;
       padding: 16px 18px; margin-bottom: 16px;
     }
@@ -3159,9 +3166,9 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     .web-search-wrap { flex: 1; min-width: 260px; position: relative; }
     .web-search-in {
       width: 100%; padding: 10px 14px 10px 36px; border-radius: 10px;
-      border: 1px solid #263554; background: #090f1d; color: #f8fafc; font-size: 13px; outline: none;
+      border: 1px solid #cbd5e1; background: #ffffff; color: #0f172a; font-size: 13px; outline: none;
     }
-    .web-search-in:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.18); }
+    .web-search-in:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12); }
     .web-filter-grid {
       display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px;
     }
@@ -3170,32 +3177,32 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     .web-filter-group { display: flex; flex-direction: column; gap: 5px; }
     .web-filter-lbl {
       font-size: 10.5px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.6px; color: #94a3b8;
+      letter-spacing: 0.6px; color: #475569;
     }
     .web-select-clean {
       width: 100%; padding: 8.5px 10px; border-radius: 9px;
-      border: 1px solid #243352; background: #0b1222; color: #e2e8f0;
+      border: 1px solid #cbd5e1; background: #ffffff; color: #0f172a;
       font-size: 12.5px; font-weight: 500; outline: none; cursor: pointer;
     }
-    .web-select-clean:hover { border-color: #3b4f7a; }
+    .web-select-clean:hover { border-color: #94a3b8; }
     .web-select-clean:focus { border-color: var(--accent); }
     .web-select-clean.has-value {
-      border-color: #6366f1; background: rgba(99, 102, 241, 0.12); color: #fff; font-weight: 600;
+      border-color: #4f46e5; background: #eef2ff; color: #3730a3; font-weight: 700;
     }
     .web-active-chips {
       display: none; align-items: center; flex-wrap: wrap; gap: 7px;
-      margin-top: 12px; padding-top: 11px; border-top: 1px solid rgba(255,255,255,0.06);
+      margin-top: 12px; padding-top: 11px; border-top: 1px solid #e2e8f0;
     }
     .active-filter-pill {
       display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
-      border-radius: 999px; background: rgba(99, 102, 241, 0.18);
-      border: 1px solid rgba(99, 102, 241, 0.45); color: #e0e7ff; font-size: 11.5px; font-weight: 600;
+      border-radius: 999px; background: #eef2ff;
+      border: 1px solid #c7d2fe; color: #3730a3; font-size: 11.5px; font-weight: 600;
     }
     .active-filter-pill button {
-      background: none; border: none; color: #a5b4fc; cursor: pointer;
+      background: none; border: none; color: #4f46e5; cursor: pointer;
       padding: 0; font-size: 12px; line-height: 1; font-weight: 800;
     }
-    .active-filter-pill button:hover { color: #fff; }
+    .active-filter-pill button:hover { color: #dc2626; }
 
     /* Main Grid */
     .layout-grid { display: grid; grid-template-columns: 1fr 340px; gap: 20px; align-items: start; }
@@ -3203,72 +3210,74 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
 
     .jobs-list { display: flex; flex-direction: column; gap: 13px; }
     .job-card {
-      background: var(--card);
+      background: #ffffff;
       border: 1px solid var(--border);
       border-radius: 14px;
       padding: 17px 20px;
-      transition: border-color 0.15s ease, background 0.15s ease;
+      box-shadow: 0 2px 6px rgba(15, 23, 42, 0.03);
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
-    .job-card:hover { border-color: #4f46e5; background: var(--card-hover); }
+    .job-card:hover { border-color: #6366f1; box-shadow: 0 6px 18px rgba(79, 70, 229, 0.08); }
     .jc-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-    .jc-title { font-size: 16px; font-weight: 800; color: #fff; margin: 0 0 4px; }
-    .jc-meta { font-size: 12.5px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .jc-title { font-size: 16px; font-weight: 800; color: #0f172a; margin: 0 0 4px; }
+    .jc-meta { font-size: 12.5px; color: #475569; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .match-badge {
       padding: 5px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 800;
-      background: rgba(16, 185, 129, 0.16); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35);
+      background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0;
       white-space: nowrap;
     }
     .kw-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
     .kw-chip {
-      font-size: 11.5px; padding: 3px 9px; border-radius: 6px;
-      background: rgba(99, 102, 241, 0.14); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.28);
+      font-size: 11.5px; padding: 3px 9px; border-radius: 6px; font-weight: 600;
+      background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe;
     }
     .kw-chip.portal {
-      background: rgba(6, 182, 212, 0.14); color: #67e8f9; border-color: rgba(6, 182, 212, 0.3);
+      background: #f0f9ff; color: #0369a1; border-color: #bae6fd;
     }
     .kw-chip.h1b {
-      background: rgba(16, 185, 129, 0.13); color: #6ee7b7; border-color: rgba(16, 185, 129, 0.3);
+      background: #ecfdf5; color: #047857; border-color: #a7f3d0;
     }
-    .jc-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06); flex-wrap: wrap; }
+    .jc-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #f1f5f9; flex-wrap: wrap; }
 
     .side-panel {
-      background: var(--card);
+      background: #ffffff;
       border: 1px solid var(--border);
       border-radius: 14px;
       padding: 16px;
       position: sticky;
       top: 76px;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
     }
-    .side-h { font-size: 14px; font-weight: 800; margin: 0 0 12px; display: flex; justify-content: space-between; align-items: center; }
+    .side-h { font-size: 14px; font-weight: 800; color: #0f172a; margin: 0 0 12px; display: flex; justify-content: space-between; align-items: center; }
     .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-bottom: 14px; }
-    .stat-box { background: rgba(15, 23, 42, 0.65); border: 1px solid var(--border); border-radius: 10px; padding: 10px 11px; }
-    .stat-num { font-size: 19px; font-weight: 800; color: #38bdf8; }
+    .stat-box { background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 10px 11px; }
+    .stat-num { font-size: 19px; font-weight: 800; color: #4f46e5; }
     .stat-lbl { font-size: 11px; color: var(--muted); }
     .app-item {
-      padding: 10px 11px; border-radius: 9px; background: rgba(15, 23, 42, 0.55);
+      padding: 10px 11px; border-radius: 9px; background: #f8fafc;
       border: 1px solid var(--border); margin-bottom: 8px; font-size: 12px; cursor: pointer;
     }
-    .app-item:hover { border-color: var(--accent); }
+    .app-item:hover { border-color: var(--accent); background: #eef2ff; }
 
     /* Submission Receipt & Resume Diff Modal */
     .receipt-modal-backdrop {
       display: none; position: fixed; inset: 0; z-index: 100;
-      background: rgba(4, 8, 18, 0.78); backdrop-filter: blur(6px);
+      background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(4px);
       align-items: center; justify-content: center; padding: 24px;
     }
     .receipt-modal-backdrop.open { display: flex; }
     .receipt-modal {
-      background: #0d1426; border: 1px solid #2e416e; border-radius: 16px;
+      background: #ffffff; border: 1px solid #cbd5e1; border-radius: 16px;
       max-width: 920px; width: 100%; max-height: 86vh; overflow-y: auto;
-      padding: 22px 24px; box-shadow: 0 24px 60px rgba(0,0,0,0.65);
+      padding: 22px 24px; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
     }
 
     /* Orion AI Copilot Drawer */
     .orion-drawer {
       display: none; position: fixed; right: 20px; bottom: 20px; z-index: 95;
-      width: 390px; max-width: calc(100vw - 32px); background: #0e1629;
-      border: 1px solid #4f46e5; border-radius: 16px;
-      box-shadow: 0 20px 50px rgba(0,0,0,0.65); overflow: hidden;
+      width: 390px; max-width: calc(100vw - 32px); background: #ffffff;
+      border: 1px solid #c7d2fe; border-radius: 16px;
+      box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2); overflow: hidden;
       flex-direction: column;
     }
     .orion-drawer.open { display: flex; }
@@ -3288,7 +3297,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         <span class="dot"></span>
         <span id="ext-status-text">Connecting to Jobify Chrome Extension...</span>
       </div>
-      <button type="button" class="btn btn-sm" id="btn-toggle-orion" style="border-color:#6366f1;color:#a5b4fc;">✨ Ask Orion AI</button>
+      <button type="button" class="btn btn-sm" id="btn-toggle-orion" style="border-color:#c7d2fe;background:#eef2ff;color:#3730a3;">✨ Ask Orion AI</button>
       <button type="button" class="btn btn-sm" id="btn-refresh-jobs">🔄 Refresh Live Jobs</button>
       <button type="button" class="btn btn-sm" id="btn-open-ext-hub">⚙️ Extension Hub</button>
     </div>
@@ -3315,6 +3324,10 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
           <span>📄 Résumé Diff Studio</span>
           <span class="nav-badge" id="nav-badge-resumes">1-Page</span>
         </button>
+        <button type="button" class="web-nav-btn" data-web-view="interview">
+          <span>🎤 AI Interview Prep</span>
+          <span class="nav-badge">Coach</span>
+        </button>
         <button type="button" class="web-nav-btn" data-web-view="insider">
           <span>🤝 Insider Referrals</span>
           <span class="nav-badge">Warm</span>
@@ -3325,10 +3338,10 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         </button>
       </div>
 
-      <div style="padding:12px;border-radius:10px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);font-size:11.5px;">
-        <div style="font-weight:800;color:#34d399;margin-bottom:4px;">● Turbo Headless Mode</div>
-        <div style="color:#94a3b8;line-height:1.45;">
-          Clicking <strong>Auto-Apply</strong> executes 100% in the background without opening foreground tabs and updates your Tracker in real time.
+      <div style="padding:12px;border-radius:10px;background:#ecfdf5;border:1px solid #a7f3d0;font-size:11.5px;">
+        <div style="font-weight:800;color:#047857;margin-bottom:4px;">● Turbo Headless FIFO Mode</div>
+        <div style="color:#065f46;line-height:1.45;">
+          Clicking <strong>Auto-Apply</strong> executes 100% in the background via a sequential FIFO queue without interrupting your active tab.
         </div>
       </div>
     </aside>
@@ -3338,7 +3351,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       <div class="hero-launcher">
         <div class="hero-top">
           <div>
-            <h1 class="hero-title">Autonomous Background Auto-Apply — Multi-Platform &amp; 128 Staffing Agencies</h1>
+            <h1 class="hero-title">Autonomous Background Auto-Apply — 35+ Portals &amp; 128 Staffing Agencies</h1>
             <p class="hero-sub">Pulls live roles across Workday, LinkedIn, Dice, 128 Staffing Agencies, Microsoft, Greenhouse, Ashby &amp; Lever with 2h/8h/12h/24h/2d &amp; H-1B filters</p>
           </div>
           <div style="display:flex;gap:8px;">
@@ -3359,7 +3372,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
           <span id="web-hud-stage-badge" class="stage-pill in_flight">In Flight</span>
-          <button type="button" class="btn btn-sm" id="btn-stop-web-apply" style="border-color:#ef4444;color:#fca5a5;">⏹ Stop</button>
+          <button type="button" class="btn btn-sm" id="btn-stop-web-apply" style="border-color:#fecaca;background:#fef2f2;color:#dc2626;">⏹ Stop</button>
         </div>
       </div>
 
@@ -3367,9 +3380,9 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       <section class="tsenta-panel" id="tsenta-pipeline-section">
         <div class="tsenta-hdr">
           <div>
-            <div style="font-size:15.5px;font-weight:800;color:#fff;display:flex;align-items:center;gap:8px;">
+            <div style="font-size:15.5px;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:8px;">
               <span>📋 Live Autonomous Applications &amp; Tracker Pipeline</span>
-              <span style="font-size:11.5px;font-weight:600;color:#38bdf8;">(In Flight → Filled → Submitted → Applied Tracker)</span>
+              <span style="font-size:11.5px;font-weight:700;color:#0284c7;">(In Flight → Filled → Submitted → Applied Tracker)</span>
             </div>
             <div style="font-size:12px;color:var(--muted);margin-top:2px;">
               Click any application row to inspect its <strong>Submission Receipt</strong> (all filled fields ✓) &amp; <strong>Tailored Résumé Diff</strong> (− before / + after)
@@ -3409,25 +3422,25 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         <!-- Tsenta 4-Column Kanban Tracker (Applied -> Viewed -> Replied -> Interview) -->
         <div class="kanban-grid" id="tracker-kanban-board" style="display:none;">
           <div class="kanban-col">
-            <div class="kanban-col-hdr"><span style="color:#34d399;">● Applied / Submitted</span><span id="kb-cnt-applied">0</span></div>
+            <div class="kanban-col-hdr"><span style="color:#059669;">● Applied / Submitted</span><span id="kb-cnt-applied">0</span></div>
             <div id="kb-col-applied"></div>
           </div>
           <div class="kanban-col">
-            <div class="kanban-col-hdr"><span style="color:#38bdf8;">● Application Viewed</span><span id="kb-cnt-viewed">0</span></div>
+            <div class="kanban-col-hdr"><span style="color:#0284c7;">● Application Viewed</span><span id="kb-cnt-viewed">0</span></div>
             <div id="kb-col-viewed"></div>
           </div>
           <div class="kanban-col">
-            <div class="kanban-col-hdr"><span style="color:#c084fc;">● Recruiter Replied</span><span id="kb-cnt-replied">0</span></div>
+            <div class="kanban-col-hdr"><span style="color:#7c3aed;">● Recruiter Replied</span><span id="kb-cnt-replied">0</span></div>
             <div id="kb-col-replied"></div>
           </div>
           <div class="kanban-col">
-            <div class="kanban-col-hdr"><span style="color:#fbbf24;">● Technical Interview</span><span id="kb-cnt-interview">0</span></div>
+            <div class="kanban-col-hdr"><span style="color:#d97706;">● Technical Interview</span><span id="kb-cnt-interview">0</span></div>
             <div id="kb-col-interview"></div>
           </div>
         </div>
       </section>
 
-      <!-- Dynamic Workspace Views (Jobs Feed / Staffing Agencies / Resume Diff Studio / Insider Connections / Inbox) -->
+      <!-- Dynamic Workspace Views (Jobs Feed / Staffing Agencies / Resume Diff Studio / Interview Prep / Insider Connections / Inbox) -->
       <div id="web-jobs-section">
         <div class="web-filter-shell">
           <div class="web-filter-top">
@@ -3436,7 +3449,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
               <input type="text" id="filter-search" class="web-search-in" value="" placeholder="Search by role, company, tech stack, or staffing agency..." />
             </div>
             <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-              <span id="web-jobs-result-summary" style="font-size:12px;color:#94a3b8;font-weight:600;">Loading live multi-platform roles...</span>
+              <span id="web-jobs-result-summary" style="font-size:12px;color:#475569;font-weight:600;">Loading live multi-platform roles...</span>
               <button type="button" class="btn btn-sm" id="btn-reset-filters" style="display:none;">Reset Filters</button>
               <button type="button" class="btn btn-emerald btn-sm" id="btn-batch-apply">🚀 Batch Auto-Apply Selected (<span id="selected-count">0</span>)</button>
             </div>
@@ -3552,9 +3565,9 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
               </div>
             </div>
 
-            <div style="padding:10px 12px;border-radius:10px;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);margin-bottom:14px;font-size:11.5px;">
-              <div style="font-weight:800;color:#a5b4fc;margin-bottom:4px;">🏢 128 Staffing Agencies Connected</div>
-              <div style="color:#94a3b8;line-height:1.45;">
+            <div style="padding:10px 12px;border-radius:10px;background:#eef2ff;border:1px solid #c7d2fe;margin-bottom:14px;font-size:11.5px;">
+              <div style="font-weight:800;color:#3730a3;margin-bottom:4px;">🏢 128 Staffing Agencies Connected</div>
+              <div style="color:#475569;line-height:1.45;">
                 Synced with your Google Sheet of 128 IT/Engineering staffing agencies supporting W2, C2C, OPT &amp; H-1B sponsorship.
               </div>
               <button type="button" class="btn btn-sm btn-primary" id="btn-open-staffing-view" style="margin-top:8px;width:100%;justify-content:center;">Browse All 128 Agencies →</button>
@@ -3568,7 +3581,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         </div>
       </div>
 
-      <!-- Auxiliary Views Container (Staffing Agencies / Resume Diff Studio / Insider Referrals / Recruiter Inbox) -->
+      <!-- Auxiliary Views Container (Staffing Agencies / Resume Diff Studio / Interview Prep / Insider Referrals / Recruiter Inbox) -->
       <div id="web-aux-view-container" style="display:none;"></div>
     </main>
   </div>
@@ -3580,19 +3593,19 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
 
   <!-- Jobright "Orion AI" Career Copilot Drawer -->
   <div class="orion-drawer" id="orion-copilot-drawer">
-    <div style="padding:13px 16px;background:linear-gradient(135deg,#312e81,#1e1b4b);display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #4f46e5;">
+    <div style="padding:13px 16px;background:linear-gradient(135deg,#4f46e5,#7c3aed);display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #c7d2fe;">
       <div>
-        <div style="font-weight:800;font-size:14px;color:#fff;">✨ Orion AI Career Copilot</div>
-        <div style="font-size:11px;color:#a5b4fc;">24/7 Match Explainer, Bullet Tailor &amp; Interview Coach</div>
+        <div style="font-weight:800;font-size:14px;color:#ffffff;">✨ Orion AI Career Copilot</div>
+        <div style="font-size:11px;color:#e0e7ff;">24/7 Match Explainer, Bullet Tailor &amp; Interview Coach</div>
       </div>
       <button type="button" class="btn btn-sm" id="btn-close-orion">✕</button>
     </div>
-    <div id="orion-chat-messages" style="padding:14px;height:290px;overflow-y:auto;font-size:12.5px;line-height:1.5;display:flex;flex-direction:column;gap:10px;">
-      <div style="background:#17213a;padding:10px 12px;border-radius:10px;color:#e2e8f0;">
-        Hi Raviteja! I'm <strong>Orion AI</strong>. Ask me why you match any role, how to tailor your Google AI agent evaluation bullets, or click a quick prompt below:
+    <div id="orion-chat-messages" style="padding:14px;height:290px;overflow-y:auto;font-size:12.5px;line-height:1.5;display:flex;flex-direction:column;gap:10px;background:#ffffff;">
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;padding:10px 12px;border-radius:10px;color:#0f172a;">
+        Hi Raviteja! I'm <strong>Orion AI</strong>. Ask me why you match any role, how to tailor your Google AI agent evaluation bullets, or request interview prep:
       </div>
     </div>
-    <div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px;">
+    <div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px;background:#f8fafc;">
       <input type="text" id="orion-chat-input" class="search-in" style="flex:1;" placeholder="Ask Orion about a role, resume bullet, or interview..." />
       <button type="button" class="btn btn-primary btn-sm" id="btn-send-orion">Send</button>
     </div>
@@ -3703,7 +3716,8 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       const detEl = document.getElementById("web-hud-detail");
       const badgeEl = document.getElementById("web-hud-stage-badge");
       hud.classList.add("active");
-      stepEl.innerHTML = `<span class="dot-pulse"></span> <span>${escapeHtml(st.stepLabel || "Jobify Autonomous Agent Active")}</span>`;
+      const qTag = st.queuedCount > 0 ? ` (+${st.queuedCount} queued)` : "";
+      stepEl.innerHTML = `<span class="dot-pulse"></span> <span>${escapeHtml((st.stepLabel || "Jobify Autonomous Agent Active") + qTag)}</span>`;
       detEl.textContent = st.detail || "";
       if (badgeEl) {
         const isDone = st.completed || st.stage === "completed";
@@ -3755,15 +3769,15 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       if (apps.length > 0) {
         listEl.innerHTML = apps.slice(0, 6).map((a) => {
           const pStage = classifyPipelineStage(a);
-          const color = pStage === "in_flight" ? "#38bdf8" : pStage === "filled" ? "#c084fc" : "#34d399";
+          const color = pStage === "in_flight" ? "#0284c7" : pStage === "filled" ? "#7c3aed" : "#059669";
           return `
             <div class="app-item" data-open-receipt-id="${escapeHtml(a.id)}">
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <div style="font-weight:700;color:#fff;">${escapeHtml(a.company)}</div>
+                <div style="font-weight:700;color:#0f172a;">${escapeHtml(a.company)}</div>
                 <span style="font-size:10.5px;font-weight:800;color:${color};">${escapeHtml(a.stepLabel || a.status || "Applied")}</span>
               </div>
-              <div style="color:#94a3b8;font-size:11.5px;margin-top:2px;">${escapeHtml(a.role)}</div>
-              <div style="color:#6ee7b7;font-size:11px;margin-top:3px;">📄 ${escapeHtml(a.resumeUsed || "Tailored PDF")} • Click for Receipt</div>
+              <div style="color:#475569;font-size:11.5px;margin-top:2px;">${escapeHtml(a.role)}</div>
+              <div style="color:#047857;font-size:11px;font-weight:600;margin-top:3px;">📄 ${escapeHtml(a.resumeUsed || "Tailored PDF")} • Click for Receipt</div>
             </div>
           `;
         }).join("");
@@ -3809,23 +3823,23 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
           return `
             <tr data-pipeline-row-id="${escapeHtml(a.id)}" data-pipeline-stage="${escapeHtml(pStage)}">
               <td>
-                <div style="font-weight:800;color:#fff;">${escapeHtml(a.company)}</div>
-                <div style="font-size:12px;color:#94a3b8;">${escapeHtml(a.role)}</div>
+                <div style="font-weight:800;color:#0f172a;">${escapeHtml(a.company)}</div>
+                <div style="font-size:12px;color:#475569;">${escapeHtml(a.role)}</div>
               </td>
               <td>
                 <span class="kw-chip portal">${escapeHtml(a.ats || "Career Portal")}</span>
                 <div style="font-size:11px;color:#64748b;margin-top:3px;">${escapeHtml(a.location || "United States")}</div>
               </td>
               <td>
-                <div style="font-family:monospace;font-size:11.5px;color:#34d399;">✓ ${escapeHtml(a.resumeUsed || "Raviteja_velanati_Resume.pdf")}</div>
-                <div style="font-size:10.5px;color:#94a3b8;">${escapeHtml(a.resumeStatus || "Attached · 1-Page PDF")}</div>
+                <div style="font-family:monospace;font-size:11.5px;color:#047857;font-weight:600;">✓ ${escapeHtml(a.resumeUsed || "Raviteja_velanati_Resume.pdf")}</div>
+                <div style="font-size:10.5px;color:#64748b;">${escapeHtml(a.resumeStatus || "Attached · 1-Page PDF")}</div>
               </td>
               <td>
-                <span style="font-size:11.5px;color:#a5b4fc;">${escapeHtml(a.coverLetterStatus || "Ready")}</span>
+                <span style="font-size:11.5px;color:#4338ca;font-weight:600;">${escapeHtml(a.coverLetterStatus || "Ready")}</span>
               </td>
               <td>
                 ${stageLabel}
-                <div style="font-size:11px;color:#94a3b8;margin-top:3px;">${escapeHtml(a.detail || a.notes || "")}</div>
+                <div style="font-size:11px;color:#64748b;margin-top:3px;">${escapeHtml(a.detail || a.notes || "")}</div>
               </td>
               <td>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -3883,9 +3897,9 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
               .map(
                 (a) => `
               <div class="kanban-card" data-kb-id="${escapeHtml(a.id)}">
-                <div style="font-weight:700;font-size:12.5px;color:#fff;">${escapeHtml(a.company)}</div>
-                <div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">${escapeHtml(a.role)}</div>
-                <div style="font-size:10.5px;color:#34d399;margin-top:5px;">📄 ${escapeHtml(a.resumeUsed || "Tailored PDF")}</div>
+                <div style="font-weight:700;font-size:12.5px;color:#0f172a;">${escapeHtml(a.company)}</div>
+                <div style="font-size:11.5px;color:#475569;margin-top:2px;">${escapeHtml(a.role)}</div>
+                <div style="font-size:10.5px;color:#059669;font-weight:600;margin-top:5px;">📄 ${escapeHtml(a.resumeUsed || "Tailored PDF")}</div>
               </div>
             `
               )
@@ -3938,8 +3952,8 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       box.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:12px;">
           <div>
-            <div style="font-size:18px;font-weight:800;color:#fff;">🧾 What Just Got Sent to ${escapeHtml(app.ats || app.company)}</div>
-            <div style="font-size:12.5px;color:#34d399;margin-top:3px;">
+            <div style="font-size:18px;font-weight:800;color:#0f172a;">🧾 What Just Got Sent to ${escapeHtml(app.ats || app.company)}</div>
+            <div style="font-size:12.5px;color:#047857;font-weight:600;margin-top:3px;">
               ${escapeHtml(app.company)} — ${escapeHtml(app.role)} • ${fields.length} of ${fields.length} fields filled · 0 skipped · 0 generic answers
             </div>
           </div>
@@ -3948,25 +3962,25 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
           <div>
-            <div style="font-size:13px;font-weight:800;color:#6ee7b7;margin-bottom:10px;">✓ Submitted Field Values</div>
+            <div style="font-size:13px;font-weight:800;color:#047857;margin-bottom:10px;">✓ Submitted Field Values</div>
             <div style="display:flex;flex-direction:column;gap:7px;">
               ${fields.map((f) => `
-                <div style="padding:8px 10px;background:#131d36;border:1px solid #24355c;border-radius:8px;font-size:12px;">
-                  <span style="color:#34d399;font-weight:700;">✓ ${escapeHtml(f.label)}:</span>
-                  <span style="color:#f1f5f9;margin-left:6px;">${escapeHtml(f.value)}</span>
+                <div style="padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;">
+                  <span style="color:#059669;font-weight:700;">✓ ${escapeHtml(f.label)}:</span>
+                  <span style="color:#0f172a;margin-left:6px;">${escapeHtml(f.value)}</span>
                 </div>
               `).join("")}
             </div>
           </div>
 
           <div>
-            <div style="font-size:13px;font-weight:800;color:#a5b4fc;margin-bottom:10px;">✨ Tailored Résumé Diff (${escapeHtml(app.resumeUsed || "1-Page PDF")})</div>
+            <div style="font-size:13px;font-weight:800;color:#4338ca;margin-bottom:10px;">✨ Tailored Résumé Diff (${escapeHtml(app.resumeUsed || "1-Page PDF")})</div>
             <div style="display:flex;flex-direction:column;gap:10px;">
               ${diffs.map((d) => `
-                <div style="padding:10px 12px;background:#131d36;border:1px solid #24355c;border-radius:8px;font-size:12px;line-height:1.45;">
-                  <div style="font-weight:700;color:#cbd5e1;margin-bottom:5px;">${escapeHtml(d.company)} — ${escapeHtml(d.role)}</div>
-                  <div style="color:#fca5a5;background:rgba(239,68,68,0.08);padding:5px 7px;border-radius:5px;margin-bottom:5px;">− ${escapeHtml(d.before)}</div>
-                  <div style="color:#6ee7b7;background:rgba(16,185,129,0.08);padding:5px 7px;border-radius:5px;">+ ${escapeHtml(d.after)}</div>
+                <div style="padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;line-height:1.45;">
+                  <div style="font-weight:700;color:#0f172a;margin-bottom:5px;">${escapeHtml(d.company)} — ${escapeHtml(d.role)}</div>
+                  <div style="color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;padding:5px 7px;border-radius:5px;margin-bottom:5px;">− ${escapeHtml(d.before)}</div>
+                  <div style="color:#065f46;background:#ecfdf5;border:1px solid #a7f3d0;padding:5px 7px;border-radius:5px;">+ ${escapeHtml(d.after)}</div>
                 </div>
               `).join("")}
             </div>
@@ -4061,7 +4075,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         } else {
           chipsBox.style.display = "flex";
           chipsBox.innerHTML =
-            `<span style="font-size:11px;font-weight:700;color:#94a3b8;margin-right:2px;">Active filters:</span>` +
+            `<span style="font-size:11px;font-weight:700;color:#475569;margin-right:2px;">Active filters:</span>` +
             activePills
               .map(
                 (p) =>
@@ -4132,26 +4146,33 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       container.innerHTML = filtered.map((j) => {
         const checked = selectedJobIds.has(j.id) ? "checked" : "";
         const mb = j.matchBreakdown || { skills: 97, experience: 95, industry: 96 };
+        const alreadyApplied = allApplications.some(
+          (a) =>
+            (a.status === "Applied" || a.pipelineStage === "submitted") &&
+            ((j.url && a.url && String(a.url).split("#")[0] === String(j.url).split("#")[0]) ||
+              (a.company === j.company && a.role === j.title))
+        );
         return `
           <div class="job-card" data-job-id="${escapeHtml(j.id)}" data-job-company="${escapeHtml(j.company)}" data-job-ats="${escapeHtml(j.ats)}" data-posted-hours="${escapeHtml(j.postedHoursAgo)}" data-role-type="${escapeHtml(j.roleType || 'Full-Time')}" data-exp-range="${escapeHtml(j.experienceRange || '2-3')}">
             <div class="jc-top">
               <div style="display:flex; gap:12px; align-items:flex-start;">
-                <input type="checkbox" class="job-select-cb" data-id="${escapeHtml(j.id)}" ${checked} style="margin-top:4px; width:16px; height:16px; cursor:pointer;" />
+                <input type="checkbox" class="job-select-cb" data-id="${escapeHtml(j.id)}" ${checked} style="margin-top:4px; width:16px; height:16px; cursor:pointer; accent-color:#4f46e5;" />
                 <div>
                   <h2 class="jc-title">${escapeHtml(j.title)}</h2>
                   <div class="jc-meta">
-                    <strong style="color:#e2e8f0;">${escapeHtml(j.company)}</strong>
+                    <strong style="color:#0f172a;">${escapeHtml(j.company)}</strong>
                     <span>•</span>
                     <span>${escapeHtml(j.location)}</span>
-                    ${j.compensation ? `<span>•</span><span style="color:#34d399;font-weight:700;">💰 ${escapeHtml(j.compensation)}</span>` : ""}
+                    ${j.compensation ? `<span>•</span><span style="color:#059669;font-weight:700;">💰 ${escapeHtml(j.compensation)}</span>` : ""}
                     <span>•</span>
-                    <span style="color:#38bdf8;font-weight:700;">${escapeHtml(j.ats)}</span>
+                    <span style="color:#0284c7;font-weight:700;">${escapeHtml(j.ats)}</span>
                   </div>
                 </div>
               </div>
               <div style="text-align:right;">
+                ${alreadyApplied ? `<span class="match-badge" style="margin-right:4px;">✓ Applied</span>` : ""}
                 <span class="match-badge">${j.matchScore}% Match</span>
-                <div style="font-size:10.5px;color:#94a3b8;margin-top:4px;">
+                <div style="font-size:10.5px;color:#64748b;margin-top:4px;">
                   Skills ${mb.skills}% · Exp ${mb.experience}% · Fit ${mb.industry}%
                 </div>
               </div>
@@ -4159,8 +4180,8 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
 
             <div class="kw-row">
               <span class="kw-chip portal">⏱️ ${escapeHtml(j.postedLabel || "Recent")}</span>
-              <span class="kw-chip" style="background:rgba(168,85,247,0.15);color:#d8b4fe;border-color:rgba(168,85,247,0.35);">💼 ${escapeHtml(j.roleType || "Full-Time")}</span>
-              <span class="kw-chip" style="background:rgba(245,158,11,0.15);color:#fde68a;border-color:rgba(245,158,11,0.35);">📊 ${escapeHtml(j.experienceLabel || (j.experienceRange || "2-3") + " Yrs")}</span>
+              <span class="kw-chip" style="background:#f3e8ff;color:#6d28d9;border-color:#ddd6fe;">💼 ${escapeHtml(j.roleType || "Full-Time")}</span>
+              <span class="kw-chip" style="background:#fffbeb;color:#b45309;border-color:#fde68a;">📊 ${escapeHtml(j.experienceLabel || (j.experienceRange || "2-3") + " Yrs")}</span>
               <span class="kw-chip portal">🏠 ${escapeHtml(j.workMode || "Hybrid")}</span>
               ${
                 j.h1bSponsor
@@ -4171,13 +4192,13 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
               ${(j.matchedKeywords || []).slice(0, 5).map((k) => `<span class="kw-chip">✓ ${escapeHtml(k)}</span>`).join("")}
             </div>
 
-            <div style="font-size:13px; color:var(--muted); line-height:1.5;">
+            <div style="font-size:13px; color:#475569; line-height:1.5;">
               ${escapeHtml((j.description || "").slice(0, 220))}...
             </div>
 
             <div class="jc-actions">
-              <div style="font-size:12px; color:var(--muted);">
-                Tailors <code style="color:#a5b4fc;">${escapeHtml(j.resumeFileName || ("Raviteja_velanati_" + j.company.replace(/[^a-zA-Z0-9]+/g, "_") + ".pdf"))}</code> + Bypasses SSO/Login in Background
+              <div style="font-size:12px; color:#64748b;">
+                Tailors <code style="color:#4338ca;font-weight:600;">${escapeHtml(j.resumeFileName || ("Raviteja_velanati_" + j.company.replace(/[^a-zA-Z0-9]+/g, "_") + ".pdf"))}</code> + Bypasses SSO/Login in Background
               </div>
               <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <button type="button" class="btn btn-sm btn-save-to-tracker" data-job-id="${escapeHtml(j.id)}">📌 Save to Tracker</button>
@@ -4405,6 +4426,11 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         kbBoard.style.display = "none";
         auxSec.style.display = "block";
         renderAuxResumeDiffStudio(auxSec);
+      } else if (viewName === "interview") {
+        jobsSec.style.display = "none";
+        kbBoard.style.display = "none";
+        auxSec.style.display = "block";
+        renderAuxInterviewPrepStudio(auxSec);
       } else if (viewName === "insider") {
         jobsSec.style.display = "none";
         kbBoard.style.display = "none";
@@ -4424,7 +4450,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         <div class="tsenta-panel" id="staffing-agencies-directory-panel">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:14px;">
             <div>
-              <div style="font-size:16.5px;font-weight:800;color:#fff;">🏢 128 IT &amp; Engineering Staffing Agencies (Synced from Google Sheet)</div>
+              <div style="font-size:16.5px;font-weight:800;color:#0f172a;">🏢 128 IT &amp; Engineering Staffing Agencies (Synced from Google Sheet)</div>
               <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">
                 All <strong id="staffing-total-count">${agencies.length}</strong> staffing firms from your Google Sheet supporting <strong>H-1B Transfer, F-1 OPT / STEM OPT E-Verify, W2 &amp; C2C</strong> placements
               </div>
@@ -4457,10 +4483,10 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
             (a, idx) => `
           <div class="job-card" style="padding:13px 15px;" data-staffing-card="${escapeHtml(a.name)}">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px;">
-              <div style="font-weight:800;font-size:14px;color:#fff;">${escapeHtml(a.name)}</div>
+              <div style="font-weight:800;font-size:14px;color:#0f172a;">${escapeHtml(a.name)}</div>
               <span class="kw-chip portal" style="font-size:10.5px;">${escapeHtml(a.portalType)}</span>
             </div>
-            <div style="font-size:11.5px;color:#34d399;margin-bottom:10px;">🛂 H-1B Sponsor • STEM OPT E-Verify • W2 / C2C</div>
+            <div style="font-size:11.5px;color:#059669;font-weight:600;margin-bottom:10px;">🛂 H-1B Sponsor • STEM OPT E-Verify • W2 / C2C</div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
               <button type="button" class="btn btn-sm btn-emerald btn-staffing-auto-apply" data-idx="${idx}" data-name="${escapeHtml(a.name)}" data-url="${escapeHtml(a.url)}" data-portal="${escapeHtml(a.portalType)}" style="flex:1.2;">⚡ Auto-Apply</button>
               <button type="button" class="btn btn-sm btn-staffing-pull-jobs" data-name="${escapeHtml(a.name)}" style="flex:1;">🔍 Pull Jobs</button>
@@ -4514,20 +4540,20 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       };
       container.innerHTML = `
         <div class="tsenta-panel">
-          <div style="font-size:16px;font-weight:800;color:#fff;margin-bottom:6px;">📄 Tsenta-Style Side-by-Side Résumé Diff Studio</div>
+          <div style="font-size:16px;font-weight:800;color:#0f172a;margin-bottom:6px;">📄 Tsenta-Style Side-by-Side Résumé Diff Studio</div>
           <div style="font-size:12.5px;color:var(--muted);margin-bottom:14px;">
-            Every role gets a dedicated 1-page LaTeX PDF (<code style="color:#34d399;">Raviteja_velanati_&lt;Company&gt;.pdf</code>) with exact keyword injection &amp; bullet restructuring:
+            Every role gets a dedicated 1-page LaTeX PDF (<code style="color:#047857;font-weight:700;">Raviteja_velanati_&lt;Company&gt;.pdf</code>) with exact keyword injection &amp; bullet restructuring:
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-            <div style="padding:14px;background:#131d36;border:1px solid #ef4444;border-radius:10px;">
-              <div style="font-weight:800;color:#fca5a5;margin-bottom:8px;">− Baseline Master Bullet (Before)</div>
-              <div style="font-size:12.5px;color:#e2e8f0;line-height:1.5;">
+            <div style="padding:14px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;">
+              <div style="font-weight:800;color:#b91c1c;margin-bottom:8px;">− Baseline Master Bullet (Before)</div>
+              <div style="font-size:12.5px;color:#1e293b;line-height:1.5;">
                 Built sandboxed web applications and evaluation tools for testing AI agents at Google AI.
               </div>
             </div>
-            <div style="padding:14px;background:#131d36;border:1px solid #10b981;border-radius:10px;">
-              <div style="font-weight:800;color:#6ee7b7;margin-bottom:8px;">+ Tailored Role-Specific Bullet (${escapeHtml(sampleApp.resumeUsed)})</div>
-              <div style="font-size:12.5px;color:#e2e8f0;line-height:1.5;">
+            <div style="padding:14px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;">
+              <div style="font-weight:800;color:#047857;margin-bottom:8px;">+ Tailored Role-Specific Bullet (${escapeHtml(sampleApp.resumeUsed)})</div>
+              <div style="font-size:12.5px;color:#0f172a;line-height:1.5;">
                 Architected 13 full-stack React &amp; TypeScript sandboxed web applications for autonomous browser AI agent evaluation across 460+ workflows, cutting initialization latency by 70%.
               </div>
             </div>
@@ -4536,21 +4562,67 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       `;
     }
 
+    function renderAuxInterviewPrepStudio(container) {
+      const topJob = allJobs[0] || { company: "Anthropic", title: "AI Platform & Evaluation Engineer", description: "" };
+      container.innerHTML = `
+        <div class="tsenta-panel">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+            <div>
+              <div style="font-size:16px;font-weight:800;color:#0f172a;">🎤 AI Interview Prep &amp; Role Cheat-Sheet Studio</div>
+              <div style="font-size:12.5px;color:var(--muted);">Generate a tailored 60-second elevator pitch, technical architecture Q&amp;As &amp; quantified STAR stories</div>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" id="web-btn-gen-prep">🎤 Generate Cheat-Sheet</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+            <input type="text" id="web-prep-comp" class="search-in" value="${escapeHtml(topJob.company)}" placeholder="Company Name" />
+            <input type="text" id="web-prep-role" class="search-in" value="${escapeHtml(topJob.title)}" placeholder="Role Title" />
+          </div>
+          <div id="web-prep-out" style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;font-size:13px;color:#334155;line-height:1.55;">
+            Click <strong>🎤 Generate Cheat-Sheet</strong> above to synthesize role-specific Q&amp;As grounded in your Google AI agent evaluation &amp; 48-persona synthetic pipeline metrics.
+          </div>
+        </div>
+      `;
+      document.getElementById("web-btn-gen-prep")?.addEventListener("click", async (ev) => {
+        const btn = ev.currentTarget;
+        const comp = document.getElementById("web-prep-comp")?.value.trim() || "Anthropic";
+        const role = document.getElementById("web-prep-role")?.value.trim() || "AI Platform Engineer";
+        btn.disabled = true;
+        btn.textContent = "⏳ Synthesizing...";
+        const res = extensionConnected
+          ? await sendExtensionRpc("JOBIFY_WEB_GENERATE_INTERVIEW_PREP", { jobMeta: { company: comp, title: role } }, 15000)
+          : null;
+        btn.disabled = false;
+        btn.textContent = "🎤 Generate Cheat-Sheet";
+        const p = res?.prep;
+        const out = document.getElementById("web-prep-out");
+        if (p && out) {
+          out.innerHTML = `
+            <div style="margin-bottom:10px;"><strong style="color:#3730a3;">🎯 60-Second Elevator Pitch:</strong><div style="margin-top:4px;color:#0f172a;">${escapeHtml(p.elevatorPitch)}</div></div>
+            <div><strong style="color:#047857;">🧠 Key Technical Questions:</strong>
+              <ul style="padding-left:18px;margin-top:6px;">
+                ${(p.technicalQuestions || []).map((q) => `<li style="margin-bottom:6px;"><strong style="color:#0f172a;">${escapeHtml(q.question)}</strong> — ${escapeHtml(q.keyPoints)}</li>`).join("")}
+              </ul>
+            </div>
+          `;
+        }
+      });
+    }
+
     function renderAuxInsiderConnections(container) {
       container.innerHTML = `
         <div class="tsenta-panel">
-          <div style="font-size:16px;font-weight:800;color:#fff;margin-bottom:6px;">🤝 Jobright Insider Connections &amp; Warm Referral Copilot</div>
+          <div style="font-size:16px;font-weight:800;color:#0f172a;margin-bottom:6px;">🤝 Jobright Insider Connections &amp; Warm Referral Copilot</div>
           <div style="font-size:12.5px;color:var(--muted);margin-bottom:14px;">
             Verified alumni (Clark University), hiring managers &amp; technical recruiters across your target companies:
           </div>
           <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;">
             ${allJobs.slice(0, 6).map((j) => `
-              <div style="padding:14px;background:#131d36;border:1px solid var(--border);border-radius:10px;">
-                <div style="font-weight:800;color:#fff;">${escapeHtml(j.company)} — ${escapeHtml(j.title)}</div>
+              <div style="padding:14px;background:#f8fafc;border:1px solid var(--border);border-radius:10px;">
+                <div style="font-weight:800;color:#0f172a;">${escapeHtml(j.company)} — ${escapeHtml(j.title)}</div>
                 ${(j.insiderConnections || []).map((ic) => `
-                  <div style="margin-top:8px;padding:8px;background:#0b1120;border-radius:7px;font-size:12px;">
-                    <div style="color:#38bdf8;font-weight:700;">${escapeHtml(ic.role)} <span style="color:#34d399;">(${escapeHtml(ic.badge)})</span></div>
-                    <div style="color:#94a3b8;font-size:11px;margin-top:2px;">${escapeHtml(ic.hook)}</div>
+                  <div style="margin-top:8px;padding:8px;background:#ffffff;border:1px solid #e2e8f0;border-radius:7px;font-size:12px;">
+                    <div style="color:#0284c7;font-weight:700;">${escapeHtml(ic.role)} <span style="color:#059669;">(${escapeHtml(ic.badge)})</span></div>
+                    <div style="color:#475569;font-size:11px;margin-top:2px;">${escapeHtml(ic.hook)}</div>
                   </div>
                 `).join("")}
               </div>
@@ -4563,16 +4635,16 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     function renderAuxRecruiterInbox(container) {
       container.innerHTML = `
         <div class="tsenta-panel">
-          <div style="font-size:16px;font-weight:800;color:#fff;margin-bottom:6px;">📨 Autonomous Recruiter &amp; OTP Email Router (ravitejavelanati11@gmail.com)</div>
+          <div style="font-size:16px;font-weight:800;color:#0f172a;margin-bottom:6px;">📨 Autonomous Recruiter &amp; OTP Email Router (ravitejavelanati11@gmail.com)</div>
           <div style="font-size:12.5px;color:var(--muted);margin-bottom:14px;">
             Dual-Engine Gmail IMAP + Chrome Session reader automatically intercepts Workday activation links, Greenhouse security codes, and recruiter replies:
           </div>
           <div style="display:flex;flex-direction:column;gap:8px;font-size:12.5px;">
-            <div style="padding:11px 14px;background:#131d36;border-left:3px solid #10b981;border-radius:8px;">
-              <strong style="color:#34d399;">✓ Auto-Verified:</strong> Workday Candidate Account Activation &amp; Greenhouse Security Code Reader active on <code>ravitejavelanati11@gmail.com</code>
+            <div style="padding:11px 14px;background:#ecfdf5;border:1px solid #a7f3d0;border-left:3px solid #10b981;border-radius:8px;color:#065f46;">
+              <strong style="color:#047857;">✓ Auto-Verified:</strong> Workday Candidate Account Activation &amp; Greenhouse Security Code Reader active on <code>ravitejavelanati11@gmail.com</code>
             </div>
-            <div style="padding:11px 14px;background:#131d36;border-left:3px solid #38bdf8;border-radius:8px;">
-              <strong style="color:#38bdf8;">✓ Google &amp; Microsoft OAuth SSO:</strong> Automatic Account Chooser &amp; Privacy Consent handler active for Microsoft Careers, Workday, Ashby &amp; Greenhouse
+            <div style="padding:11px 14px;background:#f0f9ff;border:1px solid #bae6fd;border-left:3px solid #0284c7;border-radius:8px;color:#0c4a6e;">
+              <strong style="color:#0369a1;">✓ Google &amp; Microsoft OAuth SSO:</strong> Automatic Account Chooser &amp; Privacy Consent handler active for Microsoft Careers, Workday, Ashby &amp; Greenhouse
             </div>
           </div>
         </div>
@@ -4667,13 +4739,13 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       if (!q) return;
       inp.value = "";
       const box = document.getElementById("orion-chat-messages");
-      box.innerHTML += `<div style="background:#312e81;padding:9px 12px;border-radius:10px;color:#fff;align-self:flex-end;">${escapeHtml(q)}</div>`;
+      box.innerHTML += `<div style="background:#4f46e5;padding:9px 12px;border-radius:10px;color:#ffffff;align-self:flex-end;">${escapeHtml(q)}</div>`;
       const resp = await fetch("/api/orion-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: q, topJob: allJobs[0] || {} })
       }).then((r) => r.json()).catch(() => ({ reply: "You are a 96% match based on your 13 AI evaluation sandboxes and 48-persona synthetic pipelines at Google AI!" }));
-      box.innerHTML += `<div style="background:#17213a;padding:10px 12px;border-radius:10px;color:#e2e8f0;">${escapeHtml(resp.reply || "")}</div>`;
+      box.innerHTML += `<div style="background:#f8fafc;border:1px solid #e2e8f0;padding:10px 12px;border-radius:10px;color:#0f172a;">${escapeHtml(resp.reply || "")}</div>`;
       box.scrollTop = box.scrollHeight;
     });
 
@@ -4961,6 +5033,229 @@ UNIVERSAL_AUTH_GAUNTLET_HTML = r"""<!DOCTYPE html>
 """
 
 
+PORTAL_ADVANCED_SANDBOX_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Career Opportunity — Apply Online</title>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "JobPosting",
+    "title": "Staff Agentic Payments Engineer",
+    "hiringOrganization": {
+      "@type": "Organization",
+      "name": "Stripe"
+    },
+    "jobLocation": {
+      "@type": "Place",
+      "address": {
+        "@type": "PostalAddress",
+        "addressLocality": "San Francisco",
+        "addressRegion": "CA",
+        "addressCountry": "US"
+      }
+    },
+    "description": "Architect autonomous payment risk evaluation agents, Python and TypeScript distributed microservices, Kubernetes execution sandboxes, and real-time LLM observability pipelines at Stripe."
+  }
+  </script>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; background: #ffffff; color: #0f172a; margin: 0; padding: 32px 20px 90px; }
+    .shell { max-width: 720px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 28px; box-shadow: 0 4px 16px rgba(15,23,42,0.05); }
+    .row { margin-bottom: 14px; }
+    label { display: block; font-size: 13px; font-weight: 600; color: #1e293b; margin-bottom: 5px; }
+    input, select { width: 100%; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; box-sizing: border-box; }
+    .btn { background: #4f46e5; color: #ffffff; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 700; cursor: pointer; }
+    .btn-sec { background: #f8fafc; color: #0f172a; border: 1px solid #cbd5e1; padding: 8px 14px; border-radius: 8px; font-weight: 600; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <!-- Cookie trap that MUST NEVER be clicked -->
+  <div id="onetrust-banner-sdk" style="position:fixed;bottom:8px;left:8px;background:#f8fafc;border:1px solid #cbd5e1;padding:8px 12px;border-radius:8px;font-size:12px;">
+    <span>We use cookies to personalize site analytics.</span>
+    <button type="button" id="onetrust-accept-btn-handler">Accept All Cookies</button>
+  </div>
+
+  <div class="shell">
+    <h1 style="margin:0 0 6px;font-size:22px;">Staff Agentic Payments Engineer</h1>
+    <p style="color:#475569;font-size:13.5px;margin:0 0 20px;">San Francisco, CA • Full-Time • $210,000 - $260,000</p>
+
+    <form id="portal-adv-form">
+      <!-- 1. Localized hidden multi-child dropzone around <input type="file"> -->
+      <div class="row">
+        <label for="adv-resume">Upload Resume / CV (PDF) *</label>
+        <div class="dropzone-ui" style="padding:14px;border:1px dashed #94a3b8;border-radius:10px;background:#f8fafc;">
+          <span id="dropzone-status">Drag &amp; drop PDF resume here</span>
+          <div class="dropzone-hidden-wrapper" style="display:none;">
+            <input id="adv-resume" name="resume" type="file" accept=".pdf,application/pdf" required />
+            <span class="helper">Max 10MB PDF</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Open Shadow DOM custom web-component fields -->
+      <div class="row"><portal-shadow-input data-label="First Name *" data-name="firstName" data-type="text"></portal-shadow-input></div>
+      <div class="row"><portal-shadow-input data-label="Last Name *" data-name="lastName" data-type="text"></portal-shadow-input></div>
+      <div class="row"><portal-shadow-input data-label="Email Address *" data-name="email" data-type="email"></portal-shadow-input></div>
+      <div class="row"><portal-shadow-input data-label="Phone Number *" data-name="phone" data-type="tel"></portal-shadow-input></div>
+
+      <!-- 3. Empty Workday-style repeater requiring 'Add' click + MM/YYYY spinbuttons -->
+      <section class="row" data-automation-id="workExperienceSection" style="padding:14px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <strong>Work Experience *</strong>
+          <button type="button" id="wd-add-work-btn" data-automation-id="Add" class="btn-sec">+ Add Work Experience</button>
+        </div>
+        <div id="wd-work-mount"></div>
+      </section>
+
+      <!-- 4. Enterprise screening selects -->
+      <div class="row">
+        <label for="adv-edu-level">Highest Level of Education Completed *</label>
+        <select id="adv-edu-level" required>
+          <option value="">Select One</option>
+          <option value="High School">High School</option>
+          <option value="Bachelor's Degree">Bachelor's Degree</option>
+          <option value="Master's Degree">Master's Degree</option>
+          <option value="Doctorate">Doctorate</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label for="adv-student">Are you currently enrolled as a full-time student? *</label>
+        <select id="adv-student" required>
+          <option value="">Select One</option>
+          <option value="Yes">Yes</option>
+          <option value="No">No</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label for="adv-bg-check">Are you willing to undergo a standard pre-employment background check? *</label>
+        <select id="adv-bg-check" required>
+          <option value="">Select One</option>
+          <option value="Yes">Yes</option>
+          <option value="No">No</option>
+        </select>
+      </div>
+
+      <div id="adv-err" role="alert" style="display:none;color:#dc2626;background:#fef2f2;border:1px solid #fecaca;padding:10px;border-radius:8px;margin-bottom:12px;font-size:13px;"></div>
+      <button type="submit" id="adv-submit-btn" class="btn">Submit Application</button>
+    </form>
+
+    <div id="submit-banner" style="display:none;margin-top:18px;padding:16px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;color:#065f46;font-weight:700;">
+      Application Submitted! Thank you for applying to Stripe.
+    </div>
+  </div>
+
+  <script>
+    class PortalShadowInput extends HTMLElement {
+      connectedCallback() {
+        if (this.shadowRoot) return;
+        const sr = this.attachShadow({ mode: "open" });
+        const lbl = this.getAttribute("data-label") || "Field";
+        const nm = this.getAttribute("data-name") || "field";
+        const tp = this.getAttribute("data-type") || "text";
+        sr.innerHTML = `
+          <style>
+            label { display:block; font-size:13px; font-weight:600; color:#1e293b; margin-bottom:5px; }
+            input { width:100%; padding:9px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px; box-sizing:border-box; }
+          </style>
+          <div class="sh-field">
+            <label for="sh-${nm}">${lbl}</label>
+            <input id="sh-${nm}" name="${nm}" type="${tp}" required />
+          </div>
+        `;
+      }
+    }
+    customElements.define("portal-shadow-input", PortalShadowInput);
+
+    window.__PORTAL_ADV_AUDIT__ = {
+      cookieClicked: false,
+      repeaterExpanded: false,
+      submitted: false,
+      values: null
+    };
+
+    document.getElementById("onetrust-accept-btn-handler").addEventListener("click", () => {
+      window.__PORTAL_ADV_AUDIT__.cookieClicked = true;
+    });
+
+    document.getElementById("adv-resume").addEventListener("change", (e) => {
+      const f = e.target.files?.[0];
+      if (f) document.getElementById("dropzone-status").textContent = "Attached: " + f.name;
+    });
+
+    document.getElementById("wd-add-work-btn").addEventListener("click", () => {
+      if (document.querySelector("[data-automation-id='workExperience-1']")) return;
+      window.__PORTAL_ADV_AUDIT__.repeaterExpanded = true;
+      document.getElementById("wd-work-mount").innerHTML = `
+        <div data-automation-id="workExperience-1" style="padding:12px;background:#ffffff;border:1px solid #cbd5e1;border-radius:8px;margin-top:8px;">
+          <div class="row"><label for="we-title">Job Title *</label><input id="we-title" data-automation-id="jobTitle" type="text" required /></div>
+          <div class="row"><label for="we-comp">Company *</label><input id="we-comp" data-automation-id="company" type="text" required /></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div>
+              <label for="we-start-mm">Start Date Month (MM) *</label>
+              <input id="we-start-mm" role="spinbutton" aria-label="Month" placeholder="MM" type="text" />
+            </div>
+            <div>
+              <label for="we-start-yy">Start Date Year (YYYY) *</label>
+              <input id="we-start-yy" role="spinbutton" aria-label="Year" placeholder="YYYY" type="text" />
+            </div>
+          </div>
+        </div>
+      `;
+    });
+
+    document.getElementById("portal-adv-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const getShVal = (nm) => document.querySelector(`portal-shadow-input[data-name='${nm}']`)?.shadowRoot?.querySelector("input")?.value?.trim() || "";
+      const fn = getShVal("firstName");
+      const ln = getShVal("lastName");
+      const em = getShVal("email");
+      const ph = getShVal("phone");
+      const resFile = document.getElementById("adv-resume").files?.[0] || null;
+      const weTitle = document.getElementById("we-title")?.value?.trim() || "";
+      const weComp = document.getElementById("we-comp")?.value?.trim() || "";
+      const weMm = document.getElementById("we-start-mm")?.value?.trim() || "";
+      const weYy = document.getElementById("we-start-yy")?.value?.trim() || "";
+      const eduLvl = document.getElementById("adv-edu-level").value;
+      const student = document.getElementById("adv-student").value;
+      const bgCheck = document.getElementById("adv-bg-check").value;
+
+      const vals = {
+        firstName: fn,
+        lastName: ln,
+        email: em,
+        phone: ph,
+        resumeName: resFile?.name || null,
+        resumeBytes: resFile?.size || 0,
+        weTitle,
+        weComp,
+        weMm,
+        weYy,
+        eduLvl,
+        student,
+        bgCheck
+      };
+      window.__PORTAL_ADV_AUDIT__.values = vals;
+
+      if (!fn || !ln || !em || !ph || !resFile || !weTitle || !weComp || !eduLvl || !student || !bgCheck) {
+        const err = document.getElementById("adv-err");
+        err.style.display = "block";
+        err.textContent = "Please complete all required fields, upload your PDF resume, and add your Work Experience.";
+        return;
+      }
+      document.getElementById("adv-err").style.display = "none";
+      window.__PORTAL_ADV_AUDIT__.submitted = true;
+      document.getElementById("portal-adv-form").style.display = "none";
+      document.getElementById("submit-banner").style.display = "block";
+    });
+  </script>
+</body>
+</html>
+"""
+
+
 class JobifyHandler(BaseHTTPRequestHandler):
     def _send_cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -5062,6 +5357,8 @@ class JobifyHandler(BaseHTTPRequestHandler):
             return self._send_html(AI_ERROR_HEAL_SANDBOX_HTML)
         if path == "/sandbox/universal-auth-gauntlet":
             return self._send_html(UNIVERSAL_AUTH_GAUNTLET_HTML)
+        if path == "/sandbox/portal-advanced":
+            return self._send_html(PORTAL_ADVANCED_SANDBOX_HTML)
         if path == "/api/sandbox-otp":
             return self._send_json(200, {"ok": True, **SANDBOX_OTP_STORE})
         return self._send_json(
@@ -5079,6 +5376,7 @@ class JobifyHandler(BaseHTTPRequestHandler):
                     f"http://127.0.0.1:{PORT}/sandbox/tricky-submit",
                     f"http://127.0.0.1:{PORT}/sandbox/ai-error-heal",
                     f"http://127.0.0.1:{PORT}/sandbox/universal-auth-gauntlet",
+                    f"http://127.0.0.1:{PORT}/sandbox/portal-advanced",
                 ],
             },
         )

@@ -926,7 +926,8 @@
     const badgeTxt = shadowRoot.getElementById("jb-hud-badge-txt");
 
     if (badgeTxt) {
-      badgeTxt.textContent = st.running ? "Jobify Auto-Apply Active" : "Jobify Status";
+      const qSuffix = st.queuedCount > 0 ? ` · +${st.queuedCount} Queued` : "";
+      badgeTxt.textContent = st.running ? `Jobify Auto-Apply Active${qSuffix}` : `Jobify Status${qSuffix}`;
     }
     if (stepEl) stepEl.textContent = st.stepLabel || "Working...";
     if (detEl) detEl.textContent = st.detail || "";
@@ -1031,6 +1032,15 @@
           }
         </div>
 
+        <div class="jb-row" style="margin-top:8px;">
+          <button class="jb-btn secondary" id="jb-btn-cover-inline" style="flex:1;padding:6px 8px;font-size:11px;" title="Generate & copy/download tailored Cover Letter PDF">
+            📝 Cover Letter
+          </button>
+          <button class="jb-btn secondary" id="jb-btn-prep-inline" style="flex:1;padding:6px 8px;font-size:11px;" title="Generate role-specific Interview Prep Cheat-Sheet in Hub">
+            🎤 Interview Prep
+          </button>
+        </div>
+
         <div class="jb-footer-strip">
           <label class="jb-toggle-lbl" title="Click final Submit automatically when all fields pass validation">
             <input type="checkbox" id="jb-chk-autosubmit" ${autoSubOn ? "checked" : ""} style="accent-color:#0d9488;cursor:pointer;" />
@@ -1129,6 +1139,47 @@
       body.querySelector("#jb-dl-resume")?.addEventListener("click", () => {
         if (latestTailoredRecord?.pdfBase64) {
           downloadBase64Pdf(latestTailoredRecord.pdfBase64, latestTailoredRecord.fileName);
+        }
+      });
+
+      body.querySelector("#jb-btn-cover-inline")?.addEventListener("click", async (e) => {
+        const b = e.currentTarget;
+        b.disabled = true;
+        b.textContent = "⏳ Drafting...";
+        const resp = await safeSendMessage({
+          type: "GENERATE_COVER_LETTER",
+          payload: { jobMeta: pageMeta, tone: "Concise & Technical" }
+        });
+        b.disabled = false;
+        b.textContent = "📝 Cover Letter";
+        if (resp?.ok && resp.record) {
+          try {
+            await navigator.clipboard.writeText(resp.record.coverLetter || "");
+          } catch (_) {}
+          if (resp.record.pdfBase64) {
+            downloadBase64Pdf(resp.record.pdfBase64, resp.record.fileName);
+          }
+          showToast(`📝 Cover letter copied & downloaded!`, "success");
+        } else {
+          showToast(`⚠️ ${resp?.error || "Cover letter failed"}`, "warn");
+        }
+      });
+
+      body.querySelector("#jb-btn-prep-inline")?.addEventListener("click", async (e) => {
+        const b = e.currentTarget;
+        b.disabled = true;
+        b.textContent = "⏳ Preparing...";
+        const resp = await safeSendMessage({
+          type: "GENERATE_INTERVIEW_PREP",
+          payload: { jobMeta: pageMeta }
+        });
+        b.disabled = false;
+        b.textContent = "🎤 Interview Prep";
+        if (resp?.ok && resp.record) {
+          showToast(`🎤 Interview Prep ready — opening Hub!`, "success");
+          safeSendMessage({ type: "OPEN_DASHBOARD", payload: { tab: "interview" } });
+        } else {
+          showToast(`⚠️ ${resp?.error || "Interview prep failed"}`, "warn");
         }
       });
 
@@ -1808,6 +1859,22 @@
           reply(res);
           return;
         }
+        if (data.type === "JOBIFY_WEB_GENERATE_INTERVIEW_PREP") {
+          const res = await safeSendMessage({
+            type: "GENERATE_INTERVIEW_PREP",
+            payload: data.payload || {}
+          });
+          reply(res);
+          return;
+        }
+        if (data.type === "JOBIFY_WEB_COMPILE_RESUME_PDF") {
+          const res = await safeSendMessage({
+            type: "COMPILE_TAILORED_RESUME_PDF",
+            payload: data.payload || {}
+          });
+          reply(res);
+          return;
+        }
         if (data.type === "JOBIFY_WEB_ENQUEUE_BATCH") {
           const enq = await safeSendMessage({
             type: "ENQUEUE_AUTOPILOT",
@@ -1843,6 +1910,34 @@
     return meta.pageType === "application_form" || meta.pageType === "auth_wall";
   }
 
+  const handsFreeTriggeredUrls = new Set();
+
+  async function maybeRunHandsFreeAutoApply() {
+    if (!IS_TOP_FRAME || hiddenForTab || autoApplyStatus?.running) return false;
+    if (appState?.settings?.handsFreePortalAutoApply !== true) return false;
+    if (pageMeta?.pageType !== "application_form") return false;
+    if (window.__JOBIFY_ADAPTERS__?.detectSubmissionConfirmation?.(document)) return false;
+    const cleanUrl = location.href.split("#")[0];
+    if (handsFreeTriggeredUrls.has(cleanUrl)) return false;
+    const tracked = getTrackedStatusForPage();
+    if (tracked === "Applied" && appState?.settings?.duplicateApplyGuard !== false) return false;
+
+    handsFreeTriggeredUrls.add(cleanUrl);
+    drawerOpen = false;
+    if (shadowRoot) renderDrawer();
+    await safeSendMessage({
+      type: "START_FULL_AUTO_APPLY",
+      payload: {
+        options: {
+          autoSubmit: appState?.settings?.autoSubmitEnabled !== false,
+          tailorResume: true,
+          jobMeta: pageMeta
+        }
+      }
+    });
+    return true;
+  }
+
   // Boot & SPA lifecycle watcher
   (async () => {
     if (/^https?:/i.test(location.protocol)) {
@@ -1866,13 +1961,33 @@
       if (IS_TOP_FRAME && appState?.settings?.autoShowCopilotWidget !== false) {
         drawerOpen = shouldAutoOpenPanel(pageMeta);
         mountWidget();
+        await maybeRunHandsFreeAutoApply();
       }
     }
 
     if (IS_TOP_FRAME) {
       let lastHref = location.href;
       let lastPageType = pageMeta?.pageType || "other";
-      let hydrationChecksLeft = 8;
+      let lastHeadingSig = (document.querySelector("h1, [data-automation-id='jobPostingHeader']")?.innerText || "").trim().slice(0, 80);
+      let hydrationChecksLeft = 10;
+      let domMutatedSinceLastTick = false;
+
+      if (document.documentElement) {
+        try {
+          const domObserver = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+              if (m.target && (m.target.id === "jobify-copilot-host" || m.target.closest?.("#jobify-copilot-host"))) {
+                continue;
+              }
+              if (m.addedNodes?.length || m.removedNodes?.length) {
+                domMutatedSinceLastTick = true;
+                break;
+              }
+            }
+          });
+          domObserver.observe(document.documentElement, { childList: true, subtree: true });
+        } catch (_) {}
+      }
 
       const pollTimer = setInterval(async () => {
         try {
@@ -1891,8 +2006,10 @@
 
           if (location.href !== lastHref) {
             lastHref = location.href;
-            hydrationChecksLeft = 8;
+            hydrationChecksLeft = 10;
+            domMutatedSinceLastTick = false;
             await refreshStateAndAnalyze();
+            lastHeadingSig = (document.querySelector("h1, [data-automation-id='jobPostingHeader']")?.innerText || "").trim().slice(0, 80);
             const isConfirmedNow = Boolean(window.__JOBIFY_ADAPTERS__?.detectSubmissionConfirmation?.(document));
             if (isConfirmedNow && !autoApplyStatus?.running) {
               drawerOpen = false;
@@ -1919,20 +2036,35 @@
               } else if (shadowRoot) {
                 renderDrawer();
               }
+              await maybeRunHandsFreeAutoApply();
             } else if (shadowRoot && !autoApplyStatus?.running) {
               drawerOpen = false;
               renderDrawer();
             }
-          } else if (hydrationChecksLeft > 0) {
-            hydrationChecksLeft--;
-            if (!pageMeta?.isRelevantPage || (pageMeta?.description || "").length < 150 || !pageMeta?.hasCandidateForm) {
+          } else if (hydrationChecksLeft > 0 || domMutatedSinceLastTick) {
+            if (hydrationChecksLeft > 0) hydrationChecksLeft--;
+            const wasMutated = domMutatedSinceLastTick;
+            domMutatedSinceLastTick = false;
+            const curHeading = (document.querySelector("h1, [data-automation-id='jobPostingHeader']")?.innerText || "").trim().slice(0, 80);
+            const headingChanged = Boolean(curHeading && curHeading !== lastHeadingSig);
+
+            if (
+              headingChanged ||
+              wasMutated ||
+              !pageMeta?.isRelevantPage ||
+              (pageMeta?.description || "").length < 150 ||
+              !pageMeta?.hasCandidateForm
+            ) {
               const freshMeta = window.__JOBIFY_ADAPTERS__?.extractJobMetadata?.(document);
               if (
                 freshMeta?.isRelevantPage &&
                 (!pageMeta?.isRelevantPage ||
+                  headingChanged ||
+                  freshMeta.title !== pageMeta?.title ||
                   freshMeta.pageType !== pageMeta?.pageType ||
                   (freshMeta.description || "").length > (pageMeta?.description || "").length + 80)
               ) {
+                lastHeadingSig = curHeading;
                 await refreshStateAndAnalyze();
                 injectInlineAiButtons();
                 if (appState?.settings?.autoShowCopilotWidget !== false) {
@@ -1945,6 +2077,7 @@
                   } else if (shadowRoot && !shadowRoot.activeElement) {
                     renderDrawer();
                   }
+                  await maybeRunHandsFreeAutoApply();
                 }
               }
             }

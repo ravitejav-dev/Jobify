@@ -1309,3 +1309,118 @@ Return JSON with this exact structure:
     modelUsed: "deterministic-doctor-fallback"
   };
 }
+
+export async function generateInterviewPrepWithGemini(jobMeta = {}, profile = {}, settings = {}) {
+  const comp = String(jobMeta?.company || "Target Company").trim();
+  const role = String(jobMeta?.title || "Senior AI & Platform Engineer").trim();
+  const jdText = String(jobMeta?.description || "").slice(0, 6500);
+  const kwScan = analyzeJobKeywords(jdText, profile);
+  const topKws = [
+    ...(kwScan.matched || []).map((k) => k.keyword),
+    ...(kwScan.missing || []).map((k) => k.keyword)
+  ].slice(0, 8);
+
+  const buildFallbackPrep = () => ({
+    company: comp,
+    role,
+    elevatorPitch: `I'm Raviteja Velanati, a Senior AI Solutions Engineer at GlobalLogic supporting Google AI's Responsible AI and Novel AI workflows. Over the past 3.5+ years, I architected 13 full-stack sandboxed web applications for autonomous browser AI agent evaluation, built a 48-persona synthetic data seeding platform across 9 cloud services with 100% numerical QA accuracy, and ranked #1 of 11 engineers in platform throughput across 2,000+ batches while cutting Docker/Kubernetes warm-pool startup latency by 70%. I'm excited to bring this production agentic evaluation and cloud systems experience to ${comp} as ${role}.`,
+    technicalQuestions: [
+      {
+        question: `How would you architect a deterministic evaluation harness and sandbox environment for ${comp}'s ${role} workflows?`,
+        keyPoints: `Walk through your 13 full-stack TypeScript/React/Python sandboxed web apps at Google AI, warm-pool Docker/Kubernetes orchestration (70% faster initialization), Playwright trajectory capture, and OpenTelemetry tracing that cut mean-time-to-diagnosis by 60%.`
+      },
+      {
+        question: `How do you guarantee data quality, schema fidelity, and zero drift across multi-service synthetic data or RAG pipelines?`,
+        keyPoints: `Detail your 48-persona synthetic seeding pipeline spanning 9 cloud services (Email, Chat, Search, Drive, Photos, Calendar) backed by an automated Python Data Integrity QA gate enforcing 100% post-injection numerical accuracy and 10,000+ daily LangGraph regression checks.`
+      },
+      {
+        question: `How did you achieve a 10x throughput speedup on large-scale multimodal data pipelines under tight deadlines?`,
+        keyPoints: `Explain re-engineering the 8-language video segmentation pipeline (1,800+ recordings -> 40,000+ clips) using parallelized worker pools, deterministic chunking, and automated retry orchestration in 10 days.`
+      },
+      {
+        question: `Deep dive into ${topKws.slice(0, 4).join(", ") || "Python, TypeScript, Kubernetes, and LLM serving"} trade-offs in production.`,
+        keyPoints: `Connect ${comp}'s stack directly to your low-latency Python/C++ LLM serving backends, 19 Side-by-Side (SxS) RLHF/adversarial evaluation plugins, and CI/CD promptfoo regression gates.`
+      }
+    ],
+    behavioralStories: [
+      {
+        competency: "High-Throughput Ownership & Execution (#1 of 11 Engineers)",
+        starSummary: `Situation: 460+ multi-stage evaluation workflows risked bottlenecks. Action: Built reusable Python ingestion/deduplication pipelines and 19 React/TypeScript SxS plugins while mentoring teammates. Result: Ranked #1 of 11 developers across 2,000+ batches and 55 P0 requests with zero queue backlog.`
+      },
+      {
+        competency: "Unblocking Critical Production Bottlenecks Under Pressure",
+        starSummary: `Situation: Multimodal data pipeline stalled across 1,800+ multilingual recordings. Action: Re-architected parallel segmentation and QA verification in Python. Result: Delivered 40,000+ verified clips across 8 languages with a 10x speedup in 10 days, unblocking 3+ engineering teams.`
+      },
+      {
+        competency: "0-to-1 System Design & Observability",
+        starSummary: `Situation: Autonomous browser agents failed silently on complex e-commerce/fintech DOM flows. Action: Built 13 realistic sandboxed web apps plus React/Node.js telemetry dashboards. Result: Cut failure diagnosis time by 60% and caught 40+ adversarial edge cases pre-release.`
+      }
+    ],
+    questionsToAsk: [
+      `What are the biggest bottlenecks today in ${comp}'s evaluation, reliability, or deployment loop for ${role}?`,
+      `How does the team balance rapid model/feature iteration with deterministic regression gating and production observability?`,
+      `What does a standout 90-day engineering impact look like for someone joining this pod?`
+    ]
+  });
+
+  const systemInstruction = `You are a Principal Engineering Interview Coach preparing Raviteja Velanati for a ${role} interview at ${comp}. Ground every answer strictly in Raviteja's verified experience (GlobalLogic / Google AI client: 13 full-stack sandboxed web apps, 48-persona synthetic pipelines across 9 cloud services with 100% QA accuracy, #1 of 11 platform throughput across 2,000+ batches, 19 SxS plugins, 70% faster Docker/K8s warm-pool sandboxes, 10x multimodal pipeline speedup; MassDigi C#/C++; Clark University M.S. CS). Return strictly valid JSON.`;
+
+  const prompt = `Target Company: ${comp}
+Target Role: ${role}
+Key Detected Stack: ${topKws.join(", ") || "Python, TypeScript, React, Kubernetes, LLM Evaluation"}
+Job Description:
+${jdText || `${role} at ${comp}`}
+
+Return JSON with this exact schema:
+{
+  "elevatorPitch": "Crisp 65-90 word first-person 30-second intro tailored to ${comp} and ${role}",
+  "technicalQuestions": [
+    { "question": "Role-specific technical/system-design question", "keyPoints": "Concrete architecture & metric-backed talking points from Raviteja's work" }
+  ],
+  "behavioralStories": [
+    { "competency": "Core leadership/engineering trait", "starSummary": "Concise STAR story with exact metrics" }
+  ],
+  "questionsToAsk": ["3 sharp engineering questions to ask the interviewer at ${comp}"]
+}`;
+
+  try {
+    const res = await callGemini({
+      prompt,
+      systemInstruction,
+      requestedModel: settings?.primaryModel || "gemini-3.5-flash",
+      jsonMode: true,
+      temperature: 0.35,
+      maxOutputTokens: 2500,
+      timeoutMs: 9500,
+      settings
+    });
+    const parsed = parseJsonResponse(res.text);
+    const fb = buildFallbackPrep();
+    return {
+      prep: {
+        company: comp,
+        role,
+        elevatorPitch: String(parsed?.elevatorPitch || fb.elevatorPitch).trim(),
+        technicalQuestions:
+          Array.isArray(parsed?.technicalQuestions) && parsed.technicalQuestions.length >= 2
+            ? parsed.technicalQuestions.slice(0, 5)
+            : fb.technicalQuestions,
+        behavioralStories:
+          Array.isArray(parsed?.behavioralStories) && parsed.behavioralStories.length >= 2
+            ? parsed.behavioralStories.slice(0, 4)
+            : fb.behavioralStories,
+        questionsToAsk:
+          Array.isArray(parsed?.questionsToAsk) && parsed.questionsToAsk.length >= 2
+            ? parsed.questionsToAsk.slice(0, 4)
+            : fb.questionsToAsk
+      },
+      modelUsed: res.modelUsed
+    };
+  } catch (err) {
+    if (!settings?.geminiApiKey) {
+      return { prep: buildFallbackPrep(), modelUsed: "deterministic-interview-prep" };
+    }
+    return { prep: buildFallbackPrep(), modelUsed: "deterministic-interview-prep" };
+  }
+}
+

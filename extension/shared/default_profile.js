@@ -20,6 +20,8 @@ export const DEFAULT_SETTINGS = {
   autoSaveSubmittedJobs: true,
   autoAttachResumePdf: true,
   autoSubmitEnabled: true,
+  handsFreePortalAutoApply: false,
+  duplicateApplyGuard: true,
   defaultResumeVariant: "one_page", // "one_page" | "master"
   autopilotMode: "full_auto" // "full_auto" (autonomous tailor -> apply -> fill -> submit) | "safe_review" (pause before final submit)
 };
