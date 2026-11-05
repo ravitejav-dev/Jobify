@@ -1894,6 +1894,22 @@
           reply(res);
           return;
         }
+        if (data.type === "JOBIFY_WEB_UPDATE_PROFILE") {
+          const res = await safeSendMessage({
+            type: "UPDATE_PROFILE",
+            payload: data.payload || {}
+          });
+          reply(res);
+          return;
+        }
+        if (data.type === "JOBIFY_WEB_UPDATE_SETTINGS") {
+          const res = await safeSendMessage({
+            type: "UPDATE_SETTINGS",
+            payload: data.payload || {}
+          });
+          reply(res);
+          return;
+        }
       } catch (err) {
         reply({ ok: false, error: err?.message || String(err) });
       }

@@ -757,7 +757,27 @@
       }
     }
     const rect = el.getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0 && el.type !== "file") return false;
+    if (rect.width === 0 && rect.height === 0 && el.type !== "file") {
+      if (el.type === "radio" || el.type === "checkbox") {
+        const root = el.getRootNode?.() || document;
+        const proxyEl =
+          (el.id && root.querySelector?.(`label[for="${CSS.escape(el.id)}"]`)) ||
+          el.closest("label") ||
+          el.parentElement;
+        const pStyle = proxyEl ? window.getComputedStyle(proxyEl) : null;
+        const pRect = proxyEl?.getBoundingClientRect?.();
+        if (
+          !pRect ||
+          (pRect.width === 0 && pRect.height === 0) ||
+          pStyle?.display === "none" ||
+          pStyle?.visibility === "hidden"
+        ) {
+          return false;
+        }
+      } else {
+        return false;
+      }
+    }
     const docRight = rect.right + (window.scrollX || window.pageXOffset || 0);
     const docBottom = rect.bottom + (window.scrollY || window.pageYOffset || 0);
     if (!isChoiceOrSpecial && (rect.width <= 4 || rect.height <= 4 || docRight < -50 || docBottom < -2500)) {
@@ -766,49 +786,101 @@
     return true;
   }
 
-  // Extract structured { primaryLabel, helperText, fullLabel } so helper prose never hijacks primary label intent
+  // Extract structured { primaryLabel, helperText, fullLabel } so helper prose or radio "Yes"/"No" option labels never hijack primary label intent
   function getFieldContext(el) {
     if (!el) return { primaryLabel: "", helperText: "", fullLabel: "" };
     const primaryParts = [];
     const helperParts = [];
     const rootNode = el.getRootNode?.() || document;
     const shadowHost = rootNode instanceof ShadowRoot ? rootNode.host : null;
+    const isRadioChoice = el.type === "radio" || el.getAttribute?.("role") === "radio";
+    const PLACEHOLDER_LABEL_RE = /^(select(\s+one)?|please\s+select|choose(\s+one)?|--\s*select\s*--|toggle\s+flyout)$/i;
 
-    if (el.id) {
-      const explicitLabel =
-        rootNode.querySelector?.(`label[for="${CSS.escape(el.id)}"]`) ||
-        document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-      if (explicitLabel) primaryParts.push(explicitLabel.innerText || explicitLabel.textContent);
+    if (!isRadioChoice) {
+      if (el.id) {
+        const explicitLabel =
+          rootNode.querySelector?.(`label[for="${CSS.escape(el.id)}"]`) ||
+          document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+        if (explicitLabel) primaryParts.push(explicitLabel.innerText || explicitLabel.textContent);
+      }
+      const parentLabel = el.closest("label") || shadowHost?.closest?.("label");
+      if (parentLabel) primaryParts.push(parentLabel.innerText || parentLabel.textContent);
     }
-    const parentLabel = el.closest("label") || shadowHost?.closest?.("label");
-    if (parentLabel) primaryParts.push(parentLabel.innerText || parentLabel.textContent);
 
     const ariaLabelledBy = el.getAttribute("aria-labelledby") || shadowHost?.getAttribute?.("aria-labelledby");
     if (ariaLabelledBy) {
       for (const id of ariaLabelledBy.split(/\s+/)) {
         const ref = rootNode.getElementById?.(id) || document.getElementById(id);
-        if (ref) primaryParts.push(ref.innerText || ref.textContent);
+        if (!ref || ref === el) continue;
+        const refTxt = String(ref.innerText || ref.textContent || "").replace(/\s+/g, " ").trim();
+        if (refTxt && !PLACEHOLDER_LABEL_RE.test(refTxt) && !(isRadioChoice && /^(yes|no|true|false)$/i.test(refTxt))) {
+          primaryParts.push(refTxt);
+        }
       }
     }
 
     const ariaLabel = el.getAttribute("aria-label") || shadowHost?.getAttribute?.("aria-label") || shadowHost?.getAttribute?.("label");
-    if (ariaLabel && !/^toggle flyout$/i.test(ariaLabel.trim())) {
+    if (ariaLabel && !PLACEHOLDER_LABEL_RE.test(ariaLabel.trim()) && !(isRadioChoice && /^(yes|no|true|false)$/i.test(ariaLabel.trim()))) {
       primaryParts.push(ariaLabel);
     }
 
     const containerSelector =
-      ".ashby-application-form-field-entry, [class*='fieldEntry'], .text-input-wrapper, .select, .field, .form-group, .application-question, [data-automation-id*='formField'], [data-jobify-field], fieldset";
+      ".ashby-application-form-field-entry, [class*='fieldEntry'], .text-input-wrapper, .select, .field, .form-group, .application-question, [data-automation-id*='formField'], [data-automation-id*='question' i], [data-uxi-widget-type*='question' i], [role='radiogroup'], [data-jobify-field], fieldset";
     const fieldContainer = el.closest(containerSelector) || shadowHost?.closest?.(containerSelector);
     if (fieldContainer) {
-      const lblEl = fieldContainer.querySelector(
-        "label, legend, .ashby-application-form-question-title, .field-label, .label, h4, [data-automation-id='formLabel']"
+      const groupAriaLblBy = fieldContainer.getAttribute("aria-labelledby");
+      if (groupAriaLblBy) {
+        for (const gid of groupAriaLblBy.split(/\s+/)) {
+          const gref = rootNode.getElementById?.(gid) || document.getElementById(gid);
+          if (gref && gref !== el) {
+            const gtxt = String(gref.innerText || gref.textContent || "").replace(/\s+/g, " ").trim();
+            if (gtxt && !PLACEHOLDER_LABEL_RE.test(gtxt)) primaryParts.push(gtxt);
+          }
+        }
+      }
+      const groupAriaLbl = fieldContainer.getAttribute("aria-label");
+      if (groupAriaLbl && !PLACEHOLDER_LABEL_RE.test(groupAriaLbl.trim())) {
+        primaryParts.push(groupAriaLbl);
+      }
+
+      // Prioritise group/question prompt elements (legend, formLabel, Workday richText, question titles) over option <label>s!
+      const promptCandidates = Array.from(
+        fieldContainer.querySelectorAll(
+          "legend, [data-automation-id='formLabel'], [data-automation-id='richText'], .ashby-application-form-question-title, .field-label, .question-label, h3, h4, label"
+        )
       );
-      if (lblEl) primaryParts.push(lblEl.innerText || lblEl.textContent);
+      for (const cand of promptCandidates) {
+        if (cand.tagName === "LABEL") {
+          const forId = cand.getAttribute("for");
+          if (forId && el.id && forId !== el.id) {
+            const targetInput = rootNode.getElementById?.(forId) || document.getElementById(forId);
+            if (targetInput && (targetInput.type === "radio" || targetInput.type === "checkbox")) continue;
+          }
+          if (isRadioChoice && (cand.contains(el) || cand.querySelector("input[type='radio'], input[type='checkbox']"))) {
+            continue;
+          }
+          if (isRadioChoice && forId) {
+            const targetInput = rootNode.getElementById?.(forId) || document.getElementById(forId);
+            if (targetInput && targetInput.type === "radio") continue;
+          }
+        }
+        const cTxt = String(cand.innerText || cand.textContent || "").replace(/\s+/g, " ").trim();
+        if (!cTxt || PLACEHOLDER_LABEL_RE.test(cTxt)) continue;
+        if (isRadioChoice && /^(yes|no|true|false)$/i.test(cTxt)) continue;
+        primaryParts.push(cTxt);
+        break;
+      }
 
       const descEl = fieldContainer.querySelector(
         "[id$='-description'], .ashby-application-form-question-description, .field-description, p"
       );
-      if (descEl) helperParts.push(descEl.innerText || descEl.textContent);
+      if (descEl) {
+        const dTxt = String(descEl.innerText || descEl.textContent || "").replace(/\s+/g, " ").trim();
+        if (dTxt) {
+          if (primaryParts.length === 0) primaryParts.push(dTxt);
+          else helperParts.push(dTxt);
+        }
+      }
     }
 
     const ariaDesc = el.getAttribute("aria-describedby");
@@ -821,7 +893,7 @@
     }
 
     if (primaryParts.length === 0) {
-      if (el.placeholder) primaryParts.push(el.placeholder);
+      if (el.placeholder && !PLACEHOLDER_LABEL_RE.test(el.placeholder.trim())) primaryParts.push(el.placeholder);
       if (el.name) primaryParts.push(el.name);
       if (el.id) primaryParts.push(el.id);
       if (el.dataset?.automationId) primaryParts.push(el.dataset.automationId);
@@ -918,6 +990,13 @@
     if (/(^|[_-\s])required([_-\s]|$)/i.test(cls) && !/not[_-]?required|unrequired|optional/i.test(cls)) {
       return true;
     }
+    if (
+      node.querySelector?.(
+        ".required, [class*='required'], [aria-label*='required' i], abbr[title*='required' i], [data-automation-id='required'], [data-automation-id='asterisk']"
+      )
+    ) {
+      return true;
+    }
     try {
       const afterContent = window.getComputedStyle(node, "::after")?.content || "";
       const beforeContent = window.getComputedStyle(node, "::before")?.content || "";
@@ -940,17 +1019,54 @@
     const c = ctx || getFieldContext(el);
     if (/\*/.test(c.primaryLabel || "") || /\brequired\b/i.test(c.primaryLabel || "")) return true;
     const wrapper = el.closest(
-      ".select-shell, .field, .form-group, .application-question, .ashby-application-form-field-entry, [class*='fieldEntry'], [data-automation-id*='formField'], fieldset"
+      ".select-shell, .field, .form-group, .application-question, .ashby-application-form-field-entry, [class*='fieldEntry'], [data-automation-id*='formField'], [data-automation-id*='question' i], fieldset"
     );
     if (wrapper) {
       if (hasCssRequiredMarker(wrapper)) return true;
-      if (wrapper.querySelector("input[required], select[required], textarea[required], [aria-required='true'], [aria-invalid='true']")) {
+      if (
+        wrapper.querySelector(
+          "input[required], select[required], textarea[required], [aria-required='true'], [aria-invalid='true'], abbr[title*='required' i], [data-automation-id='required']"
+        )
+      ) {
         return true;
       }
-      const lbl = wrapper.querySelector("label, legend, .field-label, .label, .ashby-application-form-question-title");
+      const lbl = wrapper.querySelector(
+        "label, legend, [data-automation-id='formLabel'], [data-automation-id='richText'], .field-label, .label, .ashby-application-form-question-title"
+      );
       if (lbl && (/\*/.test(lbl.textContent || "") || hasCssRequiredMarker(lbl))) return true;
     }
     return false;
+  }
+
+  // Deterministic binary Yes/No polarity classifier when options are strictly ["Yes", "No"] and AI is offline or timed out
+  function resolveBinaryYesNoFallback(labelRaw, profile = {}) {
+    const q = String(labelRaw || "").toLowerCase();
+    const eeo = profile?.workAuthAndEEO || {};
+    if (!q) return ["Yes"];
+    if (/sponsorship|require.*visa|need.*visa|future.*visa/i.test(q)) {
+      return [eeo.requireSponsorship || "Yes"];
+    }
+    if (/authorized\s*to\s*work|legally\s*authorized|eligible\s*to\s*work|right\s*to\s*work/i.test(q)) {
+      return [eeo.authorizedUS || "Yes"];
+    }
+    if (
+      /previously\s*(worked|employed|contracted|interned)|former\s*(employee|contractor|intern|worker)|currently\s*(employed|working)\s*(at|by|for)|relativ|family\s*member|conflict\s*of\s*interest|non[- ]?compet|non[- ]?solicit|restrictive\s*covenant|bound\s*by|prevent.*working|government\s*(official|employee|agency)|public\s*official|security\s*clearanc|active\s*clearanc|deloitte|pwc|pricewaterhouse|kpmg|ernst|auditor|\bu\.?s\.?\s*(citizen|person)\b|permanent\s*resident|felon|convict|criminal|debar|sanction|embargo|suspend|terminat|disciplin|currently\s*enrolled|full[- ]time\s*student|hispanic|latino|transgender|disabil|veteran/i.test(
+        q
+      )
+    ) {
+      return ["No"];
+    }
+    return ["Yes"];
+  }
+
+  function isBinaryYesNoOptionList(optionLabels = []) {
+    const cleaned = (optionLabels || [])
+      .map((s) => String(s || "").replace(/\s+/g, " ").trim())
+      .filter((s) => s && !/^(select(\s+one)?|please\s+select|choose(\s+one)?|--)/i.test(s));
+    if (cleaned.length < 2 || cleaned.length > 3) return false;
+    const hasYes = cleaned.some((s) => /^(yes|true|i\s+agree|i\s+confirm|yes,?\s+)/i.test(s));
+    const hasNo = cleaned.some((s) => /^(no|false|i\s+do\s+not\s+agree|no,?\s+)/i.test(s));
+    return hasYes && hasNo;
   }
 
   // Order-safe label resolver verified against real Greenhouse, Ashby, Workday & Lever questions
@@ -979,7 +1095,7 @@
       return { skip: true };
     }
     if (/exercise\s*submission|take[- ]?home|coding\s*challenge/i.test(pLow)) return null;
-    if (/^if\s+(yes|no|other|applicable|so|you\s+selected)\b/i.test(pLow.trim())) {
+    if (/^if\s+(yes|no|other|applicable|so|you\s+selected|you\s+answered)\b/i.test(pLow.trim()) && !isFieldRequired(el, ctx)) {
       return { skip: true };
     }
     if (/publications?,?\s*papers?\s*or\s*research|google\s*scholar/i.test(pLow) && !isFieldRequired(el, ctx)) {
@@ -992,60 +1108,106 @@
       return [p.linkedin, p.github || p.portfolio].filter(Boolean);
     }
 
-    // 1. Legal / Arbitration / Consent / AI Policy / Sanctions / Government / Clearance / Non-Compete / Age / Background Check
-    if (/arbitrat|read\s+the\s+.*agreement|terms\s+of\s+the\s+agreement|confirm\s+i\s+have\s+read|read\s+and\s+underst(ood|and)/i.test(pLow)) {
+    // 1. Legal / Arbitration / Consent / AI Policy / Sanctions / Export Control / Government / Auditor / Clearance / Non-Compete / Age / Background Check
+    if (
+      /arbitrat|read\s+the\s+.*agreement|terms\s+of\s+the\s+agreement|confirm\s+i\s+have\s+read|read\s+and\s+underst(ood|and)|certify\s+that.*?(true|accurate|complete)|acknowledge\s+and\s+agree|privacy\s+(notice|policy|statement)|consent\s+to\s+(electronic|receive|processing|data)/i.test(
+        pLow
+      )
+    ) {
       return [
         "I understand and agree",
         "I will read the arbitration agreement",
         "I confirm",
         "I agree",
+        "I acknowledge",
         "Yes"
       ];
     }
     if (/\bai\s+policy\b/i.test(pLow)) {
       return ["Yes", "I agree", "I acknowledge"];
     }
-    if (/sanctions|export\s+controls|cuba,\s*iran/i.test(`${pLow} ${hLow}`)) {
+    if (
+      /sanctions|embargo|cuba|iran|north\s*korea|syria|crimea|citizen\s+or\s+resident\s+of\s+any\s+country\s+subject/i.test(
+        `${pLow} ${hLow}`
+      )
+    ) {
+      return ["None of the above", "No"];
+    }
+    if (/\bu\.?s\.?\s*person\b|export\s+control.*?(citizen|permanent\s*resident|asylee|refugee)/i.test(`${pLow} ${hLow}`)) {
+      return [eeo.requireSponsorship === "Yes" ? "No" : "Yes", "No"];
+    }
+    if (/export\s+controls?/i.test(`${pLow} ${hLow}`)) {
       return ["None of the above", "No"];
     }
     if (
-      /government\s*(employee|official|agency|employment|service)|worked\s*for\s*(the\s*)?(u\.?s\.?\s*|federal\s*)?government|security\s*clearance|active\s*clearance|hold.*clearance|relatives?\s*(employed|working)|family\s*members?\s*(employed|working)/i.test(
+      /relatives?\s*(employed|working|at|who\s*work)|family\s*members?\s*(employed|working|at|who\s*work)|immediate\s*family|related\s+to\s+any(one|\s+employee|\s+director|\s+officer|\s+board)|close\s+personal\s+relationship|conflict\s+of\s+interest/i.test(
+        pLow
+      )
+    ) {
+      return [eeo.relativesAtCompany || "No", "No", "None"];
+    }
+    if (/security\s*clearance|active\s*clearance|hold.*clearance/i.test(pLow)) {
+      return [eeo.securityClearance || eeo.governmentOrClearance || "No", "No", "None"];
+    }
+    if (
+      /government\s*(employee|official|agency|employment|service|entity)|public\s*official|worked\s*for\s*(the\s*)?(u\.?s\.?\s*|federal\s*|state\s*|foreign\s*)?government|revolving\s*door|current\s*or\s*former.*?(auditor|deloitte|pwc|pricewaterhouse|ernst\s*(&|and)\s*young|\bey\b|kpmg)|employed\s+by.*?(deloitte|pwc|ernst|kpmg)/i.test(
         pLow
       )
     ) {
       return [eeo.governmentOrClearance || "No", "No", "None"];
     }
-    if (/non-?compete|non-?solicitation|bound\s+by\s+any\s+agreements?|restrict\s+your\s+ability\s+to\s+work/i.test(pLow)) {
+    if (
+      /non-?compete|non-?solicitation|restrictive\s*covenant|post-?employment\s*(restriction|obligation|agreement)|bound\s+by\s+any\s+(agreements?|contracts?|obligations?)|restrict\s+your\s+ability\s+to\s+work|prevent\s+or\s+restrict\s+you\s+from\s+working|contractual\s+(obligation|restriction)/i.test(
+        pLow
+      )
+    ) {
+      return [eeo.nonCompeteRestriction || "No", "No"];
+    }
+    if (
+      /felony|convicted|criminal\s*(offense|history|record)|pleaded\s+guilty|debarred|suspended|excluded.*federal|oig|gsa\s*exclusion|terminated\s+for\s+cause|asked\s+to\s+resign|disciplinary\s+action/i.test(
+        pLow
+      )
+    ) {
       return ["No"];
     }
-    if (/18\s*years|over\s*18|at\s*least\s*18|background\s*check/i.test(pLow)) {
+    if (/18\s*years|over\s*18|at\s*least\s*18|age\s*of\s*18|legal\s*age\s*to\s*work|minimum\s*age/i.test(pLow)) {
+      return [eeo.over18 || "Yes", "Yes"];
+    }
+    if (/background\s*(check|screen|investig)|drug\s*(test|screen)|reference\s*check|pre-?employment\s*screen/i.test(pLow)) {
+      return [eeo.backgroundCheckConsent || "Yes", "Yes", "I consent"];
+    }
+    if (
+      /meet\s*(all\s*)?(the\s*)?(minimum|basic|required)\s*(qualifications?|requirements?)|essential\s*functions|perform\s+the\s+(duties|responsibilities|essential)|able\s+to\s+perform.*?(with\s+or\s+without|duties|functions)|driver'?s\s*licen[sc]e|reliable\s+transportation/i.test(
+        pLow
+      )
+    ) {
       return ["Yes"];
     }
 
     // 2. Work Authorization, Visa Status, Citizenship, Sponsorship, Prior Employment, Relocation, Hybrid, Salary, Start Date
     // (MUST run BEFORE geographic country/state/city matchers because work-auth labels contain "in the country where...")
     if (
-      /what\s*is\s*your\s*(current\s*)?(u\.?s\.?\s*)?(visa|immigration|work\s*authorization)\s*(type|status|classification|category)|current\s*(u\.?s\.?\s*)?visa|visa\s*(type|category|classification|status)/i.test(
+      /what\s*is\s*your\s*(current\s*)?(u\.?s\.?\s*)?(visa|immigration|work\s*authorization)\s*(type|status|classification|category)|current\s*(u\.?s\.?\s*)?visa|visa\s*(type|category|classification|status)|select\s*your\s*(current\s*)?visa/i.test(
         pLow
       ) &&
       !/require|need|future|will\s*you/i.test(pLow)
     ) {
       return [eeo.visaStatus || "H-1B", "H-1B", "H1B", "H-1B Visa", "H-1B Specialty Occupation"];
     }
-    if (/are\s+you\s+a\s+(u\.?s\.?\s*|united\s+states\s*)?(citizen|permanent\s+resident)/i.test(pLow)) {
+    if (/are\s+you\s+a\s+(u\.?s\.?\s*|united\s+states\s*)?(citizen|permanent\s+resident|national|green\s+card)/i.test(pLow)) {
       return ["No"];
     }
     if (/citizenship|citizen\s*of|nationality|country\s*of\s*(citizenship|origin|nationality)/i.test(combinedLow)) {
       return [eeo.citizenship || "India", "India", "Indian"];
     }
-    if (/authorized\s*to\s*work|legally\s*authorized|eligible\s*to\s*work|right\s*to\s*work/i.test(pLow)) {
+    if (/authorized\s*to\s*work|legally\s*authorized|eligible\s*to\s*work|right\s*to\s*work|legally\s*permitted\s*to\s*work/i.test(pLow)) {
       return [eeo.authorizedUS || "Yes", "Yes"];
     }
-    if (/sponsorship|require.*visa|need.*visa|future.*visa|h-?1b|opt\s*status/i.test(pLow)) {
+    if (/sponsorship|require.*visa|need.*visa|future.*visa|immigration\s*support|employer\s*petition|h-?1b\s*transfer|opt\s*status/i.test(pLow)) {
       return [eeo.requireSponsorship || "Yes", "Yes", eeo.visaStatus || "H-1B"];
     }
     if (
-      /previously\s*(worked|employed|applied|interviewed)|former\s*(employee|contractor)|ever\s*(worked|interviewed)|interviewed\s*(at|with)\b|worked\s*for\s+.*\bin\s+the\s+past|currently\s+or\s+have\s+you\s+previously\s+worked/i.test(
+      /previously\s*(worked|employed|applied|interviewed|contracted|interned)|former\s*(employee|contractor|worker|intern|associate|contingent)|ever\s*(worked|been\s*employed|interviewed)|interviewed\s*(at|with)\b|worked\s*(at|for)\s+.*\b(before|previously|in\s+the\s+past)|currently\s+or\s+have\s+you\s+previously\s+worked|currently\s*(employed|working)\s*(at|by|for|with)\b|have\s+you\s+ever\s+been\s+employed\s+by|current\s+or\s+former\s+(employee|worker|contractor)/i.test(
         pLow
       )
     ) {
@@ -1062,7 +1224,7 @@
       return [eeo.willingToRelocate || "Yes", "Yes"];
     }
     if (
-      /working\s*in[- ]?person|come\s*into\s*the\s*office|days?\s*(per|a)\s*week|\bhybrid\b|on-?site|in-?office|work\s*arrangement|business\s*trips|willing\s*to\s*travel/i.test(
+      /working\s*in[- ]?person|come\s*into\s*the\s*office|days?\s*(per|a)\s*week|\bhybrid\b|on-?site|in-?office|work\s*arrangement|business\s*trips|willing\s*to\s*travel|commut(e|ing)\s+distance|able\s+to\s+commute/i.test(
         pLow
       )
     ) {
@@ -1366,34 +1528,49 @@
   }
 
   function collectComboboxOptions(comboEl, shell) {
+    const filterPlaceholders = (els) =>
+      els.filter((el) => {
+        const txt = String(el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+        if (!txt || /^(select\s*one|please\s*select|choose\s*one|--\s*select\s*--)$/i.test(txt)) return false;
+        return true;
+      });
+
     // 1. Exact React-Select option ID prefix or aria-controls listbox
     const ctrlId = comboEl.getAttribute("aria-controls") || comboEl.getAttribute("aria-owns");
     if (ctrlId) {
       const lb = document.getElementById(ctrlId);
       if (lb) {
-        const opts = Array.from(lb.querySelectorAll("[role='option'], .select__option, [data-automation-id='promptOption']"));
+        const opts = filterPlaceholders(
+          Array.from(
+            lb.querySelectorAll(
+              "[role='option'], .select__option, [data-automation-id='promptOption'], [data-automation-id='selectOption'], li"
+            )
+          )
+        );
         if (opts.length > 0) return opts;
       }
     }
     if (comboEl.id) {
-      const byIdPrefix = Array.from(
-        document.querySelectorAll(`[id^="react-select-${CSS.escape(comboEl.id)}-option-"]`)
+      const byIdPrefix = filterPlaceholders(
+        Array.from(document.querySelectorAll(`[id^="react-select-${CSS.escape(comboEl.id)}-option-"]`))
       );
       if (byIdPrefix.length > 0) return byIdPrefix;
     }
     if (shell) {
-      const localOpts = Array.from(shell.querySelectorAll(".select__option, [role='option']"));
+      const localOpts = filterPlaceholders(Array.from(shell.querySelectorAll(".select__option, [role='option']")));
       if (localOpts.length > 0) return localOpts;
     }
-    // Fallback to visible listbox options in body portals (excluding intl-tel-input country list items)
-    return Array.from(
-      document.querySelectorAll(
-        ".select__option, [role='option']:not(.iti__country), [data-automation-id='promptOption'], li[role='menuitem']"
-      )
-    ).filter((el) => {
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    });
+    // Fallback to visible listbox options in body portals (including Workday wd-popup portals)
+    return filterPlaceholders(
+      Array.from(
+        document.querySelectorAll(
+          ".select__option, [role='option']:not(.iti__country), [data-automation-id='promptOption'], [data-automation-id='selectOption'], [data-uxi-widget-type='selectinputoption'], ul[role='listbox'] li, li[role='menuitem']"
+        )
+      ).filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      })
+    );
   }
 
   function typeIntoAutocompleteInput(inp, queryText) {
@@ -1421,7 +1598,7 @@
     inp.dispatchEvent(new KeyboardEvent("keyup", { key: "a", code: "KeyA", keyCode: 65, bubbles: true }));
   }
 
-  async function fillComboboxControl(comboEl, desiredCandidates, ctx, jobMeta, fillOpenEndedWithAI) {
+  async function fillComboboxControl(comboEl, desiredCandidates, ctx, jobMeta, fillOpenEndedWithAI, profile = null) {
     const shell =
       comboEl.closest(".select-shell, .select__container") ||
       comboEl.closest(".select__control")?.parentElement ||
@@ -1433,7 +1610,7 @@
       comboEl.scrollIntoView({ block: "nearest" });
     } catch (_) {}
 
-    // Step 1: Open menu cleanly
+    // Step 1: Open menu cleanly & poll up to 5 ticks for async Workday wd-popup portals
     comboEl.focus();
     if (toggleBtn && comboEl.getAttribute("aria-expanded") !== "true") {
       dispatchRealClick(toggleBtn);
@@ -1443,47 +1620,72 @@
         new KeyboardEvent("keydown", { key: "ArrowDown", code: "ArrowDown", keyCode: 40, which: 40, bubbles: true })
       );
     }
-    await sleep(160);
 
-    let optionEls = collectComboboxOptions(comboEl, shell);
+    let optionEls = [];
+    for (let waitTick = 0; waitTick < 5; waitTick++) {
+      await sleep(110);
+      optionEls = collectComboboxOptions(comboEl, shell);
+      if (optionEls.length > 0) break;
+      if (waitTick === 1 && comboEl.tagName === "BUTTON") {
+        try {
+          comboEl.click();
+        } catch (_) {}
+        comboEl.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true })
+        );
+      }
+    }
 
-    // Step 2: If static options appeared, match either via deterministic candidates or AI option picker
+    // Step 2: If static options appeared, match via deterministic candidates -> AI option picker -> Binary Yes/No fallback
     if (optionEls.length > 0) {
       let candidates = desiredCandidates;
-      if (!candidates && fillOpenEndedWithAI && ctx.primaryLabel) {
-        const optionLabels = optionEls
-          .map((o) => (o.innerText || o.textContent || "").trim())
-          .filter(Boolean)
-          .slice(0, 20);
-        if (optionLabels.length > 0) {
-          try {
-            const resp = await Promise.race([
-              chrome.runtime.sendMessage({
-                type: "ANSWER_APPLICATION_QUESTION",
-                payload: {
-                  questionCtx: {
-                    label: ctx.primaryLabel,
-                    fieldType: "select",
-                    options: optionLabels
-                  },
-                  jobMeta,
-                  saveToVault: false
-                }
-              }),
-              sleep(8000).then(() => null)
-            ]);
-            if (resp?.ok && resp.answer) {
-              candidates = [resp.answer];
-            }
-          } catch (_) {}
-        }
+      const optionLabels = optionEls
+        .map((o) => (o.innerText || o.textContent || "").replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .slice(0, 24);
+
+      if (!candidates && fillOpenEndedWithAI && ctx.primaryLabel && optionLabels.length > 0) {
+        try {
+          const resp = await Promise.race([
+            chrome.runtime.sendMessage({
+              type: "ANSWER_APPLICATION_QUESTION",
+              payload: {
+                questionCtx: {
+                  label: ctx.primaryLabel,
+                  fieldType: "select",
+                  options: optionLabels
+                },
+                jobMeta,
+                saveToVault: false
+              }
+            }),
+            sleep(8000).then(() => null)
+          ]);
+          if (resp?.ok && resp.answer) {
+            candidates = [resp.answer];
+          }
+        } catch (_) {}
+      }
+
+      if (!candidates && isBinaryYesNoOptionList(optionLabels)) {
+        candidates = resolveBinaryYesNoFallback(ctx.primaryLabel || ctx.fullLabel, profile || {});
       }
 
       const chosen = findMatchingOptionElement(optionEls, candidates);
       if (chosen) {
         dispatchRealClick(chosen);
+        await sleep(80);
+        if (comboEl.tagName === "BUTTON" && !hasComboboxSelection(comboEl)) {
+          try {
+            const innerNode = chosen.querySelector("div, span") || chosen;
+            innerNode.click();
+            chosen.dispatchEvent(
+              new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true })
+            );
+          } catch (_) {}
+          await sleep(60);
+        }
         highlightFilledElement(comboEl);
-        await sleep(90);
         return true;
       }
 
@@ -3712,7 +3914,7 @@
     return null;
   }
 
-  async function askAiToPickOption(label, optionLabels, jobMeta) {
+  async function askAiToPickOption(label, optionLabels, jobMeta, profile = null) {
     const cleanOptions = (optionLabels || []).map((o) => String(o || "").trim()).filter(Boolean).slice(0, 24);
     if (!label || cleanOptions.length === 0) return null;
     try {
@@ -3737,6 +3939,9 @@
         }
       }
     } catch (_) {}
+    if (isBinaryYesNoOptionList(cleanOptions)) {
+      return resolveBinaryYesNoFallback(label, profile || {});
+    }
     return null;
   }
 
@@ -3982,12 +4187,13 @@
       if (!forceOverwrite && grp.options.some((o) => o.selected)) continue;
       let desired = resolveDesiredValueForField(grp.ctx, profile, grp.container, jobMeta);
       if (desired?.skip) continue;
-      if (!desired && (grp.required || !onlyNeededCleanMode) && fillOpenEndedWithAI) {
-        desired = await askAiToPickOption(
-          grp.label,
-          grp.options.map((o) => o.text),
-          jobMeta
-        );
+      const optTexts = grp.options.map((o) => o.text);
+      const isBinYesNo = isBinaryYesNoOptionList(optTexts);
+      if (!desired && (grp.required || isBinYesNo || !onlyNeededCleanMode) && fillOpenEndedWithAI) {
+        desired = await askAiToPickOption(grp.label, optTexts, jobMeta, profile);
+      }
+      if (!desired && isBinYesNo) {
+        desired = resolveBinaryYesNoFallback(grp.label, profile);
       }
       if (!desired || desired.skip) continue;
       const wrappers = grp.options.map((o) => ({ el: o.el, innerText: o.text }));
@@ -5330,20 +5536,28 @@
       }
     }
 
-    // 4. Custom ARIA Checkboxes, ARIA Radio Groups, Ashby Yes/No & Generic Choice Pill Groups
-    const customControlsFilled = await fillCustomInteractiveControls(profile, meta, {
-      forceOverwrite,
-      fillOpenEndedWithAI,
-      onlyNeededCleanMode
-    });
-    if (customControlsFilled > 0) {
-      filledCount += customControlsFilled;
-      await reportStep(`Interactive Choice & Consent Controls (${customControlsFilled})`);
-    }
-
-    // 5. React-Select & Custom ARIA Comboboxes (2 passes so conditional dropdowns like EEOC Race mount & get filled)
+    // 4-6. Cascading Multi-Pass Fill: Custom ARIA Controls + Comboboxes + Standard Inputs/Radios/Selects
+    // (Up to 3 passes so conditional Workday sub-questions like Sponsorship -> Visa Status mount and fill automatically!)
     const visitedCombos = new WeakSet();
-    for (let comboPass = 0; comboPass < 2; comboPass++) {
+    const handledRadioGroups = new Set();
+    const handledCheckboxGroups = new Set();
+
+    for (let cascadePass = 0; cascadePass < 3; cascadePass++) {
+      let filledInPass = 0;
+
+      // 4. Custom ARIA Checkboxes, ARIA Radio Groups, Ashby Yes/No & Generic Choice Pill Groups
+      const customControlsFilled = await fillCustomInteractiveControls(profile, meta, {
+        forceOverwrite: cascadePass === 0 ? forceOverwrite : false,
+        fillOpenEndedWithAI,
+        onlyNeededCleanMode
+      });
+      if (customControlsFilled > 0) {
+        filledCount += customControlsFilled;
+        filledInPass += customControlsFilled;
+        await reportStep(`Interactive Choice & Consent Controls (${customControlsFilled})`);
+      }
+
+      // 5. React-Select, Workday <button aria-haspopup='listbox'> & Custom ARIA Comboboxes
       const comboboxes = queryAllDeep(
         document,
         "input[role='combobox'], button[aria-haspopup='listbox'], button[aria-haspopup='true'], [role='combobox'], input[data-automation-id='searchBox'], [data-automation-id='multiSelectContainer'] input"
@@ -5356,177 +5570,192 @@
         const r = el.getBoundingClientRect();
         return r.width > 0 && r.height > 0 && !el.disabled;
       });
-      if (comboboxes.length === 0) break;
 
       for (const combo of comboboxes) {
         visitedCombos.add(combo);
-        if (!forceOverwrite && hasComboboxSelection(combo)) continue;
+        if (!(cascadePass === 0 && forceOverwrite) && hasComboboxSelection(combo)) continue;
         const ctx = getFieldContext(combo);
         const resolved = resolveDesiredValueForField(ctx, profile, combo, meta);
         if (resolved?.skip) continue;
-        // In strict clean mode, skip unresolved optional dropdowns
-        if (!resolved && onlyNeededCleanMode && !isFieldRequired(combo, ctx)) continue;
-        const ok = await fillComboboxControl(combo, resolved, ctx, meta, fillOpenEndedWithAI);
+        const isWorkdayQuestionCombo = Boolean(
+          combo.closest("[data-automation-id*='question' i], [data-automation-id*='formField'], .application-question, fieldset")
+        );
+        if (!resolved && onlyNeededCleanMode && !isFieldRequired(combo, ctx) && !isWorkdayQuestionCombo) continue;
+        const ok = await fillComboboxControl(combo, resolved, ctx, meta, fillOpenEndedWithAI, profile);
         if (ok) {
           filledCount++;
+          filledInPass++;
           await reportStep(ctx.primaryLabel.split("|")[0].trim() || combo.id || "Dropdown");
         }
       }
-      await sleep(50);
-    }
 
-    // 6. Standard <input>, <select>, Radio Groups, Checkboxes & Cover Letter Textarea (One-by-One in DOM order)
-    const allControls = queryAllDeep(document, "input, select, textarea");
-    const handledRadioGroups = new Set();
-    const handledCheckboxGroups = new Set();
+      // 6. Standard <input>, <select>, Radio Groups, Checkboxes & Cover Letter Textarea (One-by-One in DOM order)
+      const allControls = queryAllDeep(document, "input, select, textarea");
 
-    for (const el of allControls) {
-      if (el.type === "file") continue;
-      if (isComboboxInput(el)) continue;
-      if (!isVisibleAndEditable(el)) continue;
-      if (attachedResume && el.id === "resume_text") continue;
-      if (attachedCover && el.id === "cover_letter_text") continue;
-      if (
-        el.closest(
-          "[data-jobify-exp-index], [data-jobify-edu-index], [data-automation-id^='workExperience-'], [data-automation-id^='education-']"
-        )
-      ) {
-        continue;
-      }
-
-      const ctx = getFieldContext(el);
-      const req = isFieldRequired(el, ctx);
-
-      if (el.type === "radio") {
-        const groupKey = el.name || ctx.primaryLabel;
-        if (handledRadioGroups.has(groupKey)) continue;
-        const radioScope = el.getRootNode?.() || document;
-        const radios = el.name
-          ? Array.from(radioScope.querySelectorAll(`input[type='radio'][name="${CSS.escape(el.name)}"]`))
-          : [el];
-        if (!forceOverwrite && radios.some((r) => r.checked)) {
-          handledRadioGroups.add(groupKey);
+      for (const el of allControls) {
+        if (el.type === "file") continue;
+        if (isComboboxInput(el)) continue;
+        if (!isVisibleAndEditable(el)) continue;
+        if (attachedResume && el.id === "resume_text") continue;
+        if (attachedCover && el.id === "cover_letter_text") continue;
+        if (
+          el.closest(
+            "[data-jobify-exp-index], [data-jobify-edu-index], [data-automation-id^='workExperience-'], [data-automation-id^='education-']"
+          )
+        ) {
           continue;
         }
-        let desired = resolveDesiredValueForField(ctx, profile, el, meta);
-        const radioWrappers = radios.map((r) => ({
-          radio: r,
-          innerText: getChoiceOptionLabel(r) || `${r.value || ""}`
-        }));
-        if (!desired && (req || !onlyNeededCleanMode) && fillOpenEndedWithAI) {
-          desired = await askAiToPickOption(
-            ctx.primaryLabel,
-            radioWrappers.map((w) => w.innerText),
-            meta
-          );
-        }
-        if (desired && !desired.skip) {
-          const chosenWrap = findMatchingOptionElement(radioWrappers, desired);
-          if (chosenWrap?.radio) {
-            clickCheckboxOrRadioReliably(chosenWrap.radio);
-            highlightFilledElement(chosenWrap.radio);
-            handledRadioGroups.add(groupKey);
-            filledCount++;
-            await reportStep(ctx.primaryLabel.split("|")[0].trim() || "Choice");
-          }
-        }
-        continue;
-      }
 
-      if (el.type === "checkbox") {
-        const cbGroup = resolveCheckboxGroup(el, el.getRootNode?.() || document);
-        if (cbGroup) {
-          if (handledCheckboxGroups.has(cbGroup.groupKey)) continue;
-          if (!forceOverwrite && cbGroup.checkboxes.some((c) => c.checked)) {
-            handledCheckboxGroups.add(cbGroup.groupKey);
+        const ctx = getFieldContext(el);
+        const req = isFieldRequired(el, ctx);
+        const passForceOverwrite = cascadePass === 0 ? forceOverwrite : false;
+
+        if (el.type === "radio") {
+          const groupKey = el.name || ctx.primaryLabel;
+          if (handledRadioGroups.has(groupKey)) continue;
+          const radioScope = el.getRootNode?.() || document;
+          const radios = el.name
+            ? Array.from(radioScope.querySelectorAll(`input[type='radio'][name="${CSS.escape(el.name)}"]`))
+            : [el];
+          if (!passForceOverwrite && radios.some((r) => r.checked)) {
+            handledRadioGroups.add(groupKey);
             continue;
           }
-          const groupReq = isFieldRequired(el, cbGroup.groupCtx);
-          let desired = resolveDesiredValueForField(cbGroup.groupCtx, profile, el, meta);
-          const wrappers = cbGroup.checkboxes.map((cb) => ({
-            cb,
-            innerText: getChoiceOptionLabel(cb)
+          let desired = resolveDesiredValueForField(ctx, profile, el, meta);
+          const radioWrappers = radios.map((r) => ({
+            radio: r,
+            innerText: getChoiceOptionLabel(r) || `${r.value || ""}`
           }));
-          if (!desired && groupReq && fillOpenEndedWithAI) {
-            desired = await askAiToPickOption(
-              cbGroup.groupCtx.primaryLabel,
-              wrappers.map((w) => w.innerText),
-              meta
-            );
+          const radioOptTexts = radioWrappers.map((w) => w.innerText);
+          const isBinYesNo = isBinaryYesNoOptionList(radioOptTexts);
+          if (!desired && (req || isBinYesNo || !onlyNeededCleanMode) && fillOpenEndedWithAI) {
+            desired = await askAiToPickOption(ctx.primaryLabel, radioOptTexts, meta, profile);
+          }
+          if (!desired && isBinYesNo) {
+            desired = resolveBinaryYesNoFallback(ctx.primaryLabel, profile);
           }
           if (desired && !desired.skip) {
-            const chosen = findMatchingOptionElement(wrappers, desired);
-            if (chosen?.cb) {
-              clickCheckboxOrRadioReliably(chosen.cb);
-              highlightFilledElement(chosen.cb);
-              handledCheckboxGroups.add(cbGroup.groupKey);
+            const chosenWrap = findMatchingOptionElement(radioWrappers, desired);
+            if (chosenWrap?.radio) {
+              clickCheckboxOrRadioReliably(chosenWrap.radio);
+              highlightFilledElement(chosenWrap.radio);
+              handledRadioGroups.add(groupKey);
               filledCount++;
-              await reportStep(cbGroup.groupCtx.primaryLabel.split("|")[0].trim() || "Checkbox Group");
+              filledInPass++;
+              await reportStep(ctx.primaryLabel.split("|")[0].trim() || "Choice");
             }
           }
           continue;
         }
 
-        const optionText = `${getChoiceOptionLabel(el)} ${ctx.fullLabel}`;
-        if (
-          !el.checked &&
-          !NEGATIVE_CHECKBOX_REGEX.test(optionText) &&
-          (CONSENT_CHECKBOX_REGEX.test(optionText) || req)
-        ) {
-          if (clickCheckboxOrRadioReliably(el)) {
-            highlightFilledElement(el);
-            filledCount++;
-            await reportStep("Consent Checkbox");
+        if (el.type === "checkbox") {
+          const cbGroup = resolveCheckboxGroup(el, el.getRootNode?.() || document);
+          if (cbGroup) {
+            if (handledCheckboxGroups.has(cbGroup.groupKey)) continue;
+            if (!passForceOverwrite && cbGroup.checkboxes.some((c) => c.checked)) {
+              handledCheckboxGroups.add(cbGroup.groupKey);
+              continue;
+            }
+            const groupReq = isFieldRequired(el, cbGroup.groupCtx);
+            let desired = resolveDesiredValueForField(cbGroup.groupCtx, profile, el, meta);
+            const wrappers = cbGroup.checkboxes.map((cb) => ({
+              cb,
+              innerText: getChoiceOptionLabel(cb)
+            }));
+            const cbOptTexts = wrappers.map((w) => w.innerText);
+            const isBinYesNo = isBinaryYesNoOptionList(cbOptTexts);
+            if (!desired && (groupReq || isBinYesNo) && fillOpenEndedWithAI) {
+              desired = await askAiToPickOption(cbGroup.groupCtx.primaryLabel, cbOptTexts, meta, profile);
+            }
+            if (!desired && isBinYesNo) {
+              desired = resolveBinaryYesNoFallback(cbGroup.groupCtx.primaryLabel, profile);
+            }
+            if (desired && !desired.skip) {
+              const chosen = findMatchingOptionElement(wrappers, desired);
+              if (chosen?.cb) {
+                clickCheckboxOrRadioReliably(chosen.cb);
+                highlightFilledElement(chosen.cb);
+                handledCheckboxGroups.add(cbGroup.groupKey);
+                filledCount++;
+                filledInPass++;
+                await reportStep(cbGroup.groupCtx.primaryLabel.split("|")[0].trim() || "Checkbox Group");
+              }
+            }
+            continue;
           }
-        }
-        continue;
-      }
 
-      if (el.tagName === "TEXTAREA" && /cover\s*letter/i.test(ctx.primaryLabel)) {
-        const isReqCl = isFieldRequired(el, ctx);
-        if ((shouldAttachCoverLetter || isReqCl) && coverLetterText && (forceOverwrite || !(el.value || "").trim())) {
-          if (setNativeValue(el, coverLetterText)) {
-            filledCount++;
-            await reportStep("Cover Letter Text");
+          const optionText = `${getChoiceOptionLabel(el)} ${ctx.fullLabel}`;
+          if (
+            !el.checked &&
+            !NEGATIVE_CHECKBOX_REGEX.test(optionText) &&
+            (CONSENT_CHECKBOX_REGEX.test(optionText) || req)
+          ) {
+            if (clickCheckboxOrRadioReliably(el)) {
+              highlightFilledElement(el);
+              filledCount++;
+              filledInPass++;
+              await reportStep("Consent Checkbox");
+            }
           }
+          continue;
         }
-        continue;
-      }
 
-      let desired = resolveDesiredValueForField(ctx, profile, el, meta);
-      if (desired?.skip) continue;
+        if (el.tagName === "TEXTAREA" && /cover\s*letter/i.test(ctx.primaryLabel)) {
+          const isReqCl = isFieldRequired(el, ctx);
+          if ((shouldAttachCoverLetter || isReqCl) && coverLetterText && (passForceOverwrite || !(el.value || "").trim())) {
+            if (setNativeValue(el, coverLetterText)) {
+              filledCount++;
+              filledInPass++;
+              await reportStep("Cover Letter Text");
+            }
+          }
+          continue;
+        }
 
-      if (el.tagName === "SELECT") {
-        if (!forceOverwrite && el.value && el.selectedIndex > 0) continue;
-        if (!desired && (req || !onlyNeededCleanMode) && fillOpenEndedWithAI) {
+        let desired = resolveDesiredValueForField(ctx, profile, el, meta);
+        if (desired?.skip) continue;
+
+        if (el.tagName === "SELECT") {
+          if (!passForceOverwrite && el.value && el.selectedIndex > 0) continue;
           const validOpts = Array.from(el.options || [])
             .filter((o) => o.value !== "" && !o.disabled)
             .map((o) => o.text || o.innerText || o.value);
-          desired = await askAiToPickOption(ctx.primaryLabel, validOpts, meta);
-        }
-        if (!desired) continue;
-        if (sequentialOneByOne) {
-          try {
-            el.scrollIntoView({ block: "nearest" });
-          } catch (_) {}
-        }
-        if (selectBestOption(el, desired)) {
-          filledCount++;
-          await reportStep(ctx.primaryLabel.split("|")[0].trim());
-        }
-      } else {
-        if (!desired) continue;
-        if (!forceOverwrite && (el.value || "").trim().length > 0) continue;
-        if (sequentialOneByOne) {
-          try {
-            el.scrollIntoView({ block: "nearest" });
-          } catch (_) {}
-        }
-        if (setNativeValue(el, desired[0])) {
-          filledCount++;
-          await reportStep(ctx.primaryLabel.split("|")[0].trim());
+          const isBinYesNo = isBinaryYesNoOptionList(validOpts);
+          if (!desired && (req || isBinYesNo || !onlyNeededCleanMode) && fillOpenEndedWithAI) {
+            desired = await askAiToPickOption(ctx.primaryLabel, validOpts, meta, profile);
+          }
+          if (!desired && isBinYesNo) {
+            desired = resolveBinaryYesNoFallback(ctx.primaryLabel, profile);
+          }
+          if (!desired) continue;
+          if (sequentialOneByOne) {
+            try {
+              el.scrollIntoView({ block: "nearest" });
+            } catch (_) {}
+          }
+          if (selectBestOption(el, desired)) {
+            filledCount++;
+            filledInPass++;
+            await reportStep(ctx.primaryLabel.split("|")[0].trim());
+          }
+        } else {
+          if (!desired) continue;
+          if (!passForceOverwrite && (el.value || "").trim().length > 0) continue;
+          if (sequentialOneByOne) {
+            try {
+              el.scrollIntoView({ block: "nearest" });
+            } catch (_) {}
+          }
+          if (setNativeValue(el, desired[0])) {
+            filledCount++;
+            filledInPass++;
+            await reportStep(ctx.primaryLabel.split("|")[0].trim());
+          }
         }
       }
+
+      if (filledInPass === 0) break;
+      await sleep(180);
     }
 
     // 7. Open-Ended Questions: Saved Vault Match + Parallel Concise Gemini AI (skipping optional fluff boxes!)

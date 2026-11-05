@@ -1,6 +1,6 @@
 // Jobify Pre-Analyzed Candidate Profile & Vault (Extracted from Raviteja Velanati's Master & 1-Page Resumes)
 
-export const PROFILE_SCHEMA_VERSION = 4;
+export const PROFILE_SCHEMA_VERSION = 5;
 export const SETTINGS_SCHEMA_VERSION = 3;
 
 export const DEFAULT_SETTINGS = {
@@ -90,6 +90,7 @@ export const DEFAULT_PROFILE = {
     governmentOrClearance: "No",
     securityClearance: "No",
     relativesAtCompany: "No",
+    nonCompeteRestriction: "No",
     gender: "Male",
     hispanicOrLatino: "No",
     raceEthnicity: "Asian",

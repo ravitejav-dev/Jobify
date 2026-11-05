@@ -2915,11 +2915,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           status: "In Flight",
           pipelineStage: "in_flight",
           stepLabel: isCurrentlyBusy
-            ? `Queued (#${pendingAutoApplyCount + 1}) · Waiting for active worker...`
-            : "Queued · Starting background agent...",
+            ? `Application Started · Queued (#${pendingAutoApplyCount + 1})`
+            : "Application Started",
           detail: isCurrentlyBusy
-            ? "Queued in sequential FIFO worker pipeline — will start automatically."
-            : "Initializing headless worker & reading job description...",
+            ? "Application started — queued in sequential FIFO worker pipeline."
+            : "Application started — initializing headless worker & reading job description...",
           matchScore: jbMeta.matchScore || 94,
           resumeStatus: "Queued",
           coverLetterStatus: "Optional"
@@ -2958,6 +2958,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
             return { ...out, tabId: out?.tabId || createdTab.id };
           } catch (err) {
+            if (queuedApp?.id) {
+              await upsertApplication({
+                id: queuedApp.id,
+                status: "Failed",
+                pipelineStage: "failed",
+                stepLabel: "Failed",
+                detail: err?.message || "Portal navigation failed"
+              }).catch(() => {});
+            }
             if (silentBackground && payload.keepTabOpen !== true) {
               chrome.tabs.remove(createdTab.id).catch(() => {});
             }

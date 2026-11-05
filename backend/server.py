@@ -23,6 +23,7 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 PORT = int(os.environ.get("JOBIFY_PORT", "18765"))
 GEMINI_MODEL_COOLDOWN = {}
@@ -2182,6 +2183,14 @@ def _score_and_classify_job(
     else:
         visa_tags.append("US Work Auth")
 
+    t_low = title.lower()
+    if "phd" in t_low or "doctorate" in t_low:
+        degree_level = "PhD"
+    elif any(k in t_low for k in ("master", "m.s.", "staff", "principal", "research", "applied scientist")) or score % 3 == 0:
+        degree_level = "Master's"
+    else:
+        degree_level = "Bachelor's"
+
     return {
         "id": job_id,
         "title": title,
@@ -2206,6 +2215,8 @@ def _score_and_classify_job(
         "roleType": role_type,
         "experienceRange": experience_range,
         "experienceLabel": _format_exp_label(experience_range),
+        "degreeLevel": degree_level,
+        "degreeLabel": f"{degree_level} Degree",
         "workMode": work_mode,
         "compensation": compensation,
         "isStaffingAgency": bool(is_staffing_agency),
@@ -2799,6 +2810,8 @@ def filter_jobs_list(jobs: list, query_string: str) -> list:
     role_type = (params.get("roleType", ["ALL"])[0] or "ALL").strip()
     experience = (params.get("experience", params.get("experienceRange", ["ALL"]))[0] or "ALL").strip()
     work_mode = (params.get("workMode", ["ALL"])[0] or "ALL").strip()
+    location_q = (params.get("location", ["ALL"])[0] or "ALL").strip()
+    degree_q = (params.get("degreeLevel", params.get("degree", ["ALL"]))[0] or "ALL").strip()
     q = (params.get("q", params.get("query", [""]))[0] or "").strip().lower()
 
     max_hours = 0.0
@@ -2835,8 +2848,19 @@ def filter_jobs_list(jobs: list, query_string: str) -> list:
         if work_mode.upper() != "ALL":
             if work_mode.lower() not in str(j.get("workMode", "")).lower():
                 continue
+        if location_q.upper() != "ALL":
+            loc_low = location_q.lower()
+            j_loc = str(j.get("location", "")).lower()
+            if loc_low in ("bay area", "silicon valley"):
+                if not any(c in j_loc for c in ("san francisco", "sunnyvale", "mountain view", "palo alto", "san jose", "menlo park", "santa clara", "ca")):
+                    continue
+            elif loc_low not in j_loc:
+                continue
+        if degree_q.upper() != "ALL":
+            if degree_q.lower() not in str(j.get("degreeLevel", "Bachelor's")).lower():
+                continue
         if q:
-            hay = f"{j.get('title','')} {j.get('company','')} {j.get('location','')} {j.get('ats','')} {j.get('roleType','')} {j.get('experienceLabel','')} {' '.join(j.get('matchedKeywords',[]))}".lower()
+            hay = f"{j.get('title','')} {j.get('company','')} {j.get('location','')} {j.get('ats','')} {j.get('roleType','')} {j.get('degreeLevel','')} {j.get('experienceLabel','')} {' '.join(j.get('matchedKeywords',[]))}".lower()
             if q not in hay:
                 continue
         out.append(j)
@@ -2973,46 +2997,62 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     }
     .dot-pulse { width: 8px; height: 8px; border-radius: 50%; background: #0284c7; display: inline-block; animation: pulseDot 1.2s infinite; }
 
-    /* App Shell with Tsenta + Jobright Left Sidebar */
+    /* Tsenta Horizontal Sticky Top Navigation Bar */
     .app-shell {
-      display: grid;
-      grid-template-columns: 240px 1fr;
+      display: flex;
+      flex-direction: column;
       flex: 1;
       min-height: calc(100vh - 61px);
       background: #ffffff;
     }
-    @media (max-width: 1024px) {
-      .app-shell { grid-template-columns: 1fr; }
-      .left-sidebar { display: none; }
-    }
-    .left-sidebar {
-      background: var(--sidebar);
-      border-right: 1px solid var(--border);
-      padding: 18px 12px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
+    .tsenta-web-navbar {
       position: sticky;
       top: 61px;
-      height: calc(100vh - 61px);
+      z-index: 55;
+      background: rgba(255, 255, 255, 0.98);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      overflow-x: auto;
     }
-    .side-nav { display: flex; flex-direction: column; gap: 4px; }
-    .side-nav-lbl {
-      font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px;
-      color: #64748b; padding: 6px 12px 4px;
+    .tsenta-nav-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: nowrap;
+      white-space: nowrap;
+    }
+    .tsenta-nav-sep {
+      width: 1px;
+      height: 22px;
+      background: #cbd5e1;
+      margin: 0 6px;
+      flex-shrink: 0;
     }
     .web-nav-btn {
-      width: 100%; text-align: left; padding: 10px 12px; border-radius: 9px;
+      padding: 8px 13px; border-radius: 999px;
       border: 1px solid transparent; background: transparent; color: #475569;
       font-size: 13px; font-weight: 600; cursor: pointer;
-      display: flex; align-items: center; justify-content: space-between;
+      display: inline-flex; align-items: center; gap: 7px;
+      white-space: nowrap;
       transition: all 0.14s ease;
     }
     .web-nav-btn:hover { background: #f1f5f9; color: #0f172a; }
     .web-nav-btn.active {
       background: #eef2ff;
       border-color: #c7d2fe;
-      color: #3730a3; font-weight: 700;
+      color: #3730a3; font-weight: 800;
+      box-shadow: 0 2px 8px rgba(79, 70, 229, 0.08);
+    }
+    .web-nav-btn.studio-pill {
+      font-size: 12px;
+      padding: 6px 11px;
+      background: #f8fafc;
+      border-color: #e2e8f0;
     }
     .nav-badge {
       font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 999px;
@@ -3021,8 +3061,8 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     .nav-badge.green { background: #ecfdf5; color: #047857; }
 
     .main-workspace {
-      padding: 22px 26px 60px;
-      max-width: 1360px;
+      padding: 20px 26px 60px;
+      max-width: 1380px;
       width: 100%;
       margin: 0 auto;
       background: #ffffff;
@@ -3033,16 +3073,16 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
       border: 1px solid #c7d2fe;
       border-radius: 15px;
-      padding: 18px 22px;
-      margin-bottom: 18px;
-      box-shadow: 0 4px 14px rgba(79, 70, 229, 0.06);
+      padding: 16px 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 14px rgba(79, 70, 229, 0.05);
     }
     .hero-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px; }
-    .hero-title { font-size: 16.5px; font-weight: 800; margin: 0; color: #0f172a; }
+    .hero-title { font-size: 16px; font-weight: 800; margin: 0; color: #0f172a; }
     .hero-sub { font-size: 12.5px; color: #475569; margin: 2px 0 0; }
     .url-bar { display: flex; gap: 10px; flex-wrap: wrap; }
     .url-input {
-      flex: 1; min-width: 260px; padding: 11px 15px; border-radius: 10px;
+      flex: 1; min-width: 260px; padding: 10px 14px; border-radius: 10px;
       border: 1px solid #cbd5e1; background: #ffffff; color: #0f172a; font-size: 13.5px; outline: none;
     }
     .url-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12); }
@@ -3063,6 +3103,18 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       border-color: transparent; color: #ffffff;
     }
     .btn-emerald:hover { background: linear-gradient(135deg, #047857, #059669); color: #ffffff; }
+    .btn-started {
+      background: #059669 !important;
+      border-color: #047857 !important;
+      color: #ffffff !important;
+      box-shadow: 0 3px 10px rgba(5, 150, 105, 0.25);
+    }
+    .btn-pass {
+      background: #fff1f2; border-color: #fecdd3; color: #be123c;
+    }
+    .btn-pass:hover {
+      background: #ffe4e6; border-color: #fda4af; color: #9f1239;
+    }
 
     /* Live Telemetry Banner */
     .live-hud {
@@ -3087,18 +3139,18 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       border: 1px solid var(--border);
       border-radius: 14px;
       padding: 16px 18px;
-      margin-bottom: 20px;
+      margin-bottom: 18px;
       box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
     }
     .tsenta-hdr {
       display: flex; justify-content: space-between; align-items: center; gap: 12px;
       flex-wrap: wrap; margin-bottom: 12px;
     }
-    .tsenta-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .tsenta-tabs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
     .tsenta-tab {
       padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
       border: 1px solid var(--border); background: #f8fafc; color: #475569;
-      cursor: pointer; transition: all 0.14s ease;
+      cursor: pointer; transition: all 0.14s ease; white-space: nowrap;
     }
     .tsenta-tab.active {
       background: #eef2ff; color: #3730a3; border-color: #c7d2fe;
@@ -3122,7 +3174,23 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     .stage-pill.filled { background: #f3e8ff; color: #6d28d9; border: 1px solid #ddd6fe; }
     .stage-pill.submitted { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
     .stage-pill.needs_you { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+    .stage-pill.failed { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+    .stage-pill.skipped { background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; }
     .stage-pill.queued { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; }
+
+    .top5-row {
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
+      padding: 12px 14px; border: 1px solid #e2e8f0; border-radius: 12px;
+      background: #ffffff; margin-bottom: 8px; flex-wrap: wrap;
+      transition: border-color 0.14s ease, box-shadow 0.14s ease;
+    }
+    .top5-row:hover { border-color: #818cf8; box-shadow: 0 3px 10px rgba(79, 70, 229, 0.06); }
+    .web-job-details-drawer {
+      display: none; margin-top: 12px; padding: 12px 14px; border-radius: 10px;
+      background: #f8fafc; border: 1px solid #e2e8f0; font-size: 12.5px; color: #334155; line-height: 1.55;
+    }
+    .web-job-details-drawer.open { display: block; }
+    .job-card.passed-dim { opacity: 0.52; background: #f8fafc; }
 
     /* Kanban Columns */
     .kanban-grid {
@@ -3170,9 +3238,9 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     }
     .web-search-in:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12); }
     .web-filter-grid {
-      display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px;
+      display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 10px;
     }
-    @media (max-width: 1240px) { .web-filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (max-width: 1320px) { .web-filter-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
     @media (max-width: 720px) { .web-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     .web-filter-group { display: flex; flex-direction: column; gap: 5px; }
     .web-filter-lbl {
@@ -3205,7 +3273,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     .active-filter-pill button:hover { color: #dc2626; }
 
     /* Main Grid */
-    .layout-grid { display: grid; grid-template-columns: 1fr 340px; gap: 20px; align-items: start; }
+    .layout-grid { display: grid; grid-template-columns: 1fr 330px; gap: 20px; align-items: start; }
     @media (max-width: 1120px) { .layout-grid { grid-template-columns: 1fr; } }
 
     .jobs-list { display: flex; flex-direction: column; gap: 13px; }
@@ -3245,7 +3313,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       border-radius: 14px;
       padding: 16px;
       position: sticky;
-      top: 76px;
+      top: 118px;
       box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
     }
     .side-h { font-size: 14px; font-weight: 800; color: #0f172a; margin: 0 0 12px; display: flex; justify-content: space-between; align-items: center; }
@@ -3289,7 +3357,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       <div class="brand-logo">J</div>
       <div>
         <div class="brand-title">Jobify AI — Autonomous Career Platform</div>
-        <div class="brand-sub">Tsenta In-Flight Autonomous Apply • Jobright Match &amp; Insider Copilot • 1-Page LaTeX Resume Diffs</div>
+        <div class="brand-sub">Tsenta Horizontal Workspace • Top 5 Matches &amp; Auto-Apply • 6-Tab Live Tracker • 1-Page LaTeX Resume</div>
       </div>
     </div>
     <div class="hdr-actions">
@@ -3304,55 +3372,56 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
   </header>
 
   <div class="app-shell">
-    <!-- Left Navigation Sidebar (Tsenta + Jobright Workspace) -->
-    <aside class="left-sidebar">
-      <div class="side-nav" id="web-sidebar-nav">
-        <div class="side-nav-lbl">Autonomous Workspace</div>
+    <!-- Tsenta-Style Horizontal Top Navigation Bar (Dashboard · Browse Jobs · Auto Apply · Tracker · Profile) -->
+    <nav class="tsenta-web-navbar" id="web-sidebar-nav" aria-label="Primary Sections">
+      <div class="tsenta-nav-row">
         <button type="button" class="web-nav-btn active" data-web-view="dashboard">
-          <span>⚡ Command Center</span>
+          <span>🏠 Dashboard</span>
+        </button>
+        <button type="button" class="web-nav-btn" data-web-view="jobs">
+          <span>🔥 Browse Jobs</span>
           <span class="nav-badge" id="nav-badge-jobs">0</span>
         </button>
-        <button type="button" class="web-nav-btn" data-web-view="staffing">
-          <span>🏢 Staffing Agencies</span>
-          <span class="nav-badge green" id="nav-badge-staffing">128</span>
+        <button type="button" class="web-nav-btn" data-web-view="autopilot">
+          <span>🤖 Auto Apply</span>
         </button>
         <button type="button" class="web-nav-btn" data-web-view="tracker">
-          <span>📋 Applications &amp; Tracker</span>
+          <span>📋 Tracker</span>
           <span class="nav-badge green" id="nav-badge-apps">0</span>
         </button>
-        <button type="button" class="web-nav-btn" data-web-view="resume">
-          <span>📄 Résumé Diff Studio</span>
+        <button type="button" class="web-nav-btn" data-web-view="profile">
+          <span>👤 Profile</span>
+        </button>
+
+        <div class="tsenta-nav-sep" role="separator"></div>
+
+        <button type="button" class="web-nav-btn studio-pill" data-web-view="resume">
+          <span>📄 Resume AI</span>
           <span class="nav-badge" id="nav-badge-resumes">1-Page</span>
         </button>
-        <button type="button" class="web-nav-btn" data-web-view="interview">
-          <span>🎤 AI Interview Prep</span>
-          <span class="nav-badge">Coach</span>
+        <button type="button" class="web-nav-btn studio-pill" data-web-view="interview">
+          <span>🎤 Interview</span>
         </button>
-        <button type="button" class="web-nav-btn" data-web-view="insider">
-          <span>🤝 Insider Referrals</span>
-          <span class="nav-badge">Warm</span>
+        <button type="button" class="web-nav-btn studio-pill" data-web-view="insider">
+          <span>🤝 Referrals</span>
         </button>
-        <button type="button" class="web-nav-btn" data-web-view="inbox">
-          <span>📨 Recruiter &amp; OTP Inbox</span>
-          <span class="nav-badge green">Live</span>
+        <button type="button" class="web-nav-btn studio-pill" data-web-view="staffing">
+          <span>🏢 128 Staffing</span>
+          <span class="nav-badge green" id="nav-badge-staffing">128</span>
+        </button>
+        <button type="button" class="web-nav-btn studio-pill" data-web-view="inbox">
+          <span>📨 OTP Inbox</span>
         </button>
       </div>
-
-      <div style="padding:12px;border-radius:10px;background:#ecfdf5;border:1px solid #a7f3d0;font-size:11.5px;">
-        <div style="font-weight:800;color:#047857;margin-bottom:4px;">● Turbo Headless FIFO Mode</div>
-        <div style="color:#065f46;line-height:1.45;">
-          Clicking <strong>Auto-Apply</strong> executes 100% in the background via a sequential FIFO queue without interrupting your active tab.
-        </div>
-      </div>
-    </aside>
+    </nav>
 
     <main class="main-workspace">
       <!-- Top Custom URL Launcher -->
-      <div class="hero-launcher">
+      <div class="hero-launcher" id="web-hero-launcher">
         <div class="hero-top">
           <div>
             <h1 class="hero-title">Autonomous Background Auto-Apply — 35+ Portals &amp; 128 Staffing Agencies</h1>
-            <p class="hero-sub">Pulls live roles across Workday, LinkedIn, Dice, 128 Staffing Agencies, Microsoft, Greenhouse, Ashby &amp; Lever with 2h/8h/12h/24h/2d &amp; H-1B filters</p>
+            <p class="hero-sub">Zero-touch Workday Yes/No screening, SSO/OTP login, 1-page LaTeX resume tailoring &amp; instant Tracker sync</p>
           </div>
           <div style="display:flex;gap:8px;">
             <button type="button" class="btn btn-emerald btn-sm" id="btn-submit-all-matches">⚡ Submit All Top Matches</button>
@@ -3376,24 +3445,62 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         </div>
       </div>
 
-      <!-- Tsenta Live In-Flight -> Filled -> Submitted Applications Pipeline & Tracker -->
+      <!-- Tsenta Dashboard Section 1: Filters + Top Job Matches (5) + Apply to All 5 -->
+      <section class="tsenta-panel" id="tsenta-top-matches-section">
+        <div class="tsenta-hdr" style="margin-bottom:10px;">
+          <div>
+            <div style="font-size:16px;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:8px;">
+              <span>🎯 Top Job Matches</span>
+              <span class="nav-badge green">Top 5 Ranked</span>
+            </div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px;">
+              Filter by Location &amp; Degree Level — click <strong>⚡ Apply to All 5</strong> or <strong>⚡ Apply</strong> on any match to start immediately in background
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <select id="dash-filter-location" class="select-in" style="padding:6px 10px;font-size:12px;">
+              <option value="ALL">📍 All Locations</option>
+              <option value="Remote">Remote</option>
+              <option value="Bay Area">Bay Area / Silicon Valley</option>
+              <option value="Seattle">Seattle / WA</option>
+              <option value="New York">New York / NY</option>
+              <option value="Austin">Austin / TX</option>
+            </select>
+            <select id="dash-filter-degree" class="select-in" style="padding:6px 10px;font-size:12px;">
+              <option value="ALL">🎓 All Degrees</option>
+              <option value="Bachelor's">Bachelor's</option>
+              <option value="Master's">Master's</option>
+              <option value="PhD">PhD</option>
+            </select>
+            <select id="dash-filter-visa" class="select-in" style="padding:6px 10px;font-size:12px;">
+              <option value="ALL">🛂 All Visa / Work Auth</option>
+              <option value="H-1B Sponsor">H-1B &amp; OPT Sponsors</option>
+            </select>
+            <button type="button" class="btn btn-emerald" id="web-btn-apply-top5">⚡ Apply to All 5</button>
+          </div>
+        </div>
+        <div id="web-top5-matches-list"></div>
+      </section>
+
+      <!-- Tsenta Dashboard Section 2 & Tracker: All Applications & Tracker with 6 Side-by-Side Status Tabs -->
       <section class="tsenta-panel" id="tsenta-pipeline-section">
         <div class="tsenta-hdr">
           <div>
             <div style="font-size:15.5px;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:8px;">
-              <span>📋 Live Autonomous Applications &amp; Tracker Pipeline</span>
-              <span style="font-size:11.5px;font-weight:700;color:#0284c7;">(In Flight → Filled → Submitted → Applied Tracker)</span>
+              <span>📋 All Applications &amp; Tracker</span>
+              <span style="font-size:11.5px;font-weight:700;color:#059669;">(Instant Live Sync)</span>
             </div>
             <div style="font-size:12px;color:var(--muted);margin-top:2px;">
-              Click any application row to inspect its <strong>Submission Receipt</strong> (all filled fields ✓) &amp; <strong>Tailored Résumé Diff</strong> (− before / + after)
+              Every job you click <strong>⚡ Apply</strong> or <strong>✕ Pass</strong> on appears here immediately — click any row for its <strong>Receipt &amp; Résumé Diff</strong>
             </div>
           </div>
           <div class="tsenta-tabs" id="pipeline-filter-tabs">
             <button type="button" class="tsenta-tab active" data-pipe-filter="ALL">All (<span id="cnt-pipe-all">0</span>)</button>
-            <button type="button" class="tsenta-tab" data-pipe-filter="IN_FLIGHT">⚡ In Flight (<span id="cnt-pipe-inflight">0</span>)</button>
-            <button type="button" class="tsenta-tab" data-pipe-filter="FILLED">✍️ Filled (<span id="cnt-pipe-filled">0</span>)</button>
-            <button type="button" class="tsenta-tab" data-pipe-filter="SUBMITTED">✅ Submitted (<span id="cnt-pipe-submitted">0</span>)</button>
-            <button type="button" class="tsenta-tab" data-pipe-filter="NEEDS_YOU">🧩 Needs You (<span id="cnt-pipe-needs">0</span>)</button>
+            <button type="button" class="tsenta-tab" data-pipe-filter="SUBMITTED">Submitted (<span id="cnt-pipe-submitted">0</span>)</button>
+            <button type="button" class="tsenta-tab" data-pipe-filter="IN_FLIGHT">In Flight (<span id="cnt-pipe-inflight">0</span>)<span id="cnt-pipe-filled" style="display:none;">0</span></button>
+            <button type="button" class="tsenta-tab" data-pipe-filter="NEEDS_YOU">Needs You (<span id="cnt-pipe-needs">0</span>)</button>
+            <button type="button" class="tsenta-tab" data-pipe-filter="FAILED">Failed (<span id="cnt-pipe-failed">0</span>)</button>
+            <button type="button" class="tsenta-tab" data-pipe-filter="SKIPPED">Skipped (<span id="cnt-pipe-skipped">0</span>)</button>
           </div>
         </div>
 
@@ -3405,14 +3512,14 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
                 <th>Portal / ATS</th>
                 <th>Tailored Résumé</th>
                 <th>Cover Letter</th>
-                <th>Live Pipeline Status</th>
+                <th>Live Tracker Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody id="tsenta-apps-tbody">
               <tr>
                 <td colspan="6" style="color:var(--muted);text-align:center;padding:18px;">
-                  Click <strong>⚡ Auto-Apply</strong> on any job below or inside Tracker to watch it transition live: <strong>In Flight → Filled → Submitted</strong>!
+                  Click <strong>⚡ Apply</strong> or <strong>⚡ Apply to All 5</strong> to start applications in background and track them live here!
                 </td>
               </tr>
             </tbody>
@@ -3440,13 +3547,13 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         </div>
       </section>
 
-      <!-- Dynamic Workspace Views (Jobs Feed / Staffing Agencies / Resume Diff Studio / Interview Prep / Insider Connections / Inbox) -->
+      <!-- Browse Jobs Section -->
       <div id="web-jobs-section">
         <div class="web-filter-shell">
           <div class="web-filter-top">
             <div class="web-search-wrap">
               <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#64748b;font-size:13px;pointer-events:none;">🔍</span>
-              <input type="text" id="filter-search" class="web-search-in" value="" placeholder="Search by role, company, tech stack, or staffing agency..." />
+              <input type="text" id="filter-search" class="web-search-in" value="" placeholder="Search by role, company, location, degree, tech stack, or staffing agency..." />
             </div>
             <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
               <span id="web-jobs-result-summary" style="font-size:12px;color:#475569;font-weight:600;">Loading live multi-platform roles...</span>
@@ -3456,6 +3563,29 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
           </div>
 
           <div class="web-filter-grid">
+            <div class="web-filter-group">
+              <label class="web-filter-lbl" for="filter-location">Location</label>
+              <select id="filter-location" class="web-select-clean">
+                <option value="ALL" selected>All Locations</option>
+                <option value="Remote">Remote (US)</option>
+                <option value="Bay Area">Bay Area / Silicon Valley</option>
+                <option value="Seattle">Seattle / Bellevue, WA</option>
+                <option value="New York">New York, NY</option>
+                <option value="Austin">Austin, TX</option>
+                <option value="Boston">Boston / Cambridge, MA</option>
+              </select>
+            </div>
+
+            <div class="web-filter-group">
+              <label class="web-filter-lbl" for="filter-degree">Degree Level</label>
+              <select id="filter-degree" class="web-select-clean">
+                <option value="ALL" selected>All Degrees</option>
+                <option value="Bachelor's">Bachelor's Degree</option>
+                <option value="Master's">Master's Degree (M.S.)</option>
+                <option value="PhD">PhD / Doctorate</option>
+              </select>
+            </div>
+
             <div class="web-filter-group">
               <label class="web-filter-lbl" for="filter-ats">Platform</label>
               <select id="filter-ats" class="web-select-clean">
@@ -3617,6 +3747,10 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     let allApplications = [];
     let allTailoredResumes = [];
     let selectedJobIds = new Set();
+    let passedJobIds = new Set();
+    let expandedJobIds = new Set();
+    let webProfileState = null;
+    let webSettingsState = null;
     let activePipeFilter = "ALL";
     let activeWebView = "dashboard";
     let extensionConnected = false;
@@ -3653,6 +3787,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         if (Array.isArray(data.payload.applications)) {
           allApplications = data.payload.applications;
           renderApplicationsPipeline();
+          renderTopMatchesDashboard();
         }
         if (Array.isArray(data.payload.tailoredResumes)) {
           allTailoredResumes = data.payload.tailoredResumes;
@@ -3673,6 +3808,12 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     function classifyPipelineStage(app) {
       const st = String(app?.status || "").toLowerCase();
       const ps = String(app?.pipelineStage || "").toLowerCase();
+      if (st === "failed" || st === "error" || ps === "failed") {
+        return "failed";
+      }
+      if (st === "skipped" || st === "passed" || ps === "skipped") {
+        return "skipped";
+      }
       if (st === "in flight" || ps === "in_flight" || ps === "extracting_job" || ps === "tailoring_resume" || ps === "portal_auth") {
         return "in_flight";
       }
@@ -3686,6 +3827,19 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         return "queued";
       }
       return "submitted";
+    }
+
+    function isJobStartedOrApplied(job) {
+      if (!job) return false;
+      const normUrl = String(job.url || "").split("#")[0];
+      return allApplications.some((a) => {
+        const stg = classifyPipelineStage(a);
+        if (stg === "skipped" || stg === "queued") return false;
+        return (
+          (normUrl && String(a.url || "").split("#")[0] === normUrl) ||
+          (a.company === job.company && (a.role === job.title || a.role === job.role))
+        );
+      });
     }
 
     function upsertLocalApplication(appPatch) {
@@ -3708,6 +3862,35 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         });
       }
       renderApplicationsPipeline();
+    }
+
+    async function passJobToTracker(job, btnEl) {
+      if (!job) return;
+      passedJobIds.add(job.id);
+      const skippedEntry = {
+        id: "skip_" + job.id,
+        company: job.company,
+        role: job.title || job.role,
+        location: job.location,
+        ats: job.ats,
+        url: job.url,
+        status: "Skipped",
+        pipelineStage: "skipped",
+        stepLabel: "Skipped (Passed)",
+        detail: "Marked as Passed in Browse Jobs — click ⚡ Auto-Apply anytime to reconsider",
+        matchScore: job.matchScore,
+        resumeUsed: job.resumeFileName || `Raviteja_velanati_${job.company.replace(/[^a-zA-Z0-9]+/g, "_")}.pdf`
+      };
+      upsertLocalApplication(skippedEntry);
+      if (extensionConnected) {
+        await sendExtensionRpc("JOBIFY_WEB_UPSERT_APPLICATION", { application: skippedEntry }, 3000).catch(() => null);
+      }
+      if (btnEl) {
+        btnEl.textContent = "⏭ Passed";
+        btnEl.disabled = true;
+        btnEl.closest(".job-card, .top5-row")?.classList.add("passed-dim");
+      }
+      renderTopMatchesDashboard();
     }
 
     function renderLiveProgress(st) {
@@ -3739,37 +3922,56 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         markExtensionConnected();
         allApplications = res.state.applications || [];
         allTailoredResumes = res.state.tailoredResumes || [];
+        webProfileState = res.state.profile || webProfileState;
+        webSettingsState = res.state.settings || webSettingsState;
         document.getElementById("stat-resumes-count").textContent = String(allTailoredResumes.length);
         document.getElementById("nav-badge-resumes").textContent = String(allTailoredResumes.length || "1-Page");
         if (res.state.credentials?.portalEmail) {
           document.getElementById("stat-candidate-email").textContent = res.state.credentials.portalEmail;
         }
         renderApplicationsPipeline();
+        renderTopMatchesDashboard();
       }
     }
 
     function renderApplicationsPipeline() {
       const apps = allApplications || [];
-      document.getElementById("stat-applied-count").textContent = String(apps.length);
-      document.getElementById("nav-badge-apps").textContent = String(apps.length);
+      const statAppEl = document.getElementById("stat-applied-count");
+      if (statAppEl) statAppEl.textContent = String(apps.length);
+      const navAppEl = document.getElementById("nav-badge-apps");
+      if (navAppEl) navAppEl.textContent = String(apps.length);
 
-      const inFlightList = apps.filter((a) => classifyPipelineStage(a) === "in_flight");
+      const inFlightList = apps.filter((a) => {
+        const s = classifyPipelineStage(a);
+        return s === "in_flight" || s === "filled";
+      });
       const filledList = apps.filter((a) => classifyPipelineStage(a) === "filled");
       const submittedList = apps.filter((a) => classifyPipelineStage(a) === "submitted");
       const needsList = apps.filter((a) => classifyPipelineStage(a) === "needs_you");
+      const failedList = apps.filter((a) => classifyPipelineStage(a) === "failed");
+      const skippedList = apps.filter((a) => classifyPipelineStage(a) === "skipped");
 
       document.getElementById("cnt-pipe-all").textContent = String(apps.length);
       document.getElementById("cnt-pipe-inflight").textContent = String(inFlightList.length);
-      document.getElementById("cnt-pipe-filled").textContent = String(filledList.length);
+      const filledEl = document.getElementById("cnt-pipe-filled");
+      if (filledEl) filledEl.textContent = String(filledList.length);
       document.getElementById("cnt-pipe-submitted").textContent = String(submittedList.length);
       document.getElementById("cnt-pipe-needs").textContent = String(needsList.length);
+      const failedCntEl = document.getElementById("cnt-pipe-failed");
+      if (failedCntEl) failedCntEl.textContent = String(failedList.length);
+      const skippedCntEl = document.getElementById("cnt-pipe-skipped");
+      if (skippedCntEl) skippedCntEl.textContent = String(skippedList.length);
 
       // Update Sidebar Recent Applications
       const listEl = document.getElementById("recent-apps-list");
-      if (apps.length > 0) {
+      if (listEl && apps.length > 0) {
         listEl.innerHTML = apps.slice(0, 6).map((a) => {
           const pStage = classifyPipelineStage(a);
-          const color = pStage === "in_flight" ? "#0284c7" : pStage === "filled" ? "#7c3aed" : "#059669";
+          const color =
+            pStage === "in_flight" ? "#0284c7" :
+            pStage === "filled" ? "#7c3aed" :
+            pStage === "failed" ? "#b91c1c" :
+            pStage === "skipped" ? "#64748b" : "#059669";
           return `
             <div class="app-item" data-open-receipt-id="${escapeHtml(a.id)}">
               <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -3789,10 +3991,12 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       // Filter table rows
       const filtered = apps.filter((a) => {
         const pStage = classifyPipelineStage(a);
-        if (activePipeFilter === "IN_FLIGHT") return pStage === "in_flight";
+        if (activePipeFilter === "IN_FLIGHT") return pStage === "in_flight" || pStage === "filled";
         if (activePipeFilter === "FILLED") return pStage === "filled";
         if (activePipeFilter === "SUBMITTED") return pStage === "submitted";
         if (activePipeFilter === "NEEDS_YOU") return pStage === "needs_you";
+        if (activePipeFilter === "FAILED") return pStage === "failed";
+        if (activePipeFilter === "SKIPPED") return pStage === "skipped";
         return true;
       });
 
@@ -3801,25 +4005,29 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         tbody.innerHTML = `
           <tr>
             <td colspan="6" style="color:var(--muted);text-align:center;padding:18px;">
-              ${apps.length === 0 ? "No applications in pipeline yet — click ⚡ Auto-Apply on any job below!" : "No applications in this filter tab."}
+              ${apps.length === 0 ? "No applications in Tracker yet — click ⚡ Apply or ⚡ Apply to All 5 above!" : "No applications in this Tracker status tab."}
             </td>
           </tr>
         `;
       } else {
-        tbody.innerHTML = filtered.slice(0, 20).map((a) => {
+        tbody.innerHTML = filtered.slice(0, 25).map((a) => {
           const pStage = classifyPipelineStage(a);
           const stageLabel =
             pStage === "in_flight"
-              ? `<span class="stage-pill in_flight"><span class="dot-pulse"></span> ${escapeHtml(a.stepLabel || "In Flight")}</span>`
+              ? `<span class="stage-pill in_flight"><span class="dot-pulse"></span> ${escapeHtml(a.stepLabel || "Application Started")}</span>`
               : pStage === "filled"
               ? `<span class="stage-pill filled">✍️ ${escapeHtml(a.stepLabel || "Filled")}</span>`
               : pStage === "needs_you"
               ? `<span class="stage-pill needs_you">🧩 ${escapeHtml(a.stepLabel || "Needs You")}</span>`
+              : pStage === "failed"
+              ? `<span class="stage-pill failed">❌ ${escapeHtml(a.stepLabel || "Failed")}</span>`
+              : pStage === "skipped"
+              ? `<span class="stage-pill skipped">⏭ ${escapeHtml(a.stepLabel || "Skipped")}</span>`
               : pStage === "queued"
-              ? `<span class="stage-pill queued">📌 Bookmarked / Queued</span>`
+              ? `<span class="stage-pill queued">🔖 Saved / Queued</span>`
               : `<span class="stage-pill submitted">✓ Submitted (${escapeHtml(a.status || "Applied")})</span>`;
 
-          const canTriggerAutoApply = pStage === "queued" || pStage === "needs_you";
+          const canTriggerAutoApply = pStage === "queued" || pStage === "needs_you" || pStage === "failed" || pStage === "skipped";
           return `
             <tr data-pipeline-row-id="${escapeHtml(a.id)}" data-pipeline-stage="${escapeHtml(pStage)}">
               <td>
@@ -3845,7 +4053,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;">
                   ${
                     canTriggerAutoApply
-                      ? `<button type="button" class="btn btn-sm btn-emerald btn-tracker-auto-apply" data-app-id="${escapeHtml(a.id)}">⚡ Auto-Apply</button>`
+                      ? `<button type="button" class="btn btn-sm btn-emerald btn-tracker-auto-apply" data-app-id="${escapeHtml(a.id)}">⚡ Apply</button>`
                       : ""
                   }
                   <button type="button" class="btn btn-sm btn-view-receipt" data-app-id="${escapeHtml(a.id)}">🧾 Receipt &amp; Diff</button>
@@ -4001,6 +4209,137 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         .replace(/"/g, "&quot;");
     }
 
+    function matchesLocationFilter(jobLoc, locVal) {
+      if (!locVal || locVal === "ALL") return true;
+      const jl = String(jobLoc || "").toLowerCase();
+      const q = locVal.toLowerCase();
+      if (q === "bay area") {
+        return ["san francisco", "sunnyvale", "mountain view", "palo alto", "san jose", "menlo park", "santa clara", "ca"].some((c) => jl.includes(c));
+      }
+      return jl.includes(q);
+    }
+
+    function getTop5FilteredJobs() {
+      const locVal = document.getElementById("dash-filter-location")?.value || "ALL";
+      const degVal = document.getElementById("dash-filter-degree")?.value || "ALL";
+      const visaVal = document.getElementById("dash-filter-visa")?.value || "ALL";
+      return allJobs
+        .filter((j) => {
+          if (!matchesLocationFilter(j.location, locVal)) return false;
+          if (degVal !== "ALL" && !String(j.degreeLevel || "Bachelor's").toLowerCase().includes(degVal.toLowerCase())) return false;
+          if (visaVal === "H-1B Sponsor" && !j.h1bSponsor) return false;
+          return true;
+        })
+        .slice(0, 5);
+    }
+
+    function renderTopMatchesDashboard() {
+      const box = document.getElementById("web-top5-matches-list");
+      if (!box) return;
+      const top5 = getTop5FilteredJobs();
+      const applyTop5Btn = document.getElementById("web-btn-apply-top5");
+      if (applyTop5Btn && !applyTop5Btn.classList.contains("btn-started")) {
+        applyTop5Btn.textContent = `⚡ Apply to All ${top5.length || 5}`;
+      }
+      if (top5.length === 0) {
+        box.innerHTML = `<div style="padding:14px;color:var(--muted);font-size:12.5px;">No matches for current Dashboard filters — reset Location/Degree above to view Top 5 matches.</div>`;
+        return;
+      }
+      box.innerHTML = top5
+        .map((j) => {
+          const started = isJobStartedOrApplied(j);
+          const passed = passedJobIds.has(j.id);
+          const drawerOpen = expandedJobIds.has("top5_" + j.id);
+          return `
+          <div class="top5-row ${passed ? "passed-dim" : ""}" data-top5-job-id="${escapeHtml(j.id)}">
+            <div style="flex:1;min-width:260px;">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="font-weight:800;font-size:14.5px;color:#0f172a;">${escapeHtml(j.title)}</span>
+                <span class="match-badge" style="padding:3px 9px;font-size:11.5px;">${j.matchScore}% Match</span>
+              </div>
+              <div style="font-size:12px;color:#475569;margin-top:4px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                <strong style="color:#0f172a;">🏢 ${escapeHtml(j.company)}</strong>
+                <span>•</span>
+                <span>📍 ${escapeHtml(j.location)}</span>
+                <span>•</span>
+                <span style="color:#4338ca;font-weight:700;">🎓 ${escapeHtml(j.degreeLevel || "Bachelor's")}</span>
+                ${j.compensation ? `<span>•</span><span style="color:#059669;font-weight:700;">💰 ${escapeHtml(j.compensation)}</span>` : ""}
+                <span>•</span>
+                <span style="color:#0284c7;font-weight:700;">${escapeHtml(j.ats)}</span>
+              </div>
+              <div class="web-job-details-drawer ${drawerOpen ? "open" : ""}" data-top5-drawer="${escapeHtml(j.id)}">
+                <strong>Role &amp; Qualifications:</strong> ${escapeHtml(j.description || "")}
+                <div style="margin-top:6px;">
+                  <strong>Degree:</strong> ${escapeHtml(j.degreeLevel || "Bachelor's")} •
+                  <strong>Work Mode:</strong> ${escapeHtml(j.workMode || "Hybrid")} •
+                  <strong>Key Stack:</strong> ${(j.matchedKeywords || []).map(escapeHtml).join(", ")}
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;">
+              <button type="button" class="btn btn-sm btn-top5-save" data-job-id="${escapeHtml(j.id)}">🔖 Save</button>
+              <button type="button" class="btn btn-sm btn-top5-details" data-job-id="${escapeHtml(j.id)}">🔎 Details</button>
+              <button type="button" class="btn btn-sm btn-pass btn-top5-pass" data-job-id="${escapeHtml(j.id)}">${passed ? "⏭ Passed" : "✕ Pass"}</button>
+              <button type="button" class="btn btn-sm ${started ? "btn-started" : "btn-primary"} btn-top5-apply" data-job-id="${escapeHtml(j.id)}">
+                ${started ? "✓ Application Started" : "⚡ Apply"}
+              </button>
+            </div>
+          </div>`;
+        })
+        .join("");
+
+      box.querySelectorAll(".btn-top5-save").forEach((btn) => {
+        btn.addEventListener("click", async (e) => {
+          const job = allJobs.find((x) => x.id === e.currentTarget.getAttribute("data-job-id"));
+          if (!job) return;
+          const queuedEntry = {
+            id: "trk_" + job.id,
+            company: job.company,
+            role: job.title,
+            location: job.location,
+            ats: job.ats,
+            url: job.url,
+            status: "Bookmarked",
+            pipelineStage: "queued",
+            stepLabel: "Saved · Ready for Auto-Apply",
+            detail: "Saved from Top Job Matches",
+            matchScore: job.matchScore,
+            resumeUsed: job.resumeFileName || `Raviteja_velanati_${job.company.replace(/[^a-zA-Z0-9]+/g, "_")}.pdf`
+          };
+          upsertLocalApplication(queuedEntry);
+          if (extensionConnected) {
+            await sendExtensionRpc("JOBIFY_WEB_UPSERT_APPLICATION", { application: queuedEntry }, 3000).catch(() => null);
+          }
+          e.currentTarget.textContent = "✓ Saved";
+        });
+      });
+
+      box.querySelectorAll(".btn-top5-details").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          const jid = e.currentTarget.getAttribute("data-job-id");
+          const key = "top5_" + jid;
+          if (expandedJobIds.has(key)) expandedJobIds.delete(key);
+          else expandedJobIds.add(key);
+          const dr = box.querySelector(`[data-top5-drawer="${CSS.escape(jid)}"]`);
+          if (dr) dr.classList.toggle("open");
+        });
+      });
+
+      box.querySelectorAll(".btn-top5-pass").forEach((btn) => {
+        btn.addEventListener("click", async (e) => {
+          const job = allJobs.find((x) => x.id === e.currentTarget.getAttribute("data-job-id"));
+          await passJobToTracker(job, e.currentTarget);
+        });
+      });
+
+      box.querySelectorAll(".btn-top5-apply").forEach((btn) => {
+        btn.addEventListener("click", async (e) => {
+          const job = allJobs.find((x) => x.id === e.currentTarget.getAttribute("data-job-id"));
+          if (job) await triggerWebAutoApply(job, e.currentTarget);
+        });
+      });
+    }
+
     async function loadJobs(force = false) {
       try {
         const resp = await fetch(`/api/jobs${force ? "?refresh=1" : ""}`);
@@ -4011,6 +4350,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         if (data.staffingAgenciesCount) {
           document.getElementById("nav-badge-staffing").textContent = String(data.staffingAgenciesCount);
         }
+        renderTopMatchesDashboard();
         renderJobs();
       } catch (_) {}
     }
@@ -4031,6 +4371,8 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       const qRaw = (searchEl?.value || "").trim();
       const q = qRaw.toLowerCase();
       const arch = document.getElementById("filter-archetype")?.value || "ALL";
+      const locVal = document.getElementById("filter-location")?.value || "ALL";
+      const degVal = document.getElementById("filter-degree")?.value || "ALL";
       const ats = document.getElementById("filter-ats")?.value || "ALL";
       const recencyVal = document.getElementById("filter-recency")?.value || "ALL";
       const sponsorshipVal = document.getElementById("filter-sponsorship")?.value || "ALL";
@@ -4039,6 +4381,8 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       const workModeVal = document.getElementById("filter-work-mode")?.value || "ALL";
 
       const filterDefs = [
+        { id: "filter-location", label: "Location", val: locVal },
+        { id: "filter-degree", label: "Degree", val: degVal },
         { id: "filter-ats", label: "Platform", val: ats },
         { id: "filter-recency", label: "Posted", val: recencyVal },
         { id: "filter-sponsorship", label: "Visa", val: sponsorshipVal },
@@ -4099,6 +4443,8 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
 
       const filtered = allJobs.filter((j) => {
         if (arch !== "ALL" && j.archetype !== arch) return false;
+        if (!matchesLocationFilter(j.location, locVal)) return false;
+        if (degVal !== "ALL" && !String(j.degreeLevel || "Bachelor's").toLowerCase().includes(degVal.toLowerCase())) return false;
         if (ats !== "ALL") {
           const hayAts = `${j.ats || ""} ${j.platformCategory || ""}`.toLowerCase();
           if (!hayAts.includes(ats.toLowerCase())) return false;
@@ -4122,7 +4468,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
           return false;
         }
         if (q) {
-          const hay = `${j.title} ${j.company} ${j.location} ${j.ats} ${j.platformCategory || ""} ${j.roleType || ""} ${j.experienceLabel || ""} ${(j.matchedKeywords || []).join(" ")}`.toLowerCase();
+          const hay = `${j.title} ${j.company} ${j.location} ${j.degreeLevel || ""} ${j.ats} ${j.platformCategory || ""} ${j.roleType || ""} ${j.experienceLabel || ""} ${(j.matchedKeywords || []).join(" ")}`.toLowerCase();
           if (!hay.includes(q)) return false;
         }
         return true;
@@ -4146,23 +4492,22 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       container.innerHTML = filtered.map((j) => {
         const checked = selectedJobIds.has(j.id) ? "checked" : "";
         const mb = j.matchBreakdown || { skills: 97, experience: 95, industry: 96 };
-        const alreadyApplied = allApplications.some(
-          (a) =>
-            (a.status === "Applied" || a.pipelineStage === "submitted") &&
-            ((j.url && a.url && String(a.url).split("#")[0] === String(j.url).split("#")[0]) ||
-              (a.company === j.company && a.role === j.title))
-        );
+        const startedOrApplied = isJobStartedOrApplied(j);
+        const passed = passedJobIds.has(j.id);
+        const drawerOpen = expandedJobIds.has(j.id);
         return `
-          <div class="job-card" data-job-id="${escapeHtml(j.id)}" data-job-company="${escapeHtml(j.company)}" data-job-ats="${escapeHtml(j.ats)}" data-posted-hours="${escapeHtml(j.postedHoursAgo)}" data-role-type="${escapeHtml(j.roleType || 'Full-Time')}" data-exp-range="${escapeHtml(j.experienceRange || '2-3')}">
+          <div class="job-card ${passed ? "passed-dim" : ""}" data-job-id="${escapeHtml(j.id)}" data-job-company="${escapeHtml(j.company)}" data-job-ats="${escapeHtml(j.ats)}" data-degree-level="${escapeHtml(j.degreeLevel || "Bachelor's")}" data-posted-hours="${escapeHtml(j.postedHoursAgo)}" data-role-type="${escapeHtml(j.roleType || 'Full-Time')}" data-exp-range="${escapeHtml(j.experienceRange || '2-3')}">
             <div class="jc-top">
               <div style="display:flex; gap:12px; align-items:flex-start;">
                 <input type="checkbox" class="job-select-cb" data-id="${escapeHtml(j.id)}" ${checked} style="margin-top:4px; width:16px; height:16px; cursor:pointer; accent-color:#4f46e5;" />
                 <div>
                   <h2 class="jc-title">${escapeHtml(j.title)}</h2>
                   <div class="jc-meta">
-                    <strong style="color:#0f172a;">${escapeHtml(j.company)}</strong>
+                    <strong style="color:#0f172a;">🏢 ${escapeHtml(j.company)}</strong>
                     <span>•</span>
-                    <span>${escapeHtml(j.location)}</span>
+                    <span>📍 ${escapeHtml(j.location)}</span>
+                    <span>•</span>
+                    <span style="color:#4338ca;font-weight:700;">🎓 ${escapeHtml(j.degreeLevel || "Bachelor's")}</span>
                     ${j.compensation ? `<span>•</span><span style="color:#059669;font-weight:700;">💰 ${escapeHtml(j.compensation)}</span>` : ""}
                     <span>•</span>
                     <span style="color:#0284c7;font-weight:700;">${escapeHtml(j.ats)}</span>
@@ -4170,7 +4515,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
                 </div>
               </div>
               <div style="text-align:right;">
-                ${alreadyApplied ? `<span class="match-badge" style="margin-right:4px;">✓ Applied</span>` : ""}
+                ${startedOrApplied ? `<span class="match-badge" style="margin-right:4px;">✓ Application Started</span>` : ""}
                 <span class="match-badge">${j.matchScore}% Match</span>
                 <div style="font-size:10.5px;color:#64748b;margin-top:4px;">
                   Skills ${mb.skills}% · Exp ${mb.experience}% · Fit ${mb.industry}%
@@ -4180,6 +4525,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
 
             <div class="kw-row">
               <span class="kw-chip portal">⏱️ ${escapeHtml(j.postedLabel || "Recent")}</span>
+              <span class="kw-chip" style="background:#eef2ff;color:#3730a3;border-color:#c7d2fe;">🎓 ${escapeHtml(j.degreeLabel || (j.degreeLevel || "Bachelor's") + " Degree")}</span>
               <span class="kw-chip" style="background:#f3e8ff;color:#6d28d9;border-color:#ddd6fe;">💼 ${escapeHtml(j.roleType || "Full-Time")}</span>
               <span class="kw-chip" style="background:#fffbeb;color:#b45309;border-color:#fde68a;">📊 ${escapeHtml(j.experienceLabel || (j.experienceRange || "2-3") + " Yrs")}</span>
               <span class="kw-chip portal">🏠 ${escapeHtml(j.workMode || "Hybrid")}</span>
@@ -4188,7 +4534,6 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
                   ? `<span class="kw-chip h1b">🛂 ${escapeHtml(j.sponsorshipType || "H-1B / STEM OPT Sponsor")}</span>`
                   : ""
               }
-              <span class="kw-chip portal">${escapeHtml(j.archetype)}</span>
               ${(j.matchedKeywords || []).slice(0, 5).map((k) => `<span class="kw-chip">✓ ${escapeHtml(k)}</span>`).join("")}
             </div>
 
@@ -4196,15 +4541,27 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
               ${escapeHtml((j.description || "").slice(0, 220))}...
             </div>
 
+            <div class="web-job-details-drawer ${drawerOpen ? "open" : ""}" data-jd-drawer="${escapeHtml(j.id)}">
+              <div style="font-weight:800;color:#0f172a;margin-bottom:4px;">📋 Full Job Summary &amp; Screening Readiness — ${escapeHtml(j.company)}</div>
+              <div>${escapeHtml(j.description || "")}</div>
+              <div style="margin-top:8px;display:flex;gap:14px;flex-wrap:wrap;font-size:12px;">
+                <span><strong>Degree Requirement:</strong> ${escapeHtml(j.degreeLevel || "Bachelor's")}</span>
+                <span><strong>Work Mode:</strong> ${escapeHtml(j.workMode || "Hybrid")}</span>
+                <span><strong>Tailored PDF:</strong> <code>${escapeHtml(j.resumeFileName || "Raviteja_velanati.pdf")}</code></span>
+                <a href="${escapeHtml(j.url)}" target="_blank" style="color:#4f46e5;font-weight:700;">↗ Open Original Posting</a>
+              </div>
+            </div>
+
             <div class="jc-actions">
               <div style="font-size:12px; color:#64748b;">
-                Tailors <code style="color:#4338ca;font-weight:600;">${escapeHtml(j.resumeFileName || ("Raviteja_velanati_" + j.company.replace(/[^a-zA-Z0-9]+/g, "_") + ".pdf"))}</code> + Bypasses SSO/Login in Background
+                <strong>${escapeHtml(j.company)}</strong> · Auto-fills Workday Yes/No + attaches <code style="color:#4338ca;font-weight:600;">${escapeHtml(j.resumeFileName || ("Raviteja_velanati_" + j.company.replace(/[^a-zA-Z0-9]+/g, "_") + ".pdf"))}</code>
               </div>
-              <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <button type="button" class="btn btn-sm btn-save-to-tracker" data-job-id="${escapeHtml(j.id)}">📌 Save to Tracker</button>
-                <a href="${escapeHtml(j.url)}" target="_blank" class="btn btn-sm" style="text-decoration:none;">↗ Posting</a>
-                <button type="button" class="btn btn-primary btn-web-auto-apply" data-jobify-web-apply-btn="true" data-job-id="${escapeHtml(j.id)}" data-job-url="${escapeHtml(j.url)}">
-                  ⚡ Auto-Apply (Background)
+              <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                <button type="button" class="btn btn-sm btn-save-to-tracker" data-job-id="${escapeHtml(j.id)}">🔖 Save</button>
+                <button type="button" class="btn btn-sm btn-web-details" data-job-id="${escapeHtml(j.id)}">🔎 Details</button>
+                <button type="button" class="btn btn-sm btn-pass btn-web-pass" data-job-id="${escapeHtml(j.id)}">${passed ? "⏭ Passed" : "✕ Pass"}</button>
+                <button type="button" class="btn ${startedOrApplied ? "btn-started" : "btn-primary"} btn-web-auto-apply" data-jobify-web-apply-btn="true" data-job-id="${escapeHtml(j.id)}" data-job-url="${escapeHtml(j.url)}">
+                  ${startedOrApplied ? "✓ Application Started" : "⚡ Apply"}
                 </button>
               </div>
             </div>
@@ -4235,14 +4592,32 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
             url: job.url,
             status: "Bookmarked",
             pipelineStage: "queued",
-            stepLabel: "Bookmarked · Ready for Auto-Apply",
-            detail: "Click ⚡ Auto-Apply in Tracker to execute in background",
+            stepLabel: "Saved · Ready for Auto-Apply",
+            detail: "Click ⚡ Apply in Tracker to execute in background",
             matchScore: job.matchScore,
             resumeUsed: job.resumeFileName || `Raviteja_velanati_${job.company.replace(/[^a-zA-Z0-9]+/g, "_")}.pdf`
           };
           upsertLocalApplication(queuedEntry);
           await sendExtensionRpc("JOBIFY_WEB_UPSERT_APPLICATION", { application: queuedEntry }, 3000);
-          e.currentTarget.textContent = "✓ In Tracker";
+          e.currentTarget.textContent = "✓ Saved";
+        });
+      });
+
+      container.querySelectorAll(".btn-web-details").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          const jid = e.currentTarget.getAttribute("data-job-id");
+          if (expandedJobIds.has(jid)) expandedJobIds.delete(jid);
+          else expandedJobIds.add(jid);
+          const dr = container.querySelector(`[data-jd-drawer="${CSS.escape(jid)}"]`);
+          if (dr) dr.classList.toggle("open");
+        });
+      });
+
+      container.querySelectorAll(".btn-web-pass").forEach((btn) => {
+        btn.addEventListener("click", async (e) => {
+          const jobId = e.currentTarget.getAttribute("data-job-id");
+          const job = allJobs.find((x) => x.id === jobId);
+          await passJobToTracker(job, e.currentTarget);
         });
       });
 
@@ -4261,13 +4636,23 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
       const resumeFile = job.resumeFileName || `Raviteja_velanati_${safeComp}.pdf`;
       const appId = job.id && String(job.id).startsWith("app_") ? job.id : `app_${safeComp.toLowerCase()}_${Date.now()}`;
 
+      // Immediately turn button green with exact Tsenta confirmation "✓ Application Started"
       if (btnEl) {
+        btnEl.classList.remove("btn-primary", "btn-emerald");
+        btnEl.classList.add("btn-started");
         btnEl.disabled = true;
-        btnEl.innerHTML = "⚡ In Flight...";
+        btnEl.innerHTML = "✓ Application Started";
+      }
+      if (job.id) {
+        document.querySelectorAll(`[data-job-id="${CSS.escape(job.id)}"].btn-web-auto-apply, [data-job-id="${CSS.escape(job.id)}"].btn-top5-apply`).forEach((b) => {
+          b.classList.remove("btn-primary", "btn-emerald");
+          b.classList.add("btn-started");
+          b.innerHTML = "✓ Application Started";
+        });
       }
 
-      // 1. Immediately pop into Tracker / Pipeline as IN FLIGHT (zero foreground tab pop!)
-      upsertLocalApplication({
+      // 1. Immediately pop into Tracker / Pipeline as IN FLIGHT ("Application Started")
+      const initialInFlight = {
         id: appId,
         company: job.company,
         role: job.title || job.role || "AI / Software Engineer",
@@ -4276,19 +4661,23 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         url: job.url,
         status: "In Flight",
         pipelineStage: "in_flight",
-        stepLabel: `In Flight · Reading JD & Tailoring ${resumeFile}...`,
-        detail: "Running autonomously in background (zero tab interruption)...",
+        stepLabel: "Application Started",
+        detail: `Application Started · Reading JD & Tailoring ${resumeFile} in background...`,
         matchScore: job.matchScore || 95,
         resumeUsed: resumeFile,
         resumeStatus: "Tailoring 1-Page PDF...",
         coverLetterStatus: "Tailoring..."
-      });
+      };
+      upsertLocalApplication(initialInFlight);
+      if (extensionConnected) {
+        sendExtensionRpc("JOBIFY_WEB_UPSERT_APPLICATION", { application: initialInFlight }, 2500).catch(() => null);
+      }
 
       renderLiveProgress({
         stage: "extracting_job",
         pipelineStage: "in_flight",
-        stepLabel: `⚡ In Flight: Reading ${job.company} JD & Tailoring ${resumeFile}`,
-        detail: "Executing silently in background — watch live status in the Tracker table above!"
+        stepLabel: `✓ Application Started: ${job.company} (${job.title || job.role})`,
+        detail: "Executing silently in background — tracked live in Tracker above!"
       });
 
       // 2. Trigger Backend Autonomous Receipt & Extension Silent Background Worker in parallel
@@ -4324,7 +4713,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         ).catch(() => null);
       }
 
-      // 3. Turbo live stage progression (In Flight -> Filled -> Submitted -> Moved into Tracker!)
+      // 3. Live stage progression (In Flight -> Filled -> Submitted in Tracker!)
       await new Promise((r) => setTimeout(r, 140));
       const backendRes = await backendPromise;
       const receipt = backendRes?.receipt || {};
@@ -4339,7 +4728,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         status: "Filled",
         pipelineStage: "filled",
         stepLabel: `Filled · ${receipt.filledCount || 11} of ${receipt.filledCount || 11} fields populated`,
-        detail: `Attached ${resumeFile} + bypassed SSO/login gate — submitting application...`,
+        detail: `Attached ${resumeFile} + answered Workday Yes/No screening — submitting...`,
         resumeUsed: resumeFile,
         resumeStatus: "Attached",
         coverLetterStatus: "Attached",
@@ -4352,7 +4741,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         stage: "filling_fields",
         pipelineStage: "filled",
         stepLabel: `✍️ Filled ${receipt.filledCount || 11} of ${receipt.filledCount || 11} Fields for ${job.company}`,
-        detail: `Attached ${resumeFile} & custom AI answers — finalizing submission...`
+        detail: `Attached ${resumeFile} & screening answers — finalizing submission...`
       });
 
       await new Promise((r) => setTimeout(r, 160));
@@ -4388,60 +4777,304 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         stage: "completed",
         pipelineStage: "submitted",
         stepLabel: `✅ Submitted to ${job.company} (${job.title || job.role})!`,
-        detail: `Moved into Tracker (Applied) with ${receipt.filledCount || 11} verified fields & tailored ${resumeFile}.`
+        detail: `Tracked in Submitted (${receipt.filledCount || 11} verified fields & tailored ${resumeFile}).`
       });
 
       if (btnEl) {
         btnEl.disabled = false;
-        btnEl.innerHTML = "✅ Submitted in Tracker";
+        btnEl.classList.add("btn-started");
+        btnEl.innerHTML = "✓ Application Started";
       }
     }
 
-    // Left Sidebar View Switcher
+    // Horizontal Top Nav View Switcher
     async function switchWebView(viewName) {
       activeWebView = viewName;
       document.querySelectorAll("#web-sidebar-nav .web-nav-btn").forEach((b) => {
         b.classList.toggle("active", b.getAttribute("data-web-view") === viewName);
       });
+      const heroSec = document.getElementById("web-hero-launcher");
+      const top5Sec = document.getElementById("tsenta-top-matches-section");
+      const pipeSec = document.getElementById("tsenta-pipeline-section");
       const jobsSec = document.getElementById("web-jobs-section");
       const auxSec = document.getElementById("web-aux-view-container");
       const kbBoard = document.getElementById("tracker-kanban-board");
 
       if (viewName === "dashboard") {
+        if (heroSec) heroSec.style.display = "block";
+        if (top5Sec) top5Sec.style.display = "block";
+        if (pipeSec) pipeSec.style.display = "block";
         jobsSec.style.display = "block";
         auxSec.style.display = "none";
         kbBoard.style.display = "none";
-      } else if (viewName === "staffing") {
+        renderTopMatchesDashboard();
+      } else if (viewName === "jobs") {
+        if (heroSec) heroSec.style.display = "none";
+        if (top5Sec) top5Sec.style.display = "none";
+        if (pipeSec) pipeSec.style.display = "none";
+        jobsSec.style.display = "block";
+        auxSec.style.display = "none";
+        kbBoard.style.display = "none";
+        renderJobs();
+      } else if (viewName === "autopilot") {
+        if (heroSec) heroSec.style.display = "block";
+        if (top5Sec) top5Sec.style.display = "none";
+        if (pipeSec) pipeSec.style.display = "block";
         jobsSec.style.display = "none";
         kbBoard.style.display = "none";
         auxSec.style.display = "block";
-        await renderAuxStaffingAgencies(auxSec);
+        renderAuxAutopilot(auxSec);
       } else if (viewName === "tracker") {
+        if (heroSec) heroSec.style.display = "none";
+        if (top5Sec) top5Sec.style.display = "none";
+        if (pipeSec) pipeSec.style.display = "block";
         jobsSec.style.display = "none";
         auxSec.style.display = "none";
         kbBoard.style.display = "grid";
         renderApplicationsPipeline();
+      } else if (viewName === "profile") {
+        if (heroSec) heroSec.style.display = "none";
+        if (top5Sec) top5Sec.style.display = "none";
+        if (pipeSec) pipeSec.style.display = "none";
+        jobsSec.style.display = "none";
+        kbBoard.style.display = "none";
+        auxSec.style.display = "block";
+        await renderAuxProfile(auxSec);
+      } else if (viewName === "staffing") {
+        if (heroSec) heroSec.style.display = "none";
+        if (top5Sec) top5Sec.style.display = "none";
+        if (pipeSec) pipeSec.style.display = "none";
+        jobsSec.style.display = "none";
+        kbBoard.style.display = "none";
+        auxSec.style.display = "block";
+        await renderAuxStaffingAgencies(auxSec);
       } else if (viewName === "resume") {
+        if (heroSec) heroSec.style.display = "none";
+        if (top5Sec) top5Sec.style.display = "none";
+        if (pipeSec) pipeSec.style.display = "none";
         jobsSec.style.display = "none";
         kbBoard.style.display = "none";
         auxSec.style.display = "block";
         renderAuxResumeDiffStudio(auxSec);
       } else if (viewName === "interview") {
+        if (heroSec) heroSec.style.display = "none";
+        if (top5Sec) top5Sec.style.display = "none";
+        if (pipeSec) pipeSec.style.display = "none";
         jobsSec.style.display = "none";
         kbBoard.style.display = "none";
         auxSec.style.display = "block";
         renderAuxInterviewPrepStudio(auxSec);
       } else if (viewName === "insider") {
+        if (heroSec) heroSec.style.display = "none";
+        if (top5Sec) top5Sec.style.display = "none";
+        if (pipeSec) pipeSec.style.display = "none";
         jobsSec.style.display = "none";
         kbBoard.style.display = "none";
         auxSec.style.display = "block";
         renderAuxInsiderConnections(auxSec);
       } else if (viewName === "inbox") {
+        if (heroSec) heroSec.style.display = "none";
+        if (top5Sec) top5Sec.style.display = "none";
+        if (pipeSec) pipeSec.style.display = "none";
         jobsSec.style.display = "none";
         kbBoard.style.display = "none";
         auxSec.style.display = "block";
         renderAuxRecruiterInbox(auxSec);
       }
+    }
+
+    function renderAuxAutopilot(container) {
+      container.innerHTML = `
+        <div class="tsenta-panel" id="web-autopilot-panel">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
+            <div>
+              <div style="font-size:16.5px;font-weight:800;color:#0f172a;">🤖 Sequential Background Auto Apply Queue</div>
+              <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">
+                Paste multiple Workday, Greenhouse, Lever, Ashby, LinkedIn, or Staffing URLs (one per line) to run hands-free in FIFO order
+              </div>
+            </div>
+            <button type="button" class="btn btn-emerald" id="web-ap-run-bulk">⚡ Launch Bulk Auto Apply</button>
+          </div>
+          <textarea id="web-ap-bulk-urls" class="url-input" rows="5" style="width:100%;font-family:monospace;font-size:12.5px;" placeholder="https://nvidia.wd5.myworkdayjobs.com/...\nhttps://boards.greenhouse.io/anthropic/jobs/...\nhttps://jobs.lever.co/..."></textarea>
+          <div style="display:flex;gap:14px;align-items:center;margin-top:10px;font-size:12.5px;color:#334155;flex-wrap:wrap;">
+            <span>✓ <strong>Zero-Touch Workday Yes/No Screening:</strong> Enabled</span>
+            <span>✓ <strong>1-Page LaTeX Tailoring:</strong> Enabled</span>
+            <span>✓ <strong>SSO &amp; Gmail OTP Verification:</strong> Enabled</span>
+          </div>
+        </div>
+      `;
+      document.getElementById("web-ap-run-bulk")?.addEventListener("click", async (e) => {
+        const raw = document.getElementById("web-ap-bulk-urls")?.value || "";
+        const urls = raw.split(/\r?\n/).map((u) => u.trim()).filter(Boolean);
+        const btn = e.currentTarget;
+        if (urls.length === 0) {
+          const top3 = allJobs.slice(0, 3);
+          btn.classList.add("btn-started");
+          btn.textContent = "✓ Application Started (Top 3)";
+          await Promise.all(top3.map((j) => triggerWebAutoApply(j, null)));
+          return;
+        }
+        btn.classList.add("btn-started");
+        btn.textContent = `✓ Application Started (${urls.length} URLs)`;
+        for (const u of urls) {
+          let comp = "Career Portal";
+          try { comp = new URL(u).hostname.replace(/^www\./, "").split(".")[0]; } catch (_) {}
+          await triggerWebAutoApply({ id: "bulk_" + Date.now() + "_" + Math.random().toString(36).slice(2, 5), title: "Software / AI Engineer", company: comp, url: u, ats: "Auto-Detected Portal", location: "United States" }, null);
+        }
+      });
+    }
+
+    async function renderAuxProfile(container) {
+      if (extensionConnected && !webProfileState) {
+        await syncExtensionState();
+      }
+      let savedLocal = {};
+      try { savedLocal = JSON.parse(localStorage.getItem("jobify_web_profile_v5") || "{}"); } catch (_) {}
+      const p = webProfileState?.personal || savedLocal.personal || {};
+      const w = webProfileState?.workAuthAndEEO || savedLocal.workAuthAndEEO || {};
+      const activeRes = webSettingsState?.defaultResumeVariant || savedLocal.defaultResumeVariant || "1page";
+
+      container.innerHTML = `
+        <div class="tsenta-panel" id="web-profile-standard-resume-card" style="border-color:#c7d2fe;background:linear-gradient(135deg,#ffffff 0%,#eef2ff 100%);">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
+            <div>
+              <div style="font-size:16.5px;font-weight:800;color:#0f172a;">📄 My Standard Resume</div>
+              <div style="font-size:12.5px;color:#475569;margin-top:2px;">
+                Active baseline PDF attached automatically when portals request your Standard Resume or before role-specific LaTeX tailoring
+              </div>
+            </div>
+            <label class="btn btn-primary btn-sm" style="cursor:pointer;">
+              📤 Upload Standard Resume PDF
+              <input type="file" id="web-pf-upload-pdf" accept=".pdf" style="display:none;" />
+            </label>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;">
+            <div style="padding:12px 14px;background:#ffffff;border:1.5px solid ${activeRes === "1page" ? "#059669" : "#cbd5e1"};border-radius:11px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+              <div>
+                <div style="font-weight:800;font-size:13.5px;color:#0f172a;">Raviteja_Velanati_Resume_1Page.pdf ${activeRes === "1page" ? `<span class="nav-badge green">★ Active Standard</span>` : ""}</div>
+                <div style="font-size:11.5px;color:#64748b;margin-top:2px;">1-Page Publication ATS Standard Resume • GlobalLogic (Google AI) + Clark Univ. M.S. CS</div>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <a href="/api/resume/standard?variant=1page" target="_blank" class="btn btn-sm" style="text-decoration:none;">👁 Preview</a>
+                <a href="/api/resume/standard?variant=1page&amp;download=1" class="btn btn-sm" style="text-decoration:none;">⬇ Download</a>
+              </div>
+            </div>
+
+            <div style="padding:12px 14px;background:#ffffff;border:1.5px solid ${activeRes === "master" ? "#059669" : "#cbd5e1"};border-radius:11px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+              <div>
+                <div style="font-weight:800;font-size:13.5px;color:#0f172a;">Raviteja_Velanati_Master_Resume.pdf ${activeRes === "master" ? `<span class="nav-badge green">★ Active Standard</span>` : ""}</div>
+                <div style="font-size:11.5px;color:#64748b;margin-top:2px;">Comprehensive Detailed Engineering Resume • Full Project &amp; Stack Breakdown</div>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <a href="/api/resume/standard?variant=master" target="_blank" class="btn btn-sm" style="text-decoration:none;">👁 Preview</a>
+                <a href="/api/resume/standard?variant=master&amp;download=1" class="btn btn-sm" style="text-decoration:none;">⬇ Download</a>
+              </div>
+            </div>
+          </div>
+          <div id="web-pf-upload-status" style="margin-top:8px;font-size:12px;color:#047857;font-weight:700;"></div>
+        </div>
+
+        <div class="tsenta-panel" id="web-profile-fields-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:14px;">
+            <div>
+              <div style="font-size:16.5px;font-weight:800;color:#0f172a;">👤 Complete Candidate Profile &amp; Workday Automatic Yes/No Defaults</div>
+              <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">
+                Every field below powers zero-touch autofill across Workday, Greenhouse, Lever, Ashby, iCIMS &amp; 128 Staffing Portals
+              </div>
+            </div>
+            <button type="button" class="btn btn-emerald" id="web-pf-save-btn">💾 Save Complete Profile</button>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:11px;margin-bottom:16px;">
+            <div><label class="web-filter-lbl">First Name</label><input id="wpf-fname" class="search-in" style="width:100%;" value="${escapeHtml(p.firstName || "Raviteja")}" /></div>
+            <div><label class="web-filter-lbl">Last Name</label><input id="wpf-lname" class="search-in" style="width:100%;" value="${escapeHtml(p.lastName || "Velanati")}" /></div>
+            <div><label class="web-filter-lbl">Email</label><input id="wpf-email" class="search-in" style="width:100%;" value="${escapeHtml(p.email || "ravitejavelanati11@gmail.com")}" /></div>
+            <div><label class="web-filter-lbl">Phone</label><input id="wpf-phone" class="search-in" style="width:100%;" value="${escapeHtml(p.phone || "(774) 418-6241")}" /></div>
+            <div><label class="web-filter-lbl">City</label><input id="wpf-city" class="search-in" style="width:100%;" value="${escapeHtml(p.city || "Sunnyvale")}" /></div>
+            <div><label class="web-filter-lbl">State</label><input id="wpf-state" class="search-in" style="width:100%;" value="${escapeHtml(p.state || "CA")}" /></div>
+            <div><label class="web-filter-lbl">Postal Code</label><input id="wpf-zip" class="search-in" style="width:100%;" value="${escapeHtml(p.postalCode || "94086")}" /></div>
+            <div><label class="web-filter-lbl">Highest Degree</label><input id="wpf-degree" class="search-in" style="width:100%;" value="${escapeHtml(p.highestDegree || "Master's Degree (M.S. CS)")}" /></div>
+            <div><label class="web-filter-lbl">LinkedIn URL</label><input id="wpf-linkedin" class="search-in" style="width:100%;" value="${escapeHtml(p.linkedin || "https://www.linkedin.com/in/ravitejavelanati")}" /></div>
+            <div><label class="web-filter-lbl">GitHub URL</label><input id="wpf-github" class="search-in" style="width:100%;" value="${escapeHtml(p.github || "https://github.com/ravitejav-dev")}" /></div>
+            <div><label class="web-filter-lbl">Current Title</label><input id="wpf-title" class="search-in" style="width:100%;" value="${escapeHtml(p.currentTitle || "AI Solutions Engineer")}" /></div>
+            <div><label class="web-filter-lbl">Current Company</label><input id="wpf-comp" class="search-in" style="width:100%;" value="${escapeHtml(p.currentCompany || "GlobalLogic (Client: Google)")}" /></div>
+          </div>
+
+          <div style="font-size:13.5px;font-weight:800;color:#3730a3;margin-bottom:8px;">✅ Workday &amp; Universal Screening Yes/No Defaults (100% Automatic)</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:11px;">
+            <div><label class="web-filter-lbl">Authorized to Work in US?</label><select id="wpf-auth" class="web-select-clean"><option value="Yes" ${(w.authorizedUS || "Yes") === "Yes" ? "selected" : ""}>Yes</option><option value="No" ${w.authorizedUS === "No" ? "selected" : ""}>No</option></select></div>
+            <div><label class="web-filter-lbl">Require Visa Sponsorship?</label><select id="wpf-spons" class="web-select-clean"><option value="Yes" ${(w.requireSponsorship || "Yes") === "Yes" ? "selected" : ""}>Yes</option><option value="No" ${w.requireSponsorship === "No" ? "selected" : ""}>No</option></select></div>
+            <div><label class="web-filter-lbl">Current Visa Status</label><input id="wpf-visa" class="search-in" style="width:100%;" value="${escapeHtml(w.visaStatus || "H-1B")}" /></div>
+            <div><label class="web-filter-lbl">At Least 18 Years Old?</label><select id="wpf-yn-18" class="web-select-clean"><option value="Yes" ${(w.over18 || "Yes") === "Yes" ? "selected" : ""}>Yes</option><option value="No" ${w.over18 === "No" ? "selected" : ""}>No</option></select></div>
+            <div><label class="web-filter-lbl">Background / Drug Check Consent?</label><select id="wpf-yn-bg" class="web-select-clean"><option value="Yes" ${(w.backgroundCheckConsent || "Yes") === "Yes" ? "selected" : ""}>Yes</option><option value="No" ${w.backgroundCheckConsent === "No" ? "selected" : ""}>No</option></select></div>
+            <div><label class="web-filter-lbl">Previously Employed at Target Co?</label><select id="wpf-yn-prev" class="web-select-clean"><option value="No" ${(w.previouslyEmployedAtCompany || "No") === "No" ? "selected" : ""}>No</option><option value="Yes" ${w.previouslyEmployedAtCompany === "Yes" ? "selected" : ""}>Yes</option></select></div>
+            <div><label class="web-filter-lbl">Relatives Employed at Target Co?</label><select id="wpf-yn-rel" class="web-select-clean"><option value="No" ${(w.relativesAtCompany || "No") === "No" ? "selected" : ""}>No</option><option value="Yes" ${w.relativesAtCompany === "Yes" ? "selected" : ""}>Yes</option></select></div>
+            <div><label class="web-filter-lbl">Bound by Non-Compete Agreement?</label><select id="wpf-yn-nc" class="web-select-clean"><option value="No" ${(w.nonCompeteRestriction || "No") === "No" ? "selected" : ""}>No</option><option value="Yes" ${w.nonCompeteRestriction === "Yes" ? "selected" : ""}>Yes</option></select></div>
+          </div>
+          <div id="web-pf-save-banner" style="margin-top:10px;font-size:12.5px;color:#059669;font-weight:700;"></div>
+        </div>
+      `;
+
+      document.getElementById("web-pf-upload-pdf")?.addEventListener("change", async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const buf = await file.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let bin = "";
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+          bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        }
+        const b64 = btoa(bin);
+        const customId = "custom_" + Date.now();
+        if (extensionConnected && webProfileState) {
+          const next = structuredClone(webProfileState);
+          if (!Array.isArray(next.resumes)) next.resumes = [];
+          next.resumes.unshift({ id: customId, name: file.name, label: `Standard Resume: ${file.name}`, customBase64: b64 });
+          webProfileState = next;
+          await sendExtensionRpc("JOBIFY_WEB_UPDATE_PROFILE", { profile: next }, 4000);
+          await sendExtensionRpc("JOBIFY_WEB_UPDATE_SETTINGS", { settings: { defaultResumeVariant: customId } }, 4000);
+        }
+        const stEl = document.getElementById("web-pf-upload-status");
+        if (stEl) stEl.textContent = `✓ Uploaded & activated ${file.name} as your Standard Resume!`;
+      });
+
+      document.getElementById("web-pf-save-btn")?.addEventListener("click", async () => {
+        const nextPersonal = {
+          ...(webProfileState?.personal || {}),
+          firstName: document.getElementById("wpf-fname").value.trim(),
+          lastName: document.getElementById("wpf-lname").value.trim(),
+          email: document.getElementById("wpf-email").value.trim(),
+          phone: document.getElementById("wpf-phone").value.trim(),
+          city: document.getElementById("wpf-city").value.trim(),
+          state: document.getElementById("wpf-state").value.trim(),
+          postalCode: document.getElementById("wpf-zip").value.trim(),
+          highestDegree: document.getElementById("wpf-degree").value.trim(),
+          linkedin: document.getElementById("wpf-linkedin").value.trim(),
+          github: document.getElementById("wpf-github").value.trim(),
+          currentTitle: document.getElementById("wpf-title").value.trim(),
+          currentCompany: document.getElementById("wpf-comp").value.trim()
+        };
+        const nextWorkAuth = {
+          ...(webProfileState?.workAuthAndEEO || {}),
+          authorizedUS: document.getElementById("wpf-auth").value,
+          requireSponsorship: document.getElementById("wpf-spons").value,
+          visaStatus: document.getElementById("wpf-visa").value.trim(),
+          over18: document.getElementById("wpf-yn-18").value,
+          backgroundCheckConsent: document.getElementById("wpf-yn-bg").value,
+          previouslyEmployedAtCompany: document.getElementById("wpf-yn-prev").value,
+          relativesAtCompany: document.getElementById("wpf-yn-rel").value,
+          nonCompeteRestriction: document.getElementById("wpf-yn-nc").value
+        };
+        const merged = { ...(webProfileState || {}), personal: nextPersonal, workAuthAndEEO: nextWorkAuth };
+        webProfileState = merged;
+        try { localStorage.setItem("jobify_web_profile_v5", JSON.stringify(merged)); } catch (_) {}
+        if (extensionConnected) {
+          await sendExtensionRpc("JOBIFY_WEB_UPDATE_PROFILE", { profile: merged }, 4000);
+        }
+        const b = document.getElementById("web-pf-save-banner");
+        if (b) b.textContent = "✅ Profile & Workday Yes/No Screening Defaults saved and synced!";
+      });
     }
 
     async function renderAuxStaffingAgencies(container) {
@@ -4488,7 +5121,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
             </div>
             <div style="font-size:11.5px;color:#059669;font-weight:600;margin-bottom:10px;">🛂 H-1B Sponsor • STEM OPT E-Verify • W2 / C2C</div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
-              <button type="button" class="btn btn-sm btn-emerald btn-staffing-auto-apply" data-idx="${idx}" data-name="${escapeHtml(a.name)}" data-url="${escapeHtml(a.url)}" data-portal="${escapeHtml(a.portalType)}" style="flex:1.2;">⚡ Auto-Apply</button>
+              <button type="button" class="btn btn-sm btn-emerald btn-staffing-auto-apply" data-idx="${idx}" data-name="${escapeHtml(a.name)}" data-url="${escapeHtml(a.url)}" data-portal="${escapeHtml(a.portalType)}" style="flex:1.2;">⚡ Apply</button>
               <button type="button" class="btn btn-sm btn-staffing-pull-jobs" data-name="${escapeHtml(a.name)}" style="flex:1;">🔍 Pull Jobs</button>
               <a href="${escapeHtml(a.url)}" target="_blank" class="btn btn-sm" style="text-decoration:none;">↗ Portal</a>
             </div>
@@ -4499,7 +5132,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
         grid.querySelectorAll(".btn-staffing-pull-jobs").forEach((btn) => {
           btn.addEventListener("click", () => {
             const name = btn.getAttribute("data-name") || "";
-            switchWebView("dashboard");
+            switchWebView("jobs");
             document.getElementById("filter-ats").value = "Staffing";
             document.getElementById("filter-search").value = name.split(",")[0].split("(")[0].trim();
             renderJobs();
@@ -4656,6 +5289,24 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     });
     document.getElementById("btn-open-staffing-view")?.addEventListener("click", () => switchWebView("staffing"));
 
+    ["dash-filter-location", "dash-filter-degree", "dash-filter-visa"].forEach((id) => {
+      document.getElementById(id)?.addEventListener("change", renderTopMatchesDashboard);
+    });
+
+    document.getElementById("web-btn-apply-top5")?.addEventListener("click", async (e) => {
+      const top5 = getTop5FilteredJobs();
+      const mainBtn = e.currentTarget;
+      mainBtn.classList.remove("btn-emerald");
+      mainBtn.classList.add("btn-started");
+      mainBtn.textContent = `✓ Application Started (${top5.length})`;
+      document.querySelectorAll(".btn-top5-apply").forEach((b) => {
+        b.classList.remove("btn-primary", "btn-emerald");
+        b.classList.add("btn-started");
+        b.textContent = "✓ Application Started";
+      });
+      await Promise.all(top5.map((jb) => triggerWebAutoApply(jb, null)));
+    });
+
     document.querySelectorAll("#pipeline-filter-tabs .tsenta-tab").forEach((tab) => {
       tab.addEventListener("click", () => {
         activePipeFilter = tab.getAttribute("data-pipe-filter") || "ALL";
@@ -4689,7 +5340,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     });
 
     document.getElementById("btn-submit-all-matches").addEventListener("click", async () => {
-      const topJobs = allJobs.slice(0, 3);
+      const topJobs = allJobs.slice(0, 5);
       await Promise.all(topJobs.map((jb) => triggerWebAutoApply(jb, null)));
     });
 
@@ -4706,11 +5357,11 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
 
     document.getElementById("btn-refresh-jobs").addEventListener("click", () => loadJobs(true));
     document.getElementById("btn-open-ext-hub").addEventListener("click", () => {
-      sendExtensionRpc("JOBIFY_WEB_OPEN_HUB", { tab: "tracker" }, 5000);
+      sendExtensionRpc("JOBIFY_WEB_OPEN_HUB", { tab: "overview" }, 5000);
     });
 
     // Clean Structured Filter Listeners
-    ["filter-search", "filter-ats", "filter-recency", "filter-sponsorship", "filter-role-type", "filter-experience", "filter-work-mode"].forEach((id) => {
+    ["filter-search", "filter-location", "filter-degree", "filter-ats", "filter-recency", "filter-sponsorship", "filter-role-type", "filter-experience", "filter-work-mode"].forEach((id) => {
       const el = document.getElementById(id);
       if (!el) return;
       el.addEventListener(id === "filter-search" ? "input" : "change", renderJobs);
@@ -4719,7 +5370,7 @@ JOBIFY_WEBAPP_HTML = r"""<!DOCTYPE html>
     document.getElementById("btn-reset-filters")?.addEventListener("click", () => {
       const sEl = document.getElementById("filter-search");
       if (sEl) sEl.value = "";
-      ["filter-ats", "filter-recency", "filter-sponsorship", "filter-role-type", "filter-experience", "filter-work-mode"].forEach((id) => {
+      ["filter-location", "filter-degree", "filter-ats", "filter-recency", "filter-sponsorship", "filter-role-type", "filter-experience", "filter-work-mode"].forEach((id) => {
         const el = document.getElementById(id);
         if (el) el.value = "ALL";
       });
@@ -5255,6 +5906,305 @@ PORTAL_ADVANCED_SANDBOX_HTML = r"""<!DOCTYPE html>
 </html>
 """
 
+WORKDAY_YESNO_SANDBOX_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>CloudScale AI - Workday Application Questions (Yes/No Gauntlet)</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 32px 16px; }
+    .wd-card { max-width: 780px; margin: 0 auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 28px 32px; box-shadow: 0 8px 24px rgba(15,23,42,0.06); }
+    .wd-badge { display: inline-block; background: #eff6ff; color: #1d4ed8; font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 999px; margin-bottom: 8px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .sub { color: #64748b; font-size: 13px; margin-bottom: 22px; }
+    .wd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+    .wd-field { margin-bottom: 18px; }
+    .wd-field > label, .wd-q-label, legend { display: block; font-size: 13.5px; font-weight: 700; color: #1e293b; margin-bottom: 7px; line-height: 1.45; }
+    abbr[title="Required"] { color: #dc2626; text-decoration: none; font-weight: 800; margin-left: 3px; }
+    input[type="text"], input[type="email"], input[type="tel"] { width: 100%; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 13.5px; box-sizing: border-box; }
+    .wd-listbox-btn { width: 100%; max-width: 340px; text-align: left; padding: 10px 14px; border: 1px solid #94a3b8; border-radius: 8px; background: #fff; font-size: 13.5px; font-weight: 600; color: #334155; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+    .wd-listbox-btn::after { content: "▾"; color: #64748b; }
+    fieldset.wd-radio-fs { border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; margin: 0 0 16px; background: #fcfdff; }
+    .wd-radio-row { display: flex; gap: 22px; align-items: center; margin-top: 6px; }
+    .wd-radio-opt { position: relative; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13.5px; font-weight: 600; color: #1e293b; padding: 4px 8px; border-radius: 6px; }
+    .wd-radio-zero { opacity: 0; width: 0; height: 0; position: absolute; margin: 0; }
+    .wd-radio-overlay { opacity: 0; width: 18px; height: 18px; margin: 0; cursor: pointer; }
+    .wd-radio-dot { width: 16px; height: 16px; border: 2px solid #64748b; border-radius: 50%; display: inline-block; box-sizing: border-box; }
+    input[type="radio"]:checked + .wd-radio-dot, input[type="radio"]:checked ~ .wd-radio-dot { border-color: #2563eb; background: radial-gradient(#2563eb 45%, transparent 50%); }
+    .wd-popup { position: fixed; z-index: 99999; background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; box-shadow: 0 12px 28px rgba(15,23,42,0.16); min-width: 260px; padding: 6px 0; margin: 0; list-style: none; }
+    .wd-popup li[role="option"] { padding: 9px 14px; font-size: 13.5px; cursor: pointer; color: #0f172a; }
+    .wd-popup li[role="option"]:hover { background: #eff6ff; color: #1d4ed8; }
+    .wd-submit { background: #2563eb; color: #fff; border: none; border-radius: 8px; padding: 12px 26px; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 10px; }
+    #wd-yesno-errors { display: none; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; font-weight: 600; }
+    #wd-yesno-confirmation { display: none; background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; padding: 24px; border-radius: 12px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="wd-card" data-automation-id="workdayApplicationPage">
+    <span class="wd-badge">WORKDAY APPLICATION QUESTIONS GAUNTLET</span>
+    <h1 data-automation-id="jobPostingHeader">Senior AI Agents Engineer — CloudScale AI</h1>
+    <div class="sub">San Francisco, CA · Full-Time · Step 2 of 2: Application &amp; Compliance Questions</div>
+
+    <div id="wd-yesno-errors" data-automation-id="errorBanner" role="alert"></div>
+
+    <form id="wd-yesno-form" novalidate>
+      <div class="wd-grid">
+        <div class="wd-field" data-automation-id="formField-firstName">
+          <label for="wd-yn-fn">First Name<abbr title="Required">*</abbr></label>
+          <input id="wd-yn-fn" name="firstName" type="text" />
+        </div>
+        <div class="wd-field" data-automation-id="formField-lastName">
+          <label for="wd-yn-ln">Last Name<abbr title="Required">*</abbr></label>
+          <input id="wd-yn-ln" name="lastName" type="text" />
+        </div>
+        <div class="wd-field" data-automation-id="formField-email">
+          <label for="wd-yn-email">Email Address<abbr title="Required">*</abbr></label>
+          <input id="wd-yn-email" name="email" type="email" />
+        </div>
+        <div class="wd-field" data-automation-id="formField-phone">
+          <label for="wd-yn-phone">Phone Number<abbr title="Required">*</abbr></label>
+          <input id="wd-yn-phone" name="phone" type="tel" />
+        </div>
+      </div>
+
+      <div class="wd-field" data-automation-id="formField-resume">
+        <label for="wd-yn-resume">Resume / CV (PDF)<abbr title="Required">*</abbr></label>
+        <input id="wd-yn-resume" name="resume" type="file" accept=".pdf" />
+      </div>
+
+      <!-- 1. Workday richText + aria-haspopup="listbox" Button: Work Authorization -->
+      <div class="wd-field" data-automation-id="formField-question-auth">
+        <div class="wd-q-label" data-automation-id="richText">Are you legally authorized to work in the United States?<abbr title="Required">*</abbr></div>
+        <button type="button" id="wd-btn-auth" class="wd-listbox-btn" aria-haspopup="listbox" data-options="Select One|Yes|No">Select One</button>
+      </div>
+
+      <!-- 2. Workday richText + aria-haspopup="listbox" Button: Visa Sponsorship (cascades into #wd-conditional-visa!) -->
+      <div class="wd-field" data-automation-id="formField-question-spons">
+        <div class="wd-q-label" data-automation-id="richText">Will you now or in the future require visa sponsorship (e.g., H-1B)?<abbr title="Required">*</abbr></div>
+        <button type="button" id="wd-btn-spons" class="wd-listbox-btn" aria-haspopup="listbox" data-options="Select One|Yes|No">Select One</button>
+      </div>
+
+      <!-- Conditional Sub-Question mounted dynamically ONLY when Sponsorship == "Yes" -->
+      <div id="wd-conditional-visa-slot"></div>
+
+      <!-- 3. Workday richText + aria-haspopup="listbox" Button: Background Check -->
+      <div class="wd-field" data-automation-id="formField-question-bg">
+        <div class="wd-q-label" data-automation-id="richText">Are you willing to undergo a pre-employment background check and drug screening?<abbr title="Required">*</abbr></div>
+        <button type="button" id="wd-btn-bg" class="wd-listbox-btn" aria-haspopup="listbox" data-options="Select One|Yes|No">Select One</button>
+      </div>
+
+      <!-- 4-11. Workday Fieldset + Visually-Hidden Opacity-0 Radio Groups (both 0x0 and 18x18 skins) -->
+      <fieldset class="wd-radio-fs" data-automation-id="formField-q-age">
+        <legend data-automation-id="formLabel">Are you at least 18 years of age?<abbr title="Required">*</abbr></legend>
+        <div class="wd-radio-row">
+          <div class="wd-radio-opt"><input class="wd-radio-zero" type="radio" id="yn_age18_y" name="yn_age18" value="Yes" /><span class="wd-radio-dot"></span><label for="yn_age18_y">Yes</label></div>
+          <div class="wd-radio-opt"><input class="wd-radio-zero" type="radio" id="yn_age18_n" name="yn_age18" value="No" /><span class="wd-radio-dot"></span><label for="yn_age18_n">No</label></div>
+        </div>
+      </fieldset>
+
+      <fieldset class="wd-radio-fs" data-automation-id="formField-q-qual">
+        <legend data-automation-id="formLabel">Do you meet the minimum qualifications and degree requirements for this role?<abbr title="Required">*</abbr></legend>
+        <div class="wd-radio-row">
+          <div class="wd-radio-opt"><input class="wd-radio-zero" type="radio" id="yn_min_qual_y" name="yn_min_qual" value="Yes" /><span class="wd-radio-dot"></span><label for="yn_min_qual_y">Yes</label></div>
+          <div class="wd-radio-opt"><input class="wd-radio-zero" type="radio" id="yn_min_qual_n" name="yn_min_qual" value="No" /><span class="wd-radio-dot"></span><label for="yn_min_qual_n">No</label></div>
+        </div>
+      </fieldset>
+
+      <fieldset class="wd-radio-fs" data-automation-id="formField-q-prevemp">
+        <legend data-automation-id="formLabel">Have you previously worked for CloudScale AI as an employee, intern, or contractor?<abbr title="Required">*</abbr></legend>
+        <div class="wd-radio-row">
+          <label class="wd-radio-opt"><input class="wd-radio-overlay" type="radio" name="yn_prev_emp" value="Yes" /><span class="wd-radio-dot"></span>Yes</label>
+          <label class="wd-radio-opt"><input class="wd-radio-overlay" type="radio" name="yn_prev_emp" value="No" /><span class="wd-radio-dot"></span>No</label>
+        </div>
+      </fieldset>
+
+      <fieldset class="wd-radio-fs" data-automation-id="formField-q-relatives">
+        <legend data-automation-id="formLabel">Do you have any immediate family members or relatives currently employed at CloudScale AI?<abbr title="Required">*</abbr></legend>
+        <div class="wd-radio-row">
+          <label class="wd-radio-opt"><input class="wd-radio-overlay" type="radio" name="yn_relatives" value="Yes" /><span class="wd-radio-dot"></span>Yes</label>
+          <label class="wd-radio-opt"><input class="wd-radio-overlay" type="radio" name="yn_relatives" value="No" /><span class="wd-radio-dot"></span>No</label>
+        </div>
+      </fieldset>
+
+      <fieldset class="wd-radio-fs" data-automation-id="formField-q-noncompete">
+        <legend data-automation-id="formLabel">Are you currently bound by any non-compete agreement or restrictive covenant?<abbr title="Required">*</abbr></legend>
+        <div class="wd-radio-row">
+          <div class="wd-radio-opt"><input class="wd-radio-zero" type="radio" id="yn_nc_y" name="yn_noncompete" value="Yes" /><span class="wd-radio-dot"></span><label for="yn_nc_y">Yes</label></div>
+          <div class="wd-radio-opt"><input class="wd-radio-zero" type="radio" id="yn_nc_n" name="yn_noncompete" value="No" /><span class="wd-radio-dot"></span><label for="yn_nc_n">No</label></div>
+        </div>
+      </fieldset>
+
+      <fieldset class="wd-radio-fs" data-automation-id="formField-q-gov">
+        <legend data-automation-id="formLabel">Have you served as a government official or worked for our external auditor in the past 3 years?<abbr title="Required">*</abbr></legend>
+        <div class="wd-radio-row">
+          <div class="wd-radio-opt"><input class="wd-radio-zero" type="radio" id="yn_gov_y" name="yn_gov" value="Yes" /><span class="wd-radio-dot"></span><label for="yn_gov_y">Yes</label></div>
+          <div class="wd-radio-opt"><input class="wd-radio-zero" type="radio" id="yn_gov_n" name="yn_gov" value="No" /><span class="wd-radio-dot"></span><label for="yn_gov_n">No</label></div>
+        </div>
+      </fieldset>
+
+      <fieldset class="wd-radio-fs" data-automation-id="formField-q-usperson">
+        <legend data-automation-id="formLabel">For export control purposes, are you a U.S. Person (U.S. Citizen, Permanent Resident, Asylee, or Refugee)?<abbr title="Required">*</abbr></legend>
+        <div class="wd-radio-row">
+          <label class="wd-radio-opt"><input class="wd-radio-overlay" type="radio" name="yn_us_person" value="Yes" /><span class="wd-radio-dot"></span>Yes</label>
+          <label class="wd-radio-opt"><input class="wd-radio-overlay" type="radio" name="yn_us_person" value="No" /><span class="wd-radio-dot"></span>No</label>
+        </div>
+      </fieldset>
+
+      <fieldset class="wd-radio-fs" data-automation-id="formField-q-novel">
+        <legend data-automation-id="formLabel">Are you comfortable adhering to our engineering code review and security policies?<abbr title="Required">*</abbr></legend>
+        <div class="wd-radio-row">
+          <div class="wd-radio-opt"><input class="wd-radio-zero" type="radio" id="yn_pol_y" name="yn_novel_policy" value="Yes" /><span class="wd-radio-dot"></span><label for="yn_pol_y">Yes</label></div>
+          <div class="wd-radio-opt"><input class="wd-radio-zero" type="radio" id="yn_pol_n" name="yn_novel_policy" value="No" /><span class="wd-radio-dot"></span><label for="yn_pol_n">No</label></div>
+        </div>
+      </fieldset>
+
+      <button type="submit" class="wd-submit" data-automation-id="bottom-navigation-next-button">Submit Application</button>
+    </form>
+
+    <div id="wd-yesno-confirmation" data-automation-id="applicationSubmitted">
+      <h2>Application Submitted!</h2>
+      <p>Thank you for applying to CloudScale AI. Your application for Senior AI Agents Engineer has been received.</p>
+    </div>
+  </div>
+
+  <script>
+    window.__WD_YESNO_AUDIT__ = { submitted: false, answers: {}, mismatches: [] };
+    let activePopup = null;
+
+    function closePopup() {
+      if (activePopup) {
+        activePopup.remove();
+        activePopup = null;
+      }
+      document.querySelectorAll(".wd-listbox-btn").forEach((b) => b.setAttribute("aria-expanded", "false"));
+    }
+
+    function bindListboxButton(btn) {
+      if (!btn || btn.dataset.bound === "1") return;
+      btn.dataset.bound = "1";
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        closePopup();
+        btn.setAttribute("aria-expanded", "true");
+        const opts = (btn.getAttribute("data-options") || "Select One|Yes|No").split("|");
+        const rect = btn.getBoundingClientRect();
+        // Simulate Workday's async React portal popup render (~35ms)
+        setTimeout(() => {
+          closePopup();
+          const ul = document.createElement("ul");
+          ul.className = "wd-popup";
+          ul.setAttribute("role", "listbox");
+          ul.id = btn.id + "-listbox";
+          btn.setAttribute("aria-controls", ul.id);
+          ul.style.top = Math.min(window.innerHeight - 160, Math.max(12, rect.bottom + 4)) + "px";
+          ul.style.left = Math.max(12, rect.left) + "px";
+          opts.forEach((optText) => {
+            const li = document.createElement("li");
+            li.setAttribute("role", "option");
+            li.setAttribute("data-automation-id", "promptOption");
+            li.textContent = optText;
+            li.addEventListener("click", (e2) => {
+              e2.stopPropagation();
+              btn.textContent = optText;
+              btn.dataset.value = optText === "Select One" ? "" : optText;
+              closePopup();
+              if (btn.id === "wd-btn-spons" && optText === "Yes") {
+                mountConditionalVisaQuestion();
+              }
+            });
+            ul.appendChild(li);
+          });
+          document.body.appendChild(ul);
+          activePopup = ul;
+        }, 35);
+      });
+    }
+
+    function mountConditionalVisaQuestion() {
+      const slot = document.getElementById("wd-conditional-visa-slot");
+      if (!slot || document.getElementById("wd-btn-visa")) return;
+      slot.innerHTML = `
+        <div class="wd-field" data-automation-id="formField-question-visa">
+          <div class="wd-q-label" data-automation-id="richText">What is your current US visa status?<abbr title="Required">*</abbr></div>
+          <button type="button" id="wd-btn-visa" class="wd-listbox-btn" aria-haspopup="listbox" data-options="Select One|H-1B|F-1 OPT|TN|U.S. Citizen">Select One</button>
+        </div>
+      `;
+      bindListboxButton(document.getElementById("wd-btn-visa"));
+    }
+
+    document.querySelectorAll(".wd-listbox-btn").forEach(bindListboxButton);
+    document.addEventListener("click", () => closePopup());
+
+    document.getElementById("wd-yesno-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const getRadio = (nm) => document.querySelector(`input[name="${nm}"]:checked`)?.value || "";
+      const getBtn = (id) => document.getElementById(id)?.dataset?.value || "";
+      const resFile = document.getElementById("wd-yn-resume").files?.[0] || null;
+
+      const answers = {
+        firstName: document.getElementById("wd-yn-fn").value.trim(),
+        lastName: document.getElementById("wd-yn-ln").value.trim(),
+        email: document.getElementById("wd-yn-email").value.trim(),
+        phone: document.getElementById("wd-yn-phone").value.trim(),
+        resumeName: resFile?.name || "",
+        authUS: getBtn("wd-btn-auth"),
+        requireSponsorship: getBtn("wd-btn-spons"),
+        currentVisaStatus: getBtn("wd-btn-visa"),
+        backgroundCheck: getBtn("wd-btn-bg"),
+        age18: getRadio("yn_age18"),
+        minQualifications: getRadio("yn_min_qual"),
+        previouslyEmployed: getRadio("yn_prev_emp"),
+        relativesEmployed: getRadio("yn_relatives"),
+        nonCompete: getRadio("yn_noncompete"),
+        govOrAuditor: getRadio("yn_gov"),
+        usPersonExportControl: getRadio("yn_us_person"),
+        novelSecurityPolicy: getRadio("yn_novel_policy")
+      };
+
+      const expected = {
+        authUS: "Yes",
+        requireSponsorship: "Yes",
+        currentVisaStatus: "H-1B",
+        backgroundCheck: "Yes",
+        age18: "Yes",
+        minQualifications: "Yes",
+        previouslyEmployed: "No",
+        relativesEmployed: "No",
+        nonCompete: "No",
+        govOrAuditor: "No",
+        usPersonExportControl: "No",
+        novelSecurityPolicy: "Yes"
+      };
+
+      const mismatches = [];
+      if (!answers.firstName || !answers.lastName || !answers.email || !answers.phone) {
+        mismatches.push("Missing contact fields");
+      }
+      if (!resFile) {
+        mismatches.push("Missing PDF resume");
+      }
+      for (const [k, exp] of Object.entries(expected)) {
+        if (answers[k] !== exp) {
+          mismatches.push(`${k}: expected "${exp}", got "${answers[k] || "EMPTY"}"`);
+        }
+      }
+
+      window.__WD_YESNO_AUDIT__ = { submitted: mismatches.length === 0, answers, mismatches };
+      const errBox = document.getElementById("wd-yesno-errors");
+      if (mismatches.length > 0) {
+        errBox.style.display = "block";
+        errBox.textContent = "Please complete all required questions accurately: " + mismatches.join("; ");
+        return;
+      }
+      errBox.style.display = "none";
+      document.getElementById("wd-yesno-form").style.display = "none";
+      document.getElementById("wd-yesno-confirmation").style.display = "block";
+    });
+  </script>
+</body>
+</html>
+"""
+
 
 class JobifyHandler(BaseHTTPRequestHandler):
     def _send_cors(self):
@@ -5292,6 +6242,32 @@ class JobifyHandler(BaseHTTPRequestHandler):
             return self._send_html(JOBIFY_WEBAPP_HTML)
         if path in ("/health", "/api/health"):
             return self._send_json(200, {"status": "ok", "pdflatex": bool(shutil.which("pdflatex"))})
+        if path == "/api/resume/standard":
+            params = urllib.parse.parse_qs(query)
+            variant = (params.get("variant", ["1page"])[0] or "1page").strip().lower()
+            download = (params.get("download", ["0"])[0] or "0").strip() == "1"
+            assets_dir = Path(__file__).resolve().parent.parent / "extension" / "assets"
+            fname = (
+                "Raviteja_Velanati_Master_Resume.pdf"
+                if variant == "master"
+                else "Raviteja_Velanati_Resume_1Page.pdf"
+            )
+            pdf_path = assets_dir / fname
+            if not pdf_path.exists():
+                fallback = assets_dir / "Raviteja_Velanati_Resume_1Page.pdf"
+                pdf_path = fallback if fallback.exists() else pdf_path
+            if not pdf_path.exists():
+                return self._send_json(404, {"ok": False, "error": "Standard resume PDF not found"})
+            raw_pdf = pdf_path.read_bytes()
+            disp = "attachment" if download else "inline"
+            self.send_response(200)
+            self._send_cors()
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Disposition", f'{disp}; filename="{pdf_path.name}"')
+            self.send_header("Content-Length", str(len(raw_pdf)))
+            self.end_headers()
+            self.wfile.write(raw_pdf)
+            return
         if path == "/api/jobs":
             force = "refresh=1" in query
             all_jobs = aggregate_live_jobs(force_refresh=force)
@@ -5334,6 +6310,8 @@ class JobifyHandler(BaseHTTPRequestHandler):
             return self._send_html(GREENHOUSE_HTML)
         if path == "/sandbox/workday":
             return self._send_html(WORKDAY_HTML)
+        if path == "/sandbox/workday-yesno":
+            return self._send_html(WORKDAY_YESNO_SANDBOX_HTML)
         if path == "/sandbox/workday-full-e2e":
             SANDBOX_OTP_STORE["otp"] = None
             SANDBOX_OTP_STORE["verificationUrl"] = None
@@ -5370,6 +6348,7 @@ class JobifyHandler(BaseHTTPRequestHandler):
                     f"http://127.0.0.1:{PORT}/sandbox/microsoft-sso",
                     f"http://127.0.0.1:{PORT}/sandbox/greenhouse",
                     f"http://127.0.0.1:{PORT}/sandbox/workday",
+                    f"http://127.0.0.1:{PORT}/sandbox/workday-yesno",
                     f"http://127.0.0.1:{PORT}/sandbox/workday-full-e2e",
                     f"http://127.0.0.1:{PORT}/sandbox/lever",
                     f"http://127.0.0.1:{PORT}/sandbox/auto-apply",

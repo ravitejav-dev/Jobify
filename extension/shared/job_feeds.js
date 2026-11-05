@@ -1476,6 +1476,35 @@ function inferJobAttributes(j, board = {}) {
   const sponsorshipType = j.sponsorshipType || board.sponsorshipType || "H-1B Transfer & Cap Sponsor";
   const visaTags = j.visaTags || (h1bSponsor ? ["H-1B Sponsor", "STEM OPT / E-Verify"] : ["US Work Auth"]);
 
+  let degreeLevel = j.degreeLevel || "";
+  if (!degreeLevel) {
+    if (/\b(phd|ph\.d|research scientist|postdoc)\b/i.test(titleLow)) {
+      degreeLevel = "PhD";
+    } else if (/\b(senior|sr\.?|staff|principal|lead|ml|machine learning|ai|applied scientist)\b/i.test(titleLow)) {
+      degreeLevel = "Master's";
+    } else {
+      degreeLevel = "Bachelor's";
+    }
+  }
+  const degreeLabel =
+    j.degreeLabel ||
+    (degreeLevel === "PhD"
+      ? "Master's / PhD"
+      : degreeLevel === "Master's"
+        ? "Bachelor's / Master's"
+        : "Bachelor's Degree");
+
+  const salaryDisplay =
+    j.salary ||
+    j.compensation ||
+    (expRange === "6+"
+      ? "$220k – $285k"
+      : expRange === "4-6"
+        ? "$195k – $255k"
+        : expRange === "3-4"
+          ? "$175k – $225k"
+          : "$145k – $190k");
+
   return {
     ...j,
     postedHoursAgo: hoursAgo,
@@ -1487,6 +1516,9 @@ function inferJobAttributes(j, board = {}) {
     h1bSponsor,
     sponsorshipType,
     visaTags,
+    degreeLevel,
+    degreeLabel,
+    salaryDisplay,
     isStaffingAgency: Boolean(j.isStaffingAgency)
   };
 }
@@ -1660,6 +1692,8 @@ export async function fetchPersonalizedRecommendations(
     roleType = "ALL",
     experienceRange = "ALL",
     workMode = "ALL",
+    location = "ALL",
+    degreeLevel = "ALL",
     query = "",
     forceRefresh = false,
     limit = 140
@@ -1730,9 +1764,43 @@ export async function fetchPersonalizedRecommendations(
     if (!isAllFilter(workMode)) {
       if (!String(j.workMode || "").toLowerCase().includes(String(workMode).toLowerCase())) return false;
     }
+    if (!isAllFilter(location)) {
+      const locQuery = String(location).toLowerCase();
+      const jLoc = `${j.location || ""} ${j.workMode || ""}`.toLowerCase();
+      if (locQuery === "bay area" || locQuery.includes("san francisco")) {
+        if (!/san francisco|bay area|santa clara|sunnyvale|mountain view|palo alto|san jose|menlo park|redwood|california|\bca\b/i.test(jLoc)) {
+          return false;
+        }
+      } else if (locQuery === "remote") {
+        if (!/remote|anywhere/i.test(jLoc)) return false;
+      } else if (locQuery === "new york") {
+        if (!/new york|nyc|\bny\b|manhattan|brooklyn/i.test(jLoc)) return false;
+      } else if (locQuery === "seattle") {
+        if (!/seattle|bellevue|redmond|\bwa\b|washington/i.test(jLoc)) return false;
+      } else if (locQuery === "austin") {
+        if (!/austin|dallas|texas|\btx\b/i.test(jLoc)) return false;
+      } else if (locQuery === "boston") {
+        if (!/boston|cambridge|worcester|\bma\b|massachusetts/i.test(jLoc)) return false;
+      } else if (!jLoc.includes(locQuery)) {
+        return false;
+      }
+    }
+    if (!isAllFilter(degreeLevel)) {
+      const degLow = String(degreeLevel).toLowerCase();
+      const jDeg = `${j.degreeLevel || ""} ${j.degreeLabel || ""}`.toLowerCase();
+      if (degLow.includes("bachelor")) {
+        if (!jDeg.includes("bachelor") && j.degreeLevel === "PhD") return false;
+      } else if (degLow.includes("master")) {
+        if (!jDeg.includes("master") && j.degreeLevel !== "Master's") return false;
+      } else if (degLow.includes("phd")) {
+        if (!jDeg.includes("phd")) return false;
+      } else if (!jDeg.includes(degLow)) {
+        return false;
+      }
+    }
     if (query && String(query).trim()) {
       const q = String(query).trim().toLowerCase();
-      const hay = `${j.company || ""} ${j.title || ""} ${j.location || ""} ${j.ats || ""} ${j.category || ""} ${j.roleType || ""} ${j.experienceLabel || ""} ${(j.visaTags || []).join(" ")}`.toLowerCase();
+      const hay = `${j.company || ""} ${j.title || ""} ${j.location || ""} ${j.ats || ""} ${j.category || ""} ${j.roleType || ""} ${j.experienceLabel || ""} ${j.degreeLabel || ""} ${(j.visaTags || []).join(" ")}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;

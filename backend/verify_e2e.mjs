@@ -436,7 +436,7 @@ async function main() {
           const applyRes = step1?.[0]?.result || null;
 
           // Wait for Workday navigation / SPA route / auth gate after Apply Manually
-          for (let w = 0; w < 22; w++) {
+          for (let w = 0; w < 35; w++) {
             await new Promise(r => setTimeout(r, 400));
             const probe = await chrome.scripting.executeScript({
               target: { tabId: targetTabId },
@@ -1213,6 +1213,15 @@ async function main() {
     const dashAudit = await dashCdp.eval(`
       (async () => {
         const bodyBgWhite = getComputedStyle(document.body).backgroundColor === "rgb(255, 255, 255)";
+        const primaryNavBtns = Array.from(document.querySelectorAll("#main-nav [data-primary-tab='true']"));
+        const primaryNavOrder = primaryNavBtns.map((b) => b.getAttribute("data-view"));
+        const navRects = primaryNavBtns.map((b) => b.getBoundingClientRect());
+        const isHorizontalTopNav =
+          primaryNavOrder.join(",") === "overview,jobs,autopilot,tracker,vault" &&
+          navRects.length === 5 &&
+          navRects[1].left > navRects[0].left &&
+          Math.abs(navRects[1].top - navRects[0].top) < 12;
+
         const views = ["overview", "tracker", "resume", "cover", "interview", "jobs", "autopilot", "network", "vault"];
         const rendered = {};
         for (const v of views) {
@@ -1222,9 +1231,21 @@ async function main() {
           rendered[v] = document.getElementById("view-container").innerText.trim().length;
         }
 
-        // Check Overview Universal Any-Portal URL Launcher & Pipeline Conversion Funnel
+        // Check Tsenta Overview: Filters + Top 5 Matches + Apply to All 5 + 6 Side-by-Side Status Tabs + Launcher & Funnel
         document.querySelector('#main-nav [data-view="overview"]').click();
-        await new Promise(r => setTimeout(r, 40));
+        await new Promise(r => setTimeout(r, 60));
+        const ovTabEls = Array.from(document.querySelectorAll("#ov-tsenta-tabs .tsenta-status-tab"));
+        const ovTabNames = ovTabEls.map((el) => el.getAttribute("data-ov-status-tab"));
+        const ovTabsSideBySide =
+          ovTabNames.join("|") === "All|Submitted|In Flight|Needs You|Failed|Skipped" &&
+          ovTabEls.length === 6 &&
+          ovTabEls[1].getBoundingClientRect().left > ovTabEls[0].getBoundingClientRect().left;
+        const hasOverviewTsenta = Boolean(
+          document.getElementById("ov-top-matches-card") &&
+          document.getElementById("btn-apply-top-5") &&
+          document.querySelectorAll('[data-ov-job-row="true"]').length === 5 &&
+          ovTabsSideBySide
+        );
         const hasOverviewLauncherAndFunnel = Boolean(
           document.getElementById("ov-custom-url") &&
           document.getElementById("btn-ov-launch-url") &&
@@ -1239,7 +1260,7 @@ async function main() {
         await new Promise(r => setTimeout(r, 40));
         const coverCompEmpty = (document.getElementById("cl-comp")?.value || "") === "";
 
-        // Explicitly audit Live Jobs view (#jobs): non-empty multi-platform cards + zero prefiltered selections + batch multi-select + interactive filter & reset
+        // Explicitly audit Browse Jobs (#jobs): Location + Degree filters, Details drawer, Pass -> Tracker Skipped, and Apply Started state
         document.querySelector('#main-nav [data-view="jobs"]').click();
         let hubLiveJobCards = 0;
         for (let i = 0; i < 30; i++) {
@@ -1252,8 +1273,29 @@ async function main() {
         const hasBatchMultiSelect = Boolean(
           document.getElementById("jf-select-top5") &&
           document.getElementById("btn-jf-batch-apply") &&
+          document.getElementById("jf-location") &&
+          document.getElementById("jf-degree") &&
           document.querySelectorAll(".jf-batch-chk").length >= 10
         );
+
+        // Test Details toggle & Pass -> Skipped in Tracker
+        const firstDetailsBtn = document.querySelector(".jf-details-btn");
+        if (firstDetailsBtn) firstDetailsBtn.click();
+        await new Promise(r => setTimeout(r, 80));
+        const detailsDrawerOpened = Boolean(document.querySelector("#jf-grid-wrap .job-details-drawer"));
+
+        const passBtn = document.querySelectorAll(".jf-pass")[8] || document.querySelector(".jf-pass");
+        if (passBtn) passBtn.click();
+        await new Promise(r => setTimeout(r, 160));
+
+        // Test Location & Degree filters + Recency filter + Reset
+        const jfDeg = document.getElementById("jf-degree");
+        jfDeg.value = "Master's";
+        jfDeg.dispatchEvent(new Event("change"));
+        await new Promise(r => setTimeout(r, 200));
+        const hubMastersCards = document.querySelectorAll('[data-hub-job-card="true"]').length;
+        document.getElementById("jf-reset").click();
+        await new Promise(r => setTimeout(r, 200));
 
         const jfRec = document.getElementById("jf-recency");
         jfRec.value = "2";
@@ -1266,9 +1308,17 @@ async function main() {
         const hubResetJobCards = document.querySelectorAll('[data-hub-job-card="true"]').length;
         const hubActivePillsAfterReset = document.querySelectorAll("#jf-active-chips .active-filter-pill").length;
 
-        // Check Tracker filter controls + Kanban Board toggle + Receipt Modal trigger
+        // Check Tracker 6 side-by-side status tabs + Skipped count >= 1 + Kanban Board toggle + Receipt Modal trigger
         document.querySelector('#main-nav [data-view="tracker"]').click();
-        await new Promise(r => setTimeout(r, 50));
+        await new Promise(r => setTimeout(r, 60));
+        const trkStatusEls = Array.from(document.querySelectorAll("#trk-tsenta-tabs [data-trk-status-tab]"));
+        const trkStatusNames = trkStatusEls.map((el) => el.getAttribute("data-trk-status-tab"));
+        const skippedTabText = document.querySelector('#trk-tsenta-tabs [data-trk-status-tab="Skipped"]')?.innerText || "";
+        const hasTrackerTsentaTabs =
+          trkStatusNames.join("|") === "All|Submitted|In Flight|Needs You|Failed|Skipped" &&
+          trkStatusEls.length === 6 &&
+          trkStatusEls[1].getBoundingClientRect().left > trkStatusEls[0].getBoundingClientRect().left &&
+          /[1-9]/.test(skippedTabText);
         const hasTrackerFilters = Boolean(document.getElementById("trk-filter-q") && document.getElementById("trk-filter-stage"));
         const hasReceiptBtns = document.querySelectorAll(".trk-view-receipt").length >= 1;
         document.getElementById("btn-trk-view-kanban")?.click();
@@ -1278,15 +1328,26 @@ async function main() {
         await new Promise(r => setTimeout(r, 60));
         const tableRestored = Boolean(document.querySelector("#view-container table.table"));
 
-        // Check Autopilot default mode = full_auto + Bulk Multi-URL Enqueue
+        // Check Auto Apply default mode = full_auto + Bulk Multi-URL Enqueue
         document.querySelector('#main-nav [data-view="autopilot"]').click();
         await new Promise(r => setTimeout(r, 50));
         const autopilotMode = document.getElementById("ap-mode")?.value || null;
         const hasAutopilotBulk = Boolean(document.getElementById("ap-bulk-urls") && document.getElementById("ap-add-bulk-btn"));
 
-        // Check Vault autoSubmitEnabled, handsFree, dupGuard, Backup/Restore & masked secret inputs
+        // Check Profile (#vault): My Standard Resume Card + Workday Yes/No Screening Defaults + Zero-Touch Vault Controls
         document.querySelector('#main-nav [data-view="vault"]').click();
         await new Promise(r => setTimeout(r, 50));
+        const hasStandardResumeAndWorkdayDefaults = Boolean(
+          document.getElementById("profile-standard-resume-card") &&
+          document.getElementById("vc-upload-pdf") &&
+          document.querySelectorAll(".pf-preview-res").length >= 2 &&
+          document.querySelectorAll(".pf-download-res").length >= 2 &&
+          document.getElementById("pf-yn-18") &&
+          document.getElementById("pf-yn-bg") &&
+          document.getElementById("pf-yn-prev-emp") &&
+          document.getElementById("pf-yn-relatives") &&
+          document.getElementById("pf-yn-noncompete")
+        );
         const vaultAutoSubmitChecked = Boolean(document.getElementById("vc-auto-sub")?.checked);
         const hasZeroTouchVaultControls = Boolean(
           document.getElementById("vc-hands-free") &&
@@ -1356,6 +1417,9 @@ async function main() {
 
         return {
           bodyBgWhite,
+          isHorizontalTopNav,
+          primaryNavOrder,
+          hasOverviewTsenta,
           rendered,
           hasOverviewLauncherAndFunnel,
           zeroPrefilledStudios: resumeCompEmpty && coverCompEmpty,
@@ -1364,17 +1428,21 @@ async function main() {
             hubInitialActiveFilterPills,
             hubResetHiddenInitially,
             hasBatchMultiSelect,
+            detailsDrawerOpened,
+            hubMastersCards,
             hub2hJobCards,
             hubActivePillsWhenFiltered,
             hubResetJobCards,
             hubActivePillsAfterReset
           },
+          hasTrackerTsentaTabs,
           hasTrackerFilters,
           hasReceiptBtns,
           kanbanCols,
           tableRestored,
           autopilotMode,
           hasAutopilotBulk,
+          hasStandardResumeAndWorkdayDefaults,
           vaultAutoSubmitChecked,
           hasZeroTouchVaultControls,
           vaultSecretsMasked,
@@ -1403,22 +1471,28 @@ async function main() {
     if (
       dashCdp.exceptions.length > 0 ||
       !dashAudit.bodyBgWhite ||
+      !dashAudit.isHorizontalTopNav ||
+      !dashAudit.hasOverviewTsenta ||
       !dashAudit.hasOverviewLauncherAndFunnel ||
       !dashAudit.zeroPrefilledStudios ||
       !(dashAudit.hubJobsAudit?.hubLiveJobCards >= 30) ||
       dashAudit.hubJobsAudit?.hubInitialActiveFilterPills !== 0 ||
       !dashAudit.hubJobsAudit?.hubResetHiddenInitially ||
       !dashAudit.hubJobsAudit?.hasBatchMultiSelect ||
+      !dashAudit.hubJobsAudit?.detailsDrawerOpened ||
+      !(dashAudit.hubJobsAudit?.hubMastersCards >= 4) ||
       !(dashAudit.hubJobsAudit?.hub2hJobCards >= 4 && dashAudit.hubJobsAudit.hub2hJobCards < dashAudit.hubJobsAudit.hubLiveJobCards) ||
       dashAudit.hubJobsAudit?.hubActivePillsWhenFiltered !== 1 ||
       dashAudit.hubJobsAudit?.hubResetJobCards !== dashAudit.hubJobsAudit?.hubLiveJobCards ||
       dashAudit.hubJobsAudit?.hubActivePillsAfterReset !== 0 ||
+      !dashAudit.hasTrackerTsentaTabs ||
       !dashAudit.hasTrackerFilters ||
       !dashAudit.hasReceiptBtns ||
       dashAudit.kanbanCols !== 5 ||
       !dashAudit.tableRestored ||
       dashAudit.autopilotMode !== "full_auto" ||
       !dashAudit.hasAutopilotBulk ||
+      !dashAudit.hasStandardResumeAndWorkdayDefaults ||
       !dashAudit.vaultAutoSubmitChecked ||
       !dashAudit.hasZeroTouchVaultControls ||
       !dashAudit.vaultSecretsMasked ||
@@ -1494,17 +1568,29 @@ async function main() {
           renderedJobCards: document.querySelectorAll(".job-card[data-job-id]").length,
           hasCustomUrlLauncher: Boolean(document.getElementById("custom-job-url") && document.getElementById("btn-launch-custom-url")),
           floatingCopilotSuppressedOnWebApp: !document.getElementById("jobify-copilot-host"),
-          hasSidebarViews: Boolean(
-            document.getElementById("web-sidebar-nav") &&
-            document.querySelector(".web-nav-btn[data-web-view='dashboard']") &&
-            document.querySelector(".web-nav-btn[data-web-view='staffing']") &&
-            document.querySelector(".web-nav-btn[data-web-view='tracker']") &&
-            document.querySelector(".web-nav-btn[data-web-view='resume']") &&
-            document.querySelector(".web-nav-btn[data-web-view='interview']") &&
-            document.querySelector(".web-nav-btn[data-web-view='insider']") &&
-            document.querySelector(".web-nav-btn[data-web-view='inbox']")
-          ),
+          hasSidebarViews: (() => {
+            const primaryFive = Array.from(document.querySelectorAll("#web-sidebar-nav .web-nav-btn:not(.studio-pill)"));
+            const order = primaryFive.map((b) => b.getAttribute("data-web-view")).join(",");
+            const r0 = primaryFive[0]?.getBoundingClientRect();
+            const r1 = primaryFive[1]?.getBoundingClientRect();
+            const pipeTabs = Array.from(document.querySelectorAll("[data-pipe-filter]")).map((b) => b.getAttribute("data-pipe-filter")).join(",");
+            return Boolean(
+              document.getElementById("web-sidebar-nav") &&
+              order === "dashboard,jobs,autopilot,tracker,profile" &&
+              r0 && r1 && r1.left > r0.left && Math.abs(r1.top - r0.top) < 12 &&
+              pipeTabs === "ALL,SUBMITTED,IN_FLIGHT,NEEDS_YOU,FAILED,SKIPPED" &&
+              document.getElementById("web-btn-apply-top5") &&
+              document.querySelectorAll("#web-top5-matches-list .top5-row").length === 5 &&
+              document.querySelector(".web-nav-btn[data-web-view='staffing']") &&
+              document.querySelector(".web-nav-btn[data-web-view='resume']") &&
+              document.querySelector(".web-nav-btn[data-web-view='interview']") &&
+              document.querySelector(".web-nav-btn[data-web-view='insider']") &&
+              document.querySelector(".web-nav-btn[data-web-view='inbox']")
+            );
+          })(),
           hasAllNewFilters: Boolean(
+            document.getElementById("filter-location") &&
+            document.getElementById("filter-degree") &&
             document.getElementById("filter-ats") &&
             document.getElementById("filter-recency") &&
             document.getElementById("filter-sponsorship") &&
@@ -1522,15 +1608,20 @@ async function main() {
       }
     }
 
-    // Verify Multi-Platform Job Sources, All New Filters (2h/8h/12h/24h/48h, H-1B, Role Type, Experience), 128 Staffing Agencies View, Interview Studio, and Silent Tracker Auto-Apply
+    // Verify Multi-Platform Job Sources, All New Filters (Location, Degree, 2h/8h/12h/24h/48h, H-1B, Role Type, Experience), Details/Pass/Apply Started, Profile Standard Resume PDF, 128 Staffing Agencies View, Interview Studio, and Silent Tracker Auto-Apply
     const autonomousFlowAudit = await webAppCdp.eval(`
       (async () => {
         const beforeApplied = Number(document.getElementById("stat-applied-count")?.textContent || 0);
 
-        // 0. Check multi-platform coverage + interactive filters + 128 Staffing Agencies API & View + Interview Prep View
+        // 0. Check multi-platform coverage + interactive filters + Standard Resume PDF API + 128 Staffing Agencies API & View + Profile & Auto Apply & Interview Views
         const t0 = performance.now();
         const jobsApi = await fetch("/api/jobs").then((r) => r.json());
         const jobsApiLatencyMs = Math.round(performance.now() - t0);
+        const stdPdfResp = await fetch("/api/resume/standard?variant=1page");
+        const stdPdfBytes = new Uint8Array(await stdPdfResp.arrayBuffer());
+        const stdPdfHeader = new TextDecoder().decode(stdPdfBytes.slice(0, 5));
+        const standardResumeEndpointOk = stdPdfResp.status === 200 && stdPdfHeader === "%PDF-" && stdPdfBytes.length > 2000;
+
         const platformsPresent = {
           workday: jobsApi.jobs.some((j) => /workday/i.test(j.ats)),
           linkedin: jobsApi.jobs.some((j) => /linkedin/i.test(j.ats)),
@@ -1541,7 +1632,19 @@ async function main() {
           ashby: jobsApi.jobs.some((j) => /ashby/i.test(j.ats))
         };
 
-        // Test interactive filters (2h, 8h, 12h, 24h, 48h, H-1B, Role Type, Experience)
+        // Test interactive Location & Degree filters + Recency & Experience
+        const locSel = document.getElementById("filter-location");
+        locSel.value = "Remote";
+        locSel.dispatchEvent(new Event("change"));
+        const countRemote = document.querySelectorAll("#jobs-feed-container .job-card[data-job-id]").length;
+        document.getElementById("btn-reset-filters").click();
+
+        const degSel = document.getElementById("filter-degree");
+        degSel.value = "Master's";
+        degSel.dispatchEvent(new Event("change"));
+        const countMasters = document.querySelectorAll("#jobs-feed-container .job-card[data-job-id]").length;
+        document.getElementById("btn-reset-filters").click();
+
         const recSel = document.getElementById("filter-recency");
         recSel.value = "2";
         recSel.dispatchEvent(new Event("change"));
@@ -1563,7 +1666,29 @@ async function main() {
         const countExp12 = document.querySelectorAll("#jobs-feed-container .job-card[data-job-id]").length;
         document.getElementById("btn-reset-filters").click();
 
-        // Check 128 Staffing Agencies view + AI Interview Prep Studio view
+        // Test Details drawer & Pass -> Skipped on Browse Jobs cards
+        const webDetBtn = document.querySelector(".btn-web-details");
+        if (webDetBtn) webDetBtn.click();
+        await new Promise((r) => setTimeout(r, 60));
+        const webDetailsOpened = Boolean(document.querySelector(".web-job-details-drawer.open"));
+
+        const webPassBtn = document.querySelectorAll(".btn-web-pass")[9] || document.querySelector(".btn-web-pass");
+        if (webPassBtn) webPassBtn.click();
+        await new Promise((r) => setTimeout(r, 150));
+        const webSkippedCount = Number(document.getElementById("cnt-pipe-skipped")?.textContent || 0);
+
+        // Check Profile tab + Auto Apply tab + 128 Staffing Agencies view + AI Interview Prep Studio view
+        document.querySelector(".web-nav-btn[data-web-view='profile']").click();
+        await new Promise((r) => setTimeout(r, 150));
+        const webProfileRendered = Boolean(
+          document.getElementById("web-profile-standard-resume-card") &&
+          document.getElementById("web-profile-fields-card") &&
+          document.getElementById("wpf-yn-18") &&
+          document.getElementById("wpf-yn-nc")
+        );
+        document.querySelector(".web-nav-btn[data-web-view='autopilot']").click();
+        await new Promise((r) => setTimeout(r, 120));
+        const webAutopilotRendered = Boolean(document.getElementById("web-ap-bulk-urls") && document.getElementById("web-ap-run-bulk"));
         document.querySelector(".web-nav-btn[data-web-view='staffing']").click();
         await new Promise((r) => setTimeout(r, 250));
         const staffingCardsCount = document.querySelectorAll("#staffing-cards-grid [data-staffing-card]").length;
@@ -1573,7 +1698,7 @@ async function main() {
         document.querySelector(".web-nav-btn[data-web-view='dashboard']").click();
         await new Promise((r) => setTimeout(r, 100));
 
-        // 1. Click 📌 Save to Tracker on a live job card that isn't in tracker yet, then click ⚡ Auto-Apply inside the Tracker
+        // 1. Click 🔖 Save on a live job card that isn't in tracker yet, then click ⚡ Apply inside the Tracker
         const saveCardBtn = Array.from(document.querySelectorAll(".btn-save-to-tracker")).find((b) => {
           const card = b.closest(".job-card");
           const comp = card?.getAttribute("data-job-company") || "";
@@ -1631,8 +1756,13 @@ async function main() {
 
         return {
           jobsApiLatencyMs,
+          standardResumeEndpointOk,
           platformsPresent,
-          filterCounts: { count2h, count12h, count48h, countExp12 },
+          filterCounts: { countRemote, countMasters, count2h, count12h, count48h, countExp12 },
+          webDetailsOpened,
+          webSkippedCount,
+          webProfileRendered,
+          webAutopilotRendered,
           staffingCardsCount,
           webInterviewRendered,
           hadSavedTrackerApplyBtn,
@@ -1647,7 +1777,7 @@ async function main() {
       })()
     `, 35000);
 
-    console.log("7c. ✅ Jobify Autonomous Platform (White Hub + Interview Studio + Multi-Platform + 128 Staffing Agencies + Turbo Auto-Apply) Verified:", JSON.stringify({
+    console.log("7c. ✅ Jobify Autonomous Platform (Tsenta Horizontal Hub + Top 5 + 6-Tab Tracker + Profile Standard Resume + Multi-Platform) Verified:", JSON.stringify({
       ...webAppAudit,
       autonomousFlow: autonomousFlowAudit
     }, null, 2));
@@ -1666,9 +1796,16 @@ async function main() {
       webAppAudit.initialActiveFilterPills !== 0 ||
       !webAppAudit.resetBtnHiddenOnLoad ||
       !webAppAudit.hasOrionDrawer ||
+      !autonomousFlowAudit?.standardResumeEndpointOk ||
       !Object.values(autonomousFlowAudit?.platformsPresent || {}).every(Boolean) ||
+      !(autonomousFlowAudit?.filterCounts?.countRemote >= 3) ||
+      !(autonomousFlowAudit?.filterCounts?.countMasters >= 4) ||
       !(autonomousFlowAudit?.filterCounts?.count2h >= 4 && autonomousFlowAudit.filterCounts.count2h < autonomousFlowAudit.filterCounts.count12h) ||
       !(autonomousFlowAudit?.filterCounts?.countExp12 >= 4) ||
+      !autonomousFlowAudit?.webDetailsOpened ||
+      !(autonomousFlowAudit?.webSkippedCount >= 1) ||
+      !autonomousFlowAudit?.webProfileRendered ||
+      !autonomousFlowAudit?.webAutopilotRendered ||
       autonomousFlowAudit?.staffingCardsCount !== 128 ||
       !autonomousFlowAudit?.webInterviewRendered ||
       !autonomousFlowAudit?.hadSavedTrackerApplyBtn ||
@@ -1867,6 +2004,52 @@ async function main() {
       !fifoConcurrentOut[1]?.submitted
     ) {
       throw new Error(`Concurrent Multi-Job FIFO Auto-Apply Queue failed: ${JSON.stringify(fifoConcurrentOut)}`);
+    }
+
+    // 7g. Workday Yes/No & Cascading Conditional Questions Gauntlet (/sandbox/workday-yesno)
+    const wdYnCdp = await openTabAndConnect("http://127.0.0.1:18765/sandbox/workday-yesno");
+    for (let i = 0; i < 20; i++) {
+      const ready = await wdYnCdp
+        .eval(`Boolean(document.getElementById("jobify-copilot-host")?.shadowRoot?.getElementById("jb-btn-autofill"))`)
+        .catch(() => false);
+      if (ready) break;
+      await sleep(250);
+    }
+    const wdYnRun = await dashCdp.eval(
+      `chrome.runtime.sendMessage({
+        type: "START_FULL_AUTO_APPLY",
+        payload: {
+          tabId: ${wdYnCdp.tabId},
+          options: { autoSubmit: true, tailorResume: false, jobMeta: { company: "CloudScale AI", title: "Senior AI Agents Engineer", ats: "Workday" } },
+          awaitCompletion: true
+        }
+      })`,
+      60000
+    );
+    const wdYnAudit = await wdYnCdp.eval(`window.__WD_YESNO_AUDIT__`);
+    wdYnCdp.close();
+    console.log("7g. ✅ Workday Yes/No & Cascading Conditional Questions Gauntlet Verified (12/12 Listbox, Zero-Size Opacity-0 Radios, Cascading Visa -> H-1B & Binary Fallback):", JSON.stringify({
+      runOk: wdYnRun?.ok,
+      runSubmitted: wdYnRun?.submitted,
+      audit: wdYnAudit
+    }, null, 2));
+    if (
+      !wdYnAudit?.submitted ||
+      (wdYnAudit.mismatches && wdYnAudit.mismatches.length > 0) ||
+      wdYnAudit.answers?.authUS !== "Yes" ||
+      wdYnAudit.answers?.requireSponsorship !== "Yes" ||
+      wdYnAudit.answers?.currentVisaStatus !== "H-1B" ||
+      wdYnAudit.answers?.backgroundCheck !== "Yes" ||
+      wdYnAudit.answers?.age18 !== "Yes" ||
+      wdYnAudit.answers?.minQualifications !== "Yes" ||
+      wdYnAudit.answers?.previouslyEmployed !== "No" ||
+      wdYnAudit.answers?.relativesEmployed !== "No" ||
+      wdYnAudit.answers?.nonCompete !== "No" ||
+      wdYnAudit.answers?.govOrAuditor !== "No" ||
+      wdYnAudit.answers?.usPersonExportControl !== "No" ||
+      wdYnAudit.answers?.novelSecurityPolicy !== "Yes"
+    ) {
+      throw new Error(`Workday Yes/No Gauntlet (/sandbox/workday-yesno) failed: run=${JSON.stringify(wdYnRun)} audit=${JSON.stringify(wdYnAudit)}`);
     }
 
     dashCdp.close();

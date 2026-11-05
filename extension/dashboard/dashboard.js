@@ -8,23 +8,51 @@ let AUTO_APPLY_QUEUE_LEN = 0;
 let currentView = (location.hash || "#overview").replace("#", "") || "overview";
 let cachedLiveJobs = [];
 let selectedJobIndexes = new Set();
+let expandedJobDetailUrls = new Set();
 
+let ovStatusTab = "All";
+let ovFilterQ = "";
+let ovFilterLocation = "ALL";
+let ovFilterDegree = "ALL";
+let ovFilterSponsorship = "ALL";
+let ovFilterRecency = "0";
+let ovTopJobsCache = [];
+let ovExpandedDetailUrls = new Set();
+
+let trackerStatusTab = "All";
 let trackerFilterQ = "";
 let trackerFilterStage = "All";
 let trackerViewMode = "table"; // "table" | "kanban"
 let expandedReceiptAppId = null;
 let pendingInterviewDraft = null;
 
+const TSENTA_STATUS_TABS = ["All", "Submitted", "In Flight", "Needs You", "Failed", "Skipped"];
+
 const VIEW_HEADERS = {
-  overview: ["Overview, Conversion Funnel & Quick Launch", "Your Simplify+ Autonomous Career Copilot pre-loaded with Raviteja Velanati's profile"],
-  tracker: ["Application Tracker & Kanban Pipeline", "Track bookmarks, submitted receipts, tailored résumé diffs, follow-up alerts & Kanban stages"],
+  overview: [
+    "Dashboard — Filters, Top Job Matches & Live Applications Tracker",
+    "Filter live matches, click Apply to All 5, and track All · Submitted · In Flight · Needs You · Failed · Skipped side by side"
+  ],
+  jobs: [
+    "Browse Jobs — Role, Location, Degree Level & Instant Apply",
+    "Filter by Location & Degree Level • Save, expand Details, Pass, or click Apply (turns green & tracks immediately)"
+  ],
+  autopilot: [
+    "Auto Apply — FIFO Portal Queue & Bulk URL Runner",
+    "Sequential FIFO multi-portal Auto-Apply runner, bulk URL enqueue & recurring schedule"
+  ],
+  tracker: [
+    "Application Tracker — All · Submitted · In Flight · Needs You · Failed · Skipped",
+    "Side-by-side status pipeline, submission receipts, tailored résumé diffs & Kanban stages"
+  ],
+  vault: [
+    "Profile & My Standard Resume — All Candidate Fields & Workday Defaults",
+    "Manage your Standard Resume PDF, edit all candidate & Workday Yes/No screening defaults, and configure zero-touch vault"
+  ],
   resume: ["AI Resume Tailor, Live Editor & ATS Heatmap", "Tailor bullets with Gemini 3.5 Flash, interactively edit every section & re-compile 1-page ATS PDFs"],
   cover: ["AI Cover Letter Studio", "Generate custom recruiter-ready cover letters, manage saved drafts & export ATS PDFs"],
   interview: ["AI Interview Prep & Role Cheat-Sheet Studio", "Synthesize 60s elevator pitches, role-specific system design Q&As & quantified STAR stories"],
-  jobs: ["Multi-Platform Job Discovery, Batch Auto-Apply & 128 Staffing Agencies", "Live roles across 35+ ATS portals with Duplicate-Apply Guard & multi-select FIFO Batch Auto-Apply"],
-  autopilot: ["Autopilot Control Center & Bulk Portal Queue", "Sequential FIFO multi-portal Auto-Apply runner, bulk URL enqueue & recurring schedule"],
-  network: ["Network Copilot — Warm Referral Pathfinder", "Map alumni, ex-colleagues, hiring managers & AI-drafted outreach notes"],
-  vault: ["Profile, Resume Vault, Zero-Touch Controls & Backup", "Edit candidate details, portal logins, domain passwords, hands-free portal mode & JSON vault backups"]
+  network: ["Network Copilot — Warm Referral Pathfinder", "Map alumni, ex-colleagues, hiring managers & AI-drafted outreach notes"]
 };
 
 function esc(s) {
@@ -56,6 +84,15 @@ function downloadBase64(base64, fileName, mime = "application/pdf") {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
+function previewBase64Pdf(base64) {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  window.open(url, "_blank", "noopener");
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
 function downloadText(text, fileName, mime = "text/plain;charset=utf-8") {
   const url = URL.createObjectURL(new Blob([text], { type: mime }));
   const a = document.createElement("a");
@@ -71,17 +108,116 @@ function normalizeUrlKey(rawUrl) {
   return u.replace(/[?#].*$/, "").replace(/\/+$/, "");
 }
 
-function isJobAlreadyApplied(job, applications = []) {
+function matchesTsentaTab(app, tab) {
+  if (!app || tab === "All") return true;
+  const st = String(app.status || "");
+  const stage = String(app.pipelineStage || "");
+  if (tab === "Submitted") {
+    return (
+      st === "Applied" ||
+      stage === "submitted" ||
+      ["OA / Assessment", "Recruiter Screen", "Technical Interview", "Final Round", "Offer"].includes(st)
+    );
+  }
+  if (tab === "In Flight") {
+    return st === "In Flight" || st === "Filled" || stage === "in_flight" || stage === "filled";
+  }
+  if (tab === "Needs You") {
+    return st === "Needs You" || stage === "needs_you";
+  }
+  if (tab === "Failed") {
+    return st === "Failed" || stage === "failed";
+  }
+  if (tab === "Skipped") {
+    return st === "Skipped" || st === "Passed" || stage === "skipped";
+  }
+  return true;
+}
+
+function getJobTrackState(job, applications = []) {
   const jUrl = normalizeUrlKey(job?.url);
   const jComp = String(job?.company || "").trim().toLowerCase();
   const jRole = String(job?.title || job?.role || "").trim().toLowerCase();
-  return applications.some((a) => {
-    const isDone = a.status === "Applied" || a.pipelineStage === "submitted";
-    if (!isDone) return false;
+  const matched = applications.find((a) => {
     const aUrl = normalizeUrlKey(a.url);
     if (jUrl && aUrl && jUrl === aUrl) return true;
-    return Boolean(jComp && jRole && String(a.company || "").trim().toLowerCase() === jComp && String(a.role || "").trim().toLowerCase() === jRole);
+    return Boolean(
+      jComp &&
+        jRole &&
+        String(a.company || "").trim().toLowerCase() === jComp &&
+        String(a.role || "").trim().toLowerCase() === jRole
+    );
   });
+  if (!matched) {
+    return { app: null, isSubmitted: false, isStarted: false, isSkipped: false, isSaved: false };
+  }
+  const st = String(matched.status || "");
+  const stage = String(matched.pipelineStage || "");
+  return {
+    app: matched,
+    isSubmitted: st === "Applied" || stage === "submitted",
+    isStarted: st === "In Flight" || st === "Filled" || stage === "in_flight" || stage === "filled",
+    isSkipped: st === "Skipped" || st === "Passed" || stage === "skipped",
+    isSaved: st === "Bookmarked"
+  };
+}
+
+function isJobAlreadyApplied(job, applications = []) {
+  const st = getJobTrackState(job, applications);
+  return st.isSubmitted;
+}
+
+async function startJobApplicationInstant(job, btnEl = null) {
+  if (!job || !job.url) return;
+  if (btnEl) {
+    btnEl.classList.remove("emerald", "primary", "secondary");
+    btnEl.classList.add("btn-started");
+    btnEl.textContent = "✓ Application Started";
+    btnEl.dataset.started = "1";
+    btnEl.disabled = true;
+  }
+  await chrome.runtime.sendMessage({
+    type: "LAUNCH_TAB_AND_AUTO_APPLY",
+    payload: {
+      url: job.url,
+      active: false,
+      options: {
+        autoSubmit: STATE?.settings?.autoSubmitEnabled !== false,
+        tailorResume: true,
+        jobMeta: {
+          company: job.company,
+          title: job.title,
+          location: job.location,
+          ats: job.ats,
+          url: job.url,
+          matchScore: job.matchScore || 95
+        }
+      }
+    }
+  });
+  await reloadState();
+}
+
+async function passJobToSkipped(job) {
+  if (!job) return;
+  await chrome.runtime.sendMessage({
+    type: "UPSERT_APPLICATION",
+    payload: {
+      application: {
+        company: job.company,
+        role: job.title,
+        location: job.location,
+        ats: job.ats,
+        url: job.url,
+        status: "Skipped",
+        pipelineStage: "skipped",
+        stepLabel: "Skipped (Passed)",
+        detail: "Passed from Job Feed",
+        matchScore: job.matchScore || 90
+      }
+    }
+  });
+  await reloadState();
 }
 
 function isFollowUpDue(app) {
@@ -210,7 +346,26 @@ async function renderCurrentView() {
   if (currentView === "vault") return renderVaultAndProfile(c);
 }
 
-function renderOverview(c) {
+async function fetchLiveJobsHelper(filterPayload) {
+  let jobs = [];
+  try {
+    const resp = await chrome.runtime.sendMessage({
+      type: "FETCH_RECOMMENDED_JOBS",
+      payload: filterPayload
+    });
+    if (Array.isArray(resp?.jobs) && resp.jobs.length > 0) {
+      jobs = resp.jobs;
+    }
+  } catch (_) {}
+  if (jobs.length === 0) {
+    try {
+      jobs = await fetchPersonalizedRecommendations(STATE?.profile || {}, filterPayload);
+    } catch (_) {}
+  }
+  return jobs;
+}
+
+async function renderOverview(c) {
   const apps = STATE.applications || [];
   const baseAudit = scoreResumeATS(
     STATE.profile,
@@ -220,11 +375,36 @@ function renderOverview(c) {
 
   const totalApps = Math.max(1, apps.length);
   const savedCount = apps.filter((a) => a.status === "Bookmarked").length;
-  const inFlightCount = apps.filter((a) => a.status === "In Flight" || a.status === "Filled").length;
-  const appliedCount = apps.filter((a) => a.status === "Applied").length;
+  const inFlightCount = apps.filter((a) => matchesTsentaTab(a, "In Flight")).length;
+  const appliedCount = apps.filter((a) => matchesTsentaTab(a, "Submitted")).length;
+  const needsYouCount = apps.filter((a) => matchesTsentaTab(a, "Needs You")).length;
+  const failedCount = apps.filter((a) => matchesTsentaTab(a, "Failed")).length;
+  const skippedCount = apps.filter((a) => matchesTsentaTab(a, "Skipped")).length;
   const interviewCount = apps.filter((a) => ["OA / Assessment", "Recruiter Screen", "Technical Interview", "Final Round"].includes(a.status)).length;
   const offerCount = apps.filter((a) => a.status === "Offer").length;
   const followUpDueCount = apps.filter(isFollowUpDue).length;
+
+  if (ovTopJobsCache.length === 0) {
+    ovTopJobsCache = await fetchLiveJobsHelper({
+      category: "ALL",
+      location: ovFilterLocation,
+      degreeLevel: ovFilterDegree,
+      sponsorship: ovFilterSponsorship,
+      maxHoursAgo: Number(ovFilterRecency) || 0,
+      query: ovFilterQ,
+      limit: 25
+    });
+  }
+
+  const top5Jobs = ovTopJobsCache.filter((j) => !getJobTrackState(j, apps).isSkipped).slice(0, 5);
+  const allTop5Started =
+    top5Jobs.length > 0 &&
+    top5Jobs.every((j) => {
+      const ts = getJobTrackState(j, apps);
+      return ts.isStarted || ts.isSubmitted;
+    });
+
+  const dashboardFilteredApps = apps.filter((a) => matchesTsentaTab(a, ovStatusTab));
 
   const atsCounts = {};
   apps.forEach((a) => {
@@ -234,6 +414,227 @@ function renderOverview(c) {
   const topAts = Object.entries(atsCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
   c.innerHTML = `
+    <!-- 1. TSENTA DASHBOARD FILTER BAR -->
+    <div class="filter-shell" id="ov-filter-bar" style="margin-bottom:16px;">
+      <div class="filter-top-row" style="margin-bottom:10px;">
+        <div class="filter-search-wrap">
+          <input class="filter-search-input" id="ov-filter-q" placeholder="Filter top matches by role, company, skill, or city..." value="${esc(ovFilterQ)}" />
+        </div>
+        <button class="btn sm secondary" id="ov-filter-reset" type="button">↺ Reset</button>
+        <button class="btn sm secondary" id="ov-go-browse" type="button">🔍 Browse All Jobs →</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;">
+        <div class="filter-group">
+          <label class="filter-lbl" for="ov-filter-location">Location</label>
+          <select class="filter-select-clean" id="ov-filter-location">
+            <option value="ALL" ${ovFilterLocation === "ALL" ? "selected" : ""}>All US &amp; Remote</option>
+            <option value="Remote" ${ovFilterLocation === "Remote" ? "selected" : ""}>Remote</option>
+            <option value="Bay Area" ${ovFilterLocation === "Bay Area" ? "selected" : ""}>San Francisco / Bay Area</option>
+            <option value="Seattle" ${ovFilterLocation === "Seattle" ? "selected" : ""}>Seattle / Bellevue, WA</option>
+            <option value="New York" ${ovFilterLocation === "New York" ? "selected" : ""}>New York, NY</option>
+            <option value="Austin" ${ovFilterLocation === "Austin" ? "selected" : ""}>Austin / Dallas, TX</option>
+            <option value="Boston" ${ovFilterLocation === "Boston" ? "selected" : ""}>Boston, MA</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label class="filter-lbl" for="ov-filter-degree">Degree Level</label>
+          <select class="filter-select-clean" id="ov-filter-degree">
+            <option value="ALL" ${ovFilterDegree === "ALL" ? "selected" : ""}>All Degrees</option>
+            <option value="Bachelor's" ${ovFilterDegree === "Bachelor's" ? "selected" : ""}>Bachelor's (B.S. / B.Tech)</option>
+            <option value="Master's" ${ovFilterDegree === "Master's" ? "selected" : ""}>Master's (M.S. / M.Eng)</option>
+            <option value="PhD" ${ovFilterDegree === "PhD" ? "selected" : ""}>PhD / Research</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label class="filter-lbl" for="ov-filter-sponsorship">Visa / H-1B</label>
+          <select class="filter-select-clean" id="ov-filter-sponsorship">
+            <option value="ALL" ${ovFilterSponsorship === "ALL" ? "selected" : ""}>All Roles</option>
+            <option value="H-1B Sponsor" ${ovFilterSponsorship === "H-1B Sponsor" ? "selected" : ""}>H-1B &amp; Visa Sponsors</option>
+            <option value="STEM OPT" ${ovFilterSponsorship === "STEM OPT" ? "selected" : ""}>F-1 OPT / STEM OPT</option>
+            <option value="W2 / C2C" ${ovFilterSponsorship === "W2 / C2C" ? "selected" : ""}>W2 / C2C</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label class="filter-lbl" for="ov-filter-recency">Date Posted</label>
+          <select class="filter-select-clean" id="ov-filter-recency">
+            <option value="0" ${ovFilterRecency === "0" ? "selected" : ""}>Any Time</option>
+            <option value="24" ${ovFilterRecency === "24" ? "selected" : ""}>Last 24 Hours</option>
+            <option value="48" ${ovFilterRecency === "48" ? "selected" : ""}>Last 2 Days</option>
+            <option value="168" ${ovFilterRecency === "168" ? "selected" : ""}>Last 7 Days</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. TOP JOB MATCHES (5) + APPLY TO ALL 5 -->
+    <div class="card" id="ov-top-matches-card" style="border-color:#c7d2fe;">
+      <div class="card-title" style="flex-wrap:wrap;gap:10px;">
+        <div>
+          <div style="font-size:16px;font-weight:800;color:#0f172a;">🎯 Top Job Matches (${top5Jobs.length})</div>
+          <div style="font-size:12px;color:#64748b;font-weight:500;">Ranked for ${esc(STATE.profile?.personal?.fullName || "Raviteja Velanati")} • Click Apply to immediately start background auto-apply &amp; track below</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button type="button" class="btn ${allTop5Started ? "btn-started" : "emerald"}" id="btn-apply-top-5" ${top5Jobs.length === 0 || allTop5Started ? "disabled" : ""}>
+            ${allTop5Started ? "✓ All 5 Applications Started" : `⚡ Apply to All ${top5Jobs.length || 5}`}
+          </button>
+        </div>
+      </div>
+
+      ${
+        top5Jobs.length === 0
+          ? `<div style="padding:18px;text-align:center;color:#64748b;font-size:13px;">No top matches for this filter. Click <strong>Reset</strong> to view all recommended roles.</div>`
+          : `<div style="display:flex;flex-direction:column;gap:10px;" id="ov-top-matches-list">
+              ${top5Jobs
+                .map((j, idx) => {
+                  const ts = getJobTrackState(j, apps);
+                  const detailOpen = ovExpandedDetailUrls.has(j.url);
+                  const applyStartedOrDone = ts.isStarted || ts.isSubmitted;
+                  const applyLabel = ts.isSubmitted
+                    ? "✓ Submitted"
+                    : ts.isStarted
+                    ? "✓ Application Started"
+                    : "⚡ Apply";
+                  return `
+                  <div class="tsenta-job-row" data-ov-job-row="true" data-idx="${idx}">
+                    <div class="tsenta-job-main">
+                      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+                        <span class="tsenta-role-title">${esc(j.title)}</span>
+                        <span class="chip green">${j.matchScore || 95}% Match</span>
+                        <span class="chip indigo">${esc(j.ats || "Portal")}</span>
+                      </div>
+                      <div class="tsenta-company-row">
+                        <span class="tsenta-company-name">${esc(j.company)}</span>
+                        <span>•</span>
+                        <span>📍 ${esc(j.location || "United States")}</span>
+                        <span>•</span>
+                        <span>🎓 ${esc(j.degreeLevel || "Bachelor's")}+</span>
+                        ${j.compensation || j.salaryDisplay ? `<span>•</span><span style="color:#059669;font-weight:700;">${esc(j.compensation || j.salaryDisplay)}</span>` : ""}
+                        <span>•</span>
+                        <span>🕒 ${esc(j.postedLabel || "Recent")}</span>
+                      </div>
+                      ${
+                        detailOpen
+                          ? `<div class="job-details-drawer">
+                              <div style="font-weight:700;color:#0f172a;margin-bottom:4px;">Role Snapshot &amp; Requirements</div>
+                              <div style="margin-bottom:6px;">${esc(
+                                j.description ||
+                                  `${j.title} at ${j.company} (${j.location}). Seeking ${j.degreeLevel || "Bachelor's"}+ degree with hands-on Python, TypeScript, Cloud/K8s, and AI/ML production engineering.`
+                              )}</div>
+                              <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                                <span class="chip sky">${esc(j.workMode || "Hybrid")}</span>
+                                <span class="chip amber">${esc(j.experienceLabel || "2–4 Yrs")}</span>
+                                ${j.h1bSponsor ? `<span class="chip green">${esc(j.sponsorshipType || "H-1B Sponsor")}</span>` : ""}
+                                <a href="${esc(j.url)}" target="_blank" style="margin-left:auto;color:#4f46e5;font-weight:700;font-size:12px;">Open Original Posting ↗</a>
+                              </div>
+                            </div>`
+                          : ""
+                      }
+                    </div>
+                    <div class="tsenta-job-actions">
+                      <button type="button" class="btn sm secondary ov-job-save" data-idx="${idx}">${ts.isSaved ? "✓ Saved" : "🔖 Save"}</button>
+                      <button type="button" class="btn sm secondary ov-job-details" data-idx="${idx}">${detailOpen ? "▴ Hide" : "🔎 Details"}</button>
+                      <button type="button" class="btn sm secondary ov-job-pass" data-idx="${idx}">✕ Pass</button>
+                      <button type="button" class="btn sm ${applyStartedOrDone ? "btn-started" : "emerald"} ov-job-apply" data-idx="${idx}" ${applyStartedOrDone ? "disabled" : ""}>${applyLabel}</button>
+                    </div>
+                  </div>`;
+                })
+                .join("")}
+            </div>`
+      }
+    </div>
+
+    <!-- 3. ALL APPLICATIONS & TRACKER (SIDE-BY-SIDE TSENTA STATUS TABS) -->
+    <div class="card" id="ov-applications-tracker-card">
+      <div class="card-title" style="flex-wrap:wrap;gap:10px;margin-bottom:10px;">
+        <div>
+          <div style="font-size:16px;font-weight:800;color:#0f172a;">📋 All Applications &amp; Live Tracker</div>
+          <div style="font-size:12px;color:#64748b;font-weight:500;">Every job you Apply or Pass appears here immediately in real time</div>
+        </div>
+        <button type="button" class="btn sm secondary" id="ov-open-full-tracker">Open Full Tracker &amp; Kanban →</button>
+      </div>
+
+      <div class="tsenta-status-tabs" id="ov-tsenta-tabs">
+        ${[
+          { key: "All", count: apps.length },
+          { key: "Submitted", count: appliedCount },
+          { key: "In Flight", count: inFlightCount },
+          { key: "Needs You", count: needsYouCount },
+          { key: "Failed", count: failedCount },
+          { key: "Skipped", count: skippedCount }
+        ]
+          .map(
+            (t) => `
+          <button type="button" class="tsenta-status-tab ${ovStatusTab === t.key ? "active" : ""}" data-ov-status-tab="${esc(t.key)}">
+            <span>${esc(t.key)}</span>
+            <span class="tab-count">${t.count}</span>
+          </button>`
+          )
+          .join("")}
+      </div>
+
+      ${
+        dashboardFilteredApps.length === 0
+          ? `<div style="padding:20px;text-align:center;color:#64748b;font-size:13px;background:#f8fafc;border-radius:10px;border:1px dashed #cbd5e1;">
+              No applications in <strong>${esc(ovStatusTab)}</strong> yet. Click <strong>⚡ Apply</strong> or <strong>⚡ Apply to All 5</strong> above to start auto-applying!
+            </div>`
+          : `<table class="table">
+              <thead>
+                <tr>
+                  <th>Company &amp; Role</th>
+                  <th>Location</th>
+                  <th>ATS / Résumé</th>
+                  <th>Live Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${dashboardFilteredApps
+                  .slice(0, 15)
+                  .map((a) => {
+                    const tone = matchesTsentaTab(a, "Submitted")
+                      ? "green"
+                      : matchesTsentaTab(a, "In Flight")
+                      ? "sky"
+                      : matchesTsentaTab(a, "Needs You")
+                      ? "amber"
+                      : matchesTsentaTab(a, "Failed")
+                      ? "rose"
+                      : "slate";
+                    return `
+                  <tr>
+                    <td>
+                      <div style="font-weight:700;color:#0f172a;">${esc(a.company)}</div>
+                      <div style="font-size:12px;color:#334155;">${esc(a.role)}</div>
+                    </td>
+                    <td style="font-size:12px;color:#475569;">📍 ${esc(a.location || "United States")}</td>
+                    <td>
+                      <span class="chip indigo">${esc(a.ats || "Portal")}</span>
+                      <div style="font-size:11px;color:#047857;margin-top:3px;font-weight:600;">${esc(a.resumeUsed || "1-Page ATS PDF")}</div>
+                    </td>
+                    <td>
+                      <span class="chip ${tone}">${esc(a.stepLabel || a.status || "In Flight")}</span>
+                      ${a.detail ? `<div style="font-size:11px;color:#64748b;margin-top:3px;">${esc(a.detail)}</div>` : ""}
+                    </td>
+                    <td>
+                      <div style="display:flex;gap:5px;flex-wrap:wrap;">
+                        <button type="button" class="btn sm secondary ov-trk-receipt" data-id="${esc(a.id)}">🧾 Receipt</button>
+                        ${
+                          a.url && !matchesTsentaTab(a, "Submitted") && !matchesTsentaTab(a, "In Flight")
+                            ? `<button type="button" class="btn sm emerald ov-trk-retry" data-id="${esc(a.id)}">⚡ Apply</button>`
+                            : ""
+                        }
+                        ${a.url ? `<a class="btn sm secondary" href="${esc(a.url)}" target="_blank">Open ↗</a>` : ""}
+                      </div>
+                    </td>
+                  </tr>`;
+                  })
+                  .join("")}
+              </tbody>
+            </table>`
+      }
+    </div>
+
+    <!-- 4. KPI SUMMARY & DIRECT URL LAUNCHER -->
     <div class="kpi-grid">
       <div class="kpi-card">
         <div class="kpi-val">${apps.length}</div>
@@ -256,11 +657,8 @@ function renderOverview(c) {
     <div class="card" style="border-color:#c7d2fe;background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);">
       <div class="card-title">
         <span>🚀 Universal Career Portal Auto-Apply Launcher (Zero-Touch Any ATS URL)</span>
-        <span class="chip green">35+ ATS Portals + Shadow DOM + FIFO Queue</span>
+        <span class="chip green">35+ ATS Portals + Workday Yes/No + FIFO Queue</span>
       </div>
-      <p style="font-size:13px;color:#475569;margin-bottom:12px;">
-        Paste any job posting or direct career portal URL (Workday, Greenhouse, Ashby, Lever, SmartRecruiters, iCIMS, Oracle Cloud HCM, SAP SuccessFactors, Eightfold, Phenom, or corporate career sites) to tailor a 1-page PDF, resolve login/signup, fill every field, and submit automatically in the background:
-      </p>
       <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;align-items:center;">
         <input class="input" id="ov-custom-url" placeholder="https://company.wd5.myworkdayjobs.com/... or https://job-boards.greenhouse.io/..." />
         <input class="input" id="ov-custom-company" placeholder="Company (optional — auto-detected)" />
@@ -305,74 +703,203 @@ function renderOverview(c) {
 
     <div class="grid-2">
       <div class="card">
-        <div class="card-title">🧪 Test 1-Click Autofill &amp; Portal Stress Sandboxes</div>
-        <p style="font-size:13px;color:#475569;margin-bottom:14px;">
-          Launch realistic local multi-ATS portals (Greenhouse, Workday + Signup, Lever, and Shadow-DOM + Repeater Stress Portal) to verify zero-touch autofill, PDF attachment, and auto-submit:
-        </p>
+        <div class="card-title">🧪 Test 1-Click Autofill &amp; Workday Yes/No Sandboxes</div>
         <div class="grid-2" style="gap:10px;">
           <a class="btn primary" href="${esc(chrome.runtime.getURL("sandbox/greenhouse.html"))}" target="_blank">Greenhouse Sandbox ↗</a>
           <a class="btn primary" href="${esc(chrome.runtime.getURL("sandbox/workday.html"))}" target="_blank">Workday + Signup ↗</a>
-          <a class="btn primary" href="${esc(chrome.runtime.getURL("sandbox/lever.html"))}" target="_blank">Lever Sandbox ↗</a>
+          <a class="btn emerald" href="${esc(`${companionUrl}/sandbox/workday-yesno`)}" target="_blank">Workday Yes/No Stress ↗</a>
           <a class="btn secondary" href="${esc(`${companionUrl}/sandbox/portal-advanced`)}" target="_blank">Shadow DOM + Repeater ↗</a>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-title">⚡ Pre-Analyzed Candidate Snapshot</div>
-        <div style="font-size:13px;line-height:1.7;color:#334155;">
-          <div><strong style="color:#0f172a;">Name:</strong> ${esc(STATE.profile.personal.fullName)} (${esc(STATE.profile.personal.locationDisplay)})</div>
-          <div><strong style="color:#0f172a;">Current Role:</strong> ${esc(STATE.profile.personal.currentTitle)} @ ${esc(STATE.profile.personal.currentCompany)}</div>
-          <div><strong style="color:#0f172a;">Education:</strong> M.S. CS, Clark University (3.5 GPA) • B.Tech CS, Malla Reddy (3.6 GPA)</div>
-          <div><strong style="color:#0f172a;">Bundled PDFs:</strong> <span class="chip indigo">1-Page Resume</span> <span class="chip indigo">2-Page Master Resume</span></div>
-          <div><strong style="color:#0f172a;">Portal Vault:</strong> <span class="chip green">${esc(STATE.credentials.portalEmail)}</span></div>
+        <div class="card-title">
+          <span>Recent AI-Tailored Resumes</span>
+          <div style="display:flex;gap:8px;">
+            <button class="btn sm secondary" id="ov-go-interview">🎤 Interview Prep</button>
+            <button class="btn sm primary" id="ov-go-resume">+ Tailor Resume</button>
+          </div>
         </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">
-        <span>Recent AI-Tailored Resumes</span>
-        <div style="display:flex;gap:8px;">
-          <button class="btn sm secondary" id="ov-go-interview">🎤 Interview Prep Studio</button>
-          <button class="btn sm primary" id="ov-go-resume">+ Tailor New Resume</button>
-        </div>
-      </div>
-      ${
-        (STATE.tailoredResumes || []).length === 0
-          ? `<p style="font-size:13px;color:#64748b;">No tailored resumes generated yet. Open any job tab or click "+ Tailor New Resume" to build your first tailored ATS PDF.</p>`
-          : `<table class="table">
-              <thead><tr><th>Company</th><th>Role</th><th>Model</th><th>ATS Score</th><th>Created</th><th>Action</th></tr></thead>
-              <tbody>
+        ${
+          (STATE.tailoredResumes || []).length === 0
+            ? `<p style="font-size:13px;color:#64748b;">No tailored resumes generated yet. Click Apply on any match above or "+ Tailor Resume" to build a 1-page ATS PDF.</p>`
+            : `<div style="display:grid;gap:6px;">
                 ${STATE.tailoredResumes
-                  .slice(0, 8)
+                  .slice(0, 3)
                   .map(
                     (r, i) => `
-                  <tr>
-                    <td><strong style="color:#0f172a;">${esc(r.company)}</strong></td>
-                    <td>${esc(r.role)}</td>
-                    <td><span class="chip indigo">${esc(r.modelUsed)}</span></td>
-                    <td><span class="chip green">${r.atsScore || 94}/100</span></td>
-                    <td>${new Date(r.createdAt).toLocaleDateString()}</td>
-                    <td style="display:flex;gap:6px;">
-                      <button class="btn sm secondary ov-dl-tr" data-idx="${i}">⬇ Download PDF</button>
-                    </td>
-                  </tr>`
+                  <div class="sub-box" style="padding:8px 10px;display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                      <strong style="color:#0f172a;font-size:12.5px;">${esc(r.company)}</strong>
+                      <span style="font-size:12px;color:#475569;"> — ${esc(r.role)}</span>
+                    </div>
+                    <button class="btn sm secondary ov-dl-tr" data-idx="${i}">⬇ PDF</button>
+                  </div>`
                   )
                   .join("")}
-              </tbody>
-            </table>`
-      }
+              </div>`
+        }
+      </div>
     </div>
   `;
 
+  const refreshDashboardMatches = async () => {
+    ovTopJobsCache = await fetchLiveJobsHelper({
+      category: "ALL",
+      location: ovFilterLocation,
+      degreeLevel: ovFilterDegree,
+      sponsorship: ovFilterSponsorship,
+      maxHoursAgo: Number(ovFilterRecency) || 0,
+      query: ovFilterQ,
+      limit: 25
+    });
+    renderOverview(c);
+  };
+
+  let ovQTimer = null;
+  c.querySelector("#ov-filter-q")?.addEventListener("input", (e) => {
+    ovFilterQ = e.target.value;
+    clearTimeout(ovQTimer);
+    ovQTimer = setTimeout(refreshDashboardMatches, 180);
+  });
+  c.querySelector("#ov-filter-location")?.addEventListener("change", (e) => {
+    ovFilterLocation = e.target.value;
+    refreshDashboardMatches();
+  });
+  c.querySelector("#ov-filter-degree")?.addEventListener("change", (e) => {
+    ovFilterDegree = e.target.value;
+    refreshDashboardMatches();
+  });
+  c.querySelector("#ov-filter-sponsorship")?.addEventListener("change", (e) => {
+    ovFilterSponsorship = e.target.value;
+    refreshDashboardMatches();
+  });
+  c.querySelector("#ov-filter-recency")?.addEventListener("change", (e) => {
+    ovFilterRecency = e.target.value;
+    refreshDashboardMatches();
+  });
+  c.querySelector("#ov-filter-reset")?.addEventListener("click", () => {
+    ovFilterQ = "";
+    ovFilterLocation = "ALL";
+    ovFilterDegree = "ALL";
+    ovFilterSponsorship = "ALL";
+    ovFilterRecency = "0";
+    refreshDashboardMatches();
+  });
+
+  c.querySelector("#ov-go-browse")?.addEventListener("click", () => switchView("jobs"));
+  c.querySelector("#ov-open-full-tracker")?.addEventListener("click", () => switchView("tracker"));
   c.querySelector("#ov-go-resume")?.addEventListener("click", () => switchView("resume"));
   c.querySelector("#ov-go-interview")?.addEventListener("click", () => switchView("interview"));
+
+  c.querySelector("#btn-apply-top-5")?.addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    btn.classList.remove("emerald");
+    btn.classList.add("btn-started");
+    btn.textContent = "✓ All 5 Applications Started";
+    btn.disabled = true;
+    c.querySelectorAll(".ov-job-apply").forEach((b) => {
+      b.classList.remove("emerald");
+      b.classList.add("btn-started");
+      b.textContent = "✓ Application Started";
+      b.disabled = true;
+    });
+    for (const j of top5Jobs) {
+      const ts = getJobTrackState(j, STATE.applications || []);
+      if (ts.isSubmitted || ts.isStarted) continue;
+      await startJobApplicationInstant(j, null);
+    }
+    toast(`🚀 Started all ${top5Jobs.length} top matches! Track live below.`);
+    renderOverview(c);
+  });
+
+  c.querySelectorAll(".ov-job-apply").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const j = top5Jobs[Number(btn.dataset.idx)];
+      if (!j) return;
+      await startJobApplicationInstant(j, btn);
+      toast(`✓ Application Started for ${j.company} — ${j.title}`);
+      renderOverview(c);
+    });
+  });
+
+  c.querySelectorAll(".ov-job-pass").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const j = top5Jobs[Number(btn.dataset.idx)];
+      if (!j) return;
+      await passJobToSkipped(j);
+      toast(`Passed ${j.company} (logged in Skipped)`);
+      renderOverview(c);
+    });
+  });
+
+  c.querySelectorAll(".ov-job-save").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const j = top5Jobs[Number(btn.dataset.idx)];
+      if (!j) return;
+      await chrome.runtime.sendMessage({
+        type: "UPSERT_APPLICATION",
+        payload: {
+          application: {
+            company: j.company,
+            role: j.title,
+            location: j.location,
+            ats: j.ats,
+            url: j.url,
+            status: "Bookmarked",
+            stepLabel: "Saved",
+            matchScore: j.matchScore || 94
+          }
+        }
+      });
+      await reloadState();
+      toast(`🔖 Saved ${j.company} — ${j.title}`);
+      renderOverview(c);
+    });
+  });
+
+  c.querySelectorAll(".ov-job-details").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const j = top5Jobs[Number(btn.dataset.idx)];
+      if (!j) return;
+      if (ovExpandedDetailUrls.has(j.url)) ovExpandedDetailUrls.delete(j.url);
+      else ovExpandedDetailUrls.add(j.url);
+      renderOverview(c);
+    });
+  });
+
+  c.querySelectorAll("[data-ov-status-tab]").forEach((tabBtn) => {
+    tabBtn.addEventListener("click", () => {
+      ovStatusTab = tabBtn.dataset.ovStatusTab || "All";
+      renderOverview(c);
+    });
+  });
+
+  c.querySelectorAll(".ov-trk-receipt").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const app = (STATE.applications || []).find((x) => x.id === btn.dataset.id);
+      if (app) openReceiptModal(app);
+    });
+  });
+
+  c.querySelectorAll(".ov-trk-retry").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const app = (STATE.applications || []).find((x) => x.id === btn.dataset.id);
+      if (!app || !app.url) return;
+      await startJobApplicationInstant(
+        { company: app.company, title: app.role, location: app.location, ats: app.ats, url: app.url, matchScore: app.matchScore },
+        btn
+      );
+      renderOverview(c);
+    });
+  });
+
   c.querySelector("#btn-ov-launch-url")?.addEventListener("click", async () => {
     const url = c.querySelector("#ov-custom-url")?.value.trim();
     if (!url) return toast("Paste a career portal or job posting URL first.");
     const company = c.querySelector("#ov-custom-company")?.value.trim() || "";
     const role = c.querySelector("#ov-custom-role")?.value.trim() || "";
-    toast("🚀 Queued autonomous background Auto-Apply! Watch progress in Job Tracker.");
+    toast("🚀 Application Started! Watch live progress in All Applications below.");
     await chrome.runtime.sendMessage({
       type: "LAUNCH_TAB_AND_AUTO_APPLY",
       payload: {
@@ -404,6 +931,8 @@ function renderTracker(c) {
     "Filled",
     "Applied",
     "Needs You",
+    "Failed",
+    "Skipped",
     "Bookmarked",
     "OA / Assessment",
     "Recruiter Screen",
@@ -415,45 +944,28 @@ function renderTracker(c) {
 
   const qNorm = trackerFilterQ.trim().toLowerCase();
   const filteredApps = apps.filter((a) => {
+    if (!matchesTsentaTab(a, trackerStatusTab)) return false;
     if (trackerFilterStage !== "All" && a.status !== trackerFilterStage) return false;
     if (!qNorm) return true;
     const hay = `${a.company || ""} ${a.role || ""} ${a.location || ""} ${a.ats || ""} ${a.notes || ""} ${a.stepLabel || ""}`.toLowerCase();
     return hay.includes(qNorm);
   });
 
-  const inFlightCount = apps.filter((a) => a.status === "In Flight" || a.pipelineStage === "in_flight").length;
-  const filledCount = apps.filter((a) => a.status === "Filled" || a.pipelineStage === "filled").length;
-  const submittedCount = apps.filter((a) => a.status === "Applied" || a.pipelineStage === "submitted").length;
-  const needsYouCount = apps.filter((a) => a.status === "Needs You" || a.pipelineStage === "needs_you").length;
+  const inFlightCount = apps.filter((a) => matchesTsentaTab(a, "In Flight")).length;
+  const submittedCount = apps.filter((a) => matchesTsentaTab(a, "Submitted")).length;
+  const needsYouCount = apps.filter((a) => matchesTsentaTab(a, "Needs You")).length;
+  const failedCount = apps.filter((a) => matchesTsentaTab(a, "Failed")).length;
+  const skippedCount = apps.filter((a) => matchesTsentaTab(a, "Skipped")).length;
 
   const kanbanColumns = [
-    { title: "Bookmarked / Saved", targetStatus: "Bookmarked", match: (a) => a.status === "Bookmarked" },
-    { title: "In Flight / Filled", targetStatus: "In Flight", match: (a) => a.status === "In Flight" || a.status === "Filled" || a.status === "Needs You" },
-    { title: "Submitted / Applied", targetStatus: "Applied", match: (a) => a.status === "Applied" },
+    { title: "Bookmarked / Skipped", targetStatus: "Bookmarked", match: (a) => a.status === "Bookmarked" || matchesTsentaTab(a, "Skipped") },
+    { title: "In Flight / Filled", targetStatus: "In Flight", match: (a) => matchesTsentaTab(a, "In Flight") || matchesTsentaTab(a, "Needs You") || matchesTsentaTab(a, "Failed") },
+    { title: "Submitted / Applied", targetStatus: "Applied", match: (a) => a.status === "Applied" || a.pipelineStage === "submitted" },
     { title: "OA & Interviews", targetStatus: "Technical Interview", match: (a) => ["OA / Assessment", "Recruiter Screen", "Technical Interview", "Final Round"].includes(a.status) },
     { title: "Offers & Decisions", targetStatus: "Offer", match: (a) => a.status === "Offer" || a.status === "Rejected" }
   ];
 
   c.innerHTML = `
-    <div class="kpi-grid" style="margin-bottom:14px;">
-      <div class="kpi-card" style="border-color:${inFlightCount > 0 ? "#0284c7" : "#e2e8f0"};">
-        <div class="kpi-val" style="color:#0284c7;">${inFlightCount}</div>
-        <div class="kpi-lbl">⚡ In Flight (Reading JD / Tailoring / Auth)</div>
-      </div>
-      <div class="kpi-card" style="border-color:${filledCount > 0 ? "#7c3aed" : "#e2e8f0"};">
-        <div class="kpi-val" style="color:#7c3aed;">${filledCount}</div>
-        <div class="kpi-lbl">✍️ Filled (Fields &amp; PDF Attached)</div>
-      </div>
-      <div class="kpi-card" style="border-color:#a7f3d0;">
-        <div class="kpi-val" style="color:#059669;">${submittedCount}</div>
-        <div class="kpi-lbl">✅ Submitted (Moved to Applied Tracker)</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-val" style="color:#d97706;">${needsYouCount}</div>
-        <div class="kpi-lbl">🧩 Needs You (Manual Check / CAPTCHA)</div>
-      </div>
-    </div>
-
     <div class="card">
       <div class="card-title">
         <span>+ Add or Auto-Apply Job in Background (Zero Tab Interruption)</span>
@@ -477,16 +989,16 @@ function renderTracker(c) {
     </div>
 
     <div class="card">
-      <div class="card-title" style="flex-wrap:wrap;gap:10px;">
+      <div class="card-title" style="flex-wrap:wrap;gap:10px;margin-bottom:10px;">
         <span>Live Application Pipeline &amp; Tracker (${filteredApps.length}${filteredApps.length !== apps.length ? ` of ${apps.length}` : ""})</span>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <div style="display:inline-flex;gap:4px;background:#f1f5f9;padding:3px;border-radius:9px;border:1px solid #e2e8f0;">
             <button type="button" class="btn sm secondary ${trackerViewMode === "table" ? "active-tab" : ""}" id="btn-trk-view-table">📋 Table</button>
             <button type="button" class="btn sm secondary ${trackerViewMode === "kanban" ? "active-tab" : ""}" id="btn-trk-view-kanban">🗂️ Kanban</button>
           </div>
-          <input class="input" id="trk-filter-q" value="${esc(trackerFilterQ)}" placeholder="Search company, role, notes..." style="width:220px;padding:6px 10px;font-size:12px;" />
-          <select class="select" id="trk-filter-stage" style="width:170px;padding:6px 10px;font-size:12px;">
-            <option value="All" ${trackerFilterStage === "All" ? "selected" : ""}>All Stages (${apps.length})</option>
+          <input class="input" id="trk-filter-q" value="${esc(trackerFilterQ)}" placeholder="Search company, role, notes..." style="width:210px;padding:6px 10px;font-size:12px;" />
+          <select class="select" id="trk-filter-stage" style="width:165px;padding:6px 10px;font-size:12px;">
+            <option value="All" ${trackerFilterStage === "All" ? "selected" : ""}>All Sub-Stages (${apps.length})</option>
             ${statuses
               .map(
                 (s) =>
@@ -498,12 +1010,33 @@ function renderTracker(c) {
           </select>
         </div>
       </div>
+
+      <!-- SIDE-BY-SIDE TSENTA TRACKER TABS: All · Submitted · In Flight · Needs You · Failed · Skipped -->
+      <div class="tsenta-status-tabs" id="trk-tsenta-tabs">
+        ${[
+          { key: "All", count: apps.length },
+          { key: "Submitted", count: submittedCount },
+          { key: "In Flight", count: inFlightCount },
+          { key: "Needs You", count: needsYouCount },
+          { key: "Failed", count: failedCount },
+          { key: "Skipped", count: skippedCount }
+        ]
+          .map(
+            (t) => `
+          <button type="button" class="tsenta-status-tab ${trackerStatusTab === t.key ? "active" : ""}" data-trk-status-tab="${esc(t.key)}">
+            <span>${esc(t.key)}</span>
+            <span class="tab-count">${t.count}</span>
+          </button>`
+          )
+          .join("")}
+      </div>
+
       ${
         filteredApps.length === 0
           ? `<p style="font-size:13px;color:#64748b;">${
               apps.length === 0
-                ? "No applications logged yet. Click Auto-Apply on any job to watch it transition live from In Flight → Filled → Submitted!"
-                : "No applications match the current filter."
+                ? "No applications logged yet. Click Apply on any job in Dashboard or Browse Jobs to watch it transition live!"
+                : `No applications in "${trackerStatusTab}" match the current filter.`
             }</p>`
           : trackerViewMode === "kanban"
           ? `<div class="kanban-board" id="trk-kanban-board">
@@ -561,12 +1094,14 @@ function renderTracker(c) {
                     const badgeTone =
                       a.status === "In Flight"
                         ? "sky"
-                        : a.status === "Filled"
+                        : a.status === "Filled" || a.status === "Needs You"
                         ? "amber"
                         : a.status === "Applied"
                         ? "green"
-                        : a.status === "Rejected"
+                        : a.status === "Failed" || a.status === "Rejected"
                         ? "rose"
+                        : a.status === "Skipped"
+                        ? "slate"
                         : "indigo";
                     const receiptFields = Array.isArray(a.fieldsReceipt) ? a.fieldsReceipt : [];
                     const diffList = Array.isArray(a.resumeDiff) ? a.resumeDiff : [];
@@ -602,7 +1137,7 @@ function renderTracker(c) {
                       <div style="display:flex;gap:5px;flex-wrap:wrap;">
                         ${
                           a.url && a.status !== "Applied" && a.status !== "In Flight"
-                            ? `<button class="btn sm emerald trk-auto-apply" data-id="${esc(a.id)}" title="Run Autonomous Background Auto-Apply">🚀 Auto-Apply</button>`
+                            ? `<button class="btn sm emerald trk-auto-apply" data-id="${esc(a.id)}" title="Run Autonomous Background Auto-Apply">${a.status === "Failed" ? "🔄 Retry" : "🚀 Auto-Apply"}</button>`
                             : ""
                         }
                         <button class="btn sm secondary trk-view-receipt" data-id="${esc(a.id)}">🧾 ${isExpanded ? "Hide" : "Receipt & Diff"}</button>
@@ -672,6 +1207,13 @@ function renderTracker(c) {
       }
     </div>
   `;
+
+  c.querySelectorAll("[data-trk-status-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      trackerStatusTab = btn.dataset.trkStatusTab || "All";
+      renderTracker(c);
+    });
+  });
 
   c.querySelector("#btn-trk-view-table")?.addEventListener("click", () => {
     trackerViewMode = "table";
@@ -761,7 +1303,7 @@ function renderTracker(c) {
       toast("Enter an Application URL to run Background Auto-Apply.");
       return;
     }
-    toast(`🤖 Queued silent background Auto-Apply for ${company}!`);
+    toast(`✓ Application Started for ${company}!`);
     await chrome.runtime.sendMessage({
       type: "LAUNCH_TAB_AND_AUTO_APPLY",
       payload: {
@@ -782,7 +1324,11 @@ function renderTracker(c) {
     btn.addEventListener("click", async () => {
       const app = (STATE.applications || []).find((x) => x.id === btn.dataset.id);
       if (!app || !app.url) return;
-      toast(`🤖 Auto-Applying to ${app.company} in background...`);
+      btn.classList.remove("emerald");
+      btn.classList.add("btn-started");
+      btn.textContent = "✓ Application Started";
+      btn.disabled = true;
+      toast(`✓ Application Started for ${app.company}!`);
       await chrome.runtime.sendMessage({
         type: "LAUNCH_TAB_AND_AUTO_APPLY",
         payload: {
@@ -835,6 +1381,7 @@ function renderTracker(c) {
         payload: { application: { id: sel.dataset.id, status: sel.value, stepLabel: sel.value } }
       });
       await reloadState();
+      renderTracker(c);
       toast(`Updated stage -> ${sel.value}`);
     });
   });
@@ -1500,7 +2047,7 @@ async function renderLiveJobs(c) {
     <div class="filter-shell">
       <div class="filter-top-row">
         <div class="filter-search-wrap">
-          <input class="filter-search-input" id="jf-q" placeholder="Search by job title, company, skill, or city..." value="" />
+          <input class="filter-search-input" id="jf-q" placeholder="Search by job role, company name, skill, or city..." value="" />
         </div>
         <button class="btn sm secondary" id="jf-select-top5" type="button">☑️ Select Top 5 Unapplied</button>
         <button class="btn sm emerald" id="btn-jf-batch-apply" type="button" style="display:none;">🚀 Batch Auto-Apply Selected (0)</button>
@@ -1509,9 +2056,34 @@ async function renderLiveJobs(c) {
         <button class="btn sm primary" id="jf-refresh" type="button">↻ Pull Live Jobs</button>
       </div>
 
-      <div class="filter-grid-6">
+      <div class="filter-grid-8">
         <div class="filter-group">
-          <label class="filter-lbl" for="jf-platform">Platform</label>
+          <label class="filter-lbl" for="jf-location">Location</label>
+          <select class="filter-select-clean" id="jf-location">
+            <option value="ALL">All US &amp; Remote</option>
+            <option value="Remote">Remote</option>
+            <option value="Bay Area">San Francisco / Bay Area</option>
+            <option value="Seattle">Seattle / Bellevue, WA</option>
+            <option value="New York">New York, NY</option>
+            <option value="Austin">Austin / Dallas, TX</option>
+            <option value="Boston">Boston, MA</option>
+            <option value="Los Angeles">Los Angeles / Irvine, CA</option>
+            <option value="Chicago">Chicago, IL</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-lbl" for="jf-degree">Degree Level</label>
+          <select class="filter-select-clean" id="jf-degree">
+            <option value="ALL">All Degrees</option>
+            <option value="Bachelor's">Bachelor's (B.S. / B.Tech)</option>
+            <option value="Master's">Master's (M.S. / M.Eng)</option>
+            <option value="PhD">PhD / Research</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-lbl" for="jf-platform">Platform / ATS</label>
           <select class="filter-select-clean" id="jf-platform">
             <option value="ALL">All Platforms</option>
             <option value="Workday">Workday</option>
@@ -1658,6 +2230,8 @@ async function renderLiveJobs(c) {
 
   const syncFilterVisualState = () => {
     const defs = [
+      { id: "jf-location", def: "ALL", label: "Location" },
+      { id: "jf-degree", def: "ALL", label: "Degree" },
       { id: "jf-platform", def: "ALL", label: "Platform" },
       { id: "jf-recency", def: "0", label: "Posted" },
       { id: "jf-sponsorship", def: "ALL", label: "Visa" },
@@ -1706,50 +2280,9 @@ async function renderLiveJobs(c) {
     }
   };
 
-  const loadJobs = async (forceRefresh = false) => {
-    selectedJobIndexes.clear();
-    syncBatchButton();
-    syncFilterVisualState();
-    const platform = c.querySelector("#jf-platform").value;
-    const maxHoursAgo = Number(c.querySelector("#jf-recency").value) || 0;
-    const sponsorship = c.querySelector("#jf-sponsorship").value;
-    const roleType = c.querySelector("#jf-role-type").value;
-    const experienceRange = c.querySelector("#jf-exp").value;
-    const workMode = c.querySelector("#jf-work-mode").value;
-    const query = c.querySelector("#jf-q").value.trim();
+  const renderJobCardsGrid = () => {
     const wrap = c.querySelector("#jf-grid-wrap");
-
-    const filterPayload = {
-      category: "ALL",
-      platform,
-      maxHoursAgo,
-      sponsorship,
-      roleType,
-      experienceRange,
-      workMode,
-      query,
-      forceRefresh,
-      limit: 140
-    };
-
-    let jobs = [];
-    try {
-      const resp = await chrome.runtime.sendMessage({
-        type: "FETCH_RECOMMENDED_JOBS",
-        payload: filterPayload
-      });
-      if (Array.isArray(resp?.jobs) && resp.jobs.length > 0) {
-        jobs = resp.jobs;
-      }
-    } catch (_) {}
-
-    if (jobs.length === 0) {
-      try {
-        jobs = await fetchPersonalizedRecommendations(STATE?.profile || {}, filterPayload);
-      } catch (_) {}
-    }
-
-    cachedLiveJobs = jobs;
+    if (!wrap) return;
     if (cachedLiveJobs.length === 0) {
       wrap.innerHTML = `<div class="card" style="text-align:center;color:#64748b;">No matching roles found for this filter combination. Click <strong>Reset Filters</strong> to show all live jobs.</div>`;
       return;
@@ -1760,45 +2293,92 @@ async function renderLiveJobs(c) {
 
     wrap.innerHTML = `
       <div style="margin-bottom:12px;font-size:13px;color:#475569;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-        <span>Showing <strong style="color:#0f172a;">${cachedLiveJobs.length}</strong> live roles across Workday, LinkedIn, Dice, Staffing Agencies, Greenhouse, Ashby &amp; Lever</span>
+        <span>Showing <strong style="color:#0f172a;">${cachedLiveJobs.length}</strong> live roles • Click <strong>⚡ Apply</strong> to start auto-applying &amp; immediately track in <strong>Tracker</strong></span>
         <span style="font-size:11.5px;color:#059669;font-weight:700;">● Multi-Platform Live Feed Synced</span>
       </div>
       <div class="job-feed-grid">
         ${cachedLiveJobs
           .map((j, idx) => {
-            const alreadyApplied = isJobAlreadyApplied(j, apps);
+            const ts = getJobTrackState(j, apps);
+            const detailOpen = expandedJobDetailUrls.has(j.url);
+            const isStartedOrDone = ts.isStarted || (ts.isSubmitted && dupGuardOn);
+            const applyBtnClass = ts.isStarted
+              ? "btn-started"
+              : ts.isSubmitted && dupGuardOn
+              ? "btn-started"
+              : "emerald";
+            const applyBtnText = ts.isStarted
+              ? "✓ Application Started"
+              : ts.isSubmitted && dupGuardOn
+              ? "✓ Submitted"
+              : "⚡ Apply";
+
             return `
-          <div class="job-card" data-hub-job-card="true" data-card-idx="${idx}">
+          <div class="job-card ${ts.isSkipped ? "passed-card" : ""} ${selectedJobIndexes.has(idx) ? "selected-card" : ""}" data-hub-job-card="true" data-card-idx="${idx}">
             <div>
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:4px;flex-wrap:wrap;">
-                <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
-                  <input type="checkbox" class="jf-batch-chk" data-idx="${idx}" style="accent-color:#4f46e5;width:14px;height:14px;cursor:pointer;" />
-                  <span class="chip indigo">${esc(j.company)} • ${esc(j.ats)}</span>
+              <!-- Top Header: Batch Checkbox + Company Name + ATS + Match Score -->
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;gap:6px;flex-wrap:wrap;">
+                <label style="display:inline-flex;align-items:center;gap:7px;cursor:pointer;">
+                  <input type="checkbox" class="jf-batch-chk" data-idx="${idx}" ${selectedJobIndexes.has(idx) ? "checked" : ""} style="accent-color:#4f46e5;width:14px;height:14px;cursor:pointer;" />
+                  <span style="font-weight:800;font-size:13.5px;color:#1e293b;">🏢 ${esc(j.company)}</span>
+                  <span class="chip indigo" style="font-size:10.5px;">${esc(j.ats)}</span>
                 </label>
                 <div style="display:flex;gap:4px;align-items:center;">
-                  ${alreadyApplied ? `<span class="chip green">✓ Applied</span>` : ""}
+                  ${ts.isSkipped ? `<span class="chip slate">Skipped</span>` : ""}
                   <span class="chip green">${j.matchScore}% Match</span>
                 </div>
               </div>
-              <div style="font-weight:700;font-size:14.5px;color:#0f172a;margin-bottom:4px;">${esc(j.title)}</div>
-              <div style="font-size:12px;color:#475569;margin-bottom:8px;">${esc(j.location)}${
-              j.compensation ? ` • <span style="color:#059669;font-weight:700;">${esc(j.compensation)}</span>` : ""
-            }</div>
+
+              <!-- Prominent Job Role Title -->
+              <div style="font-weight:800;font-size:15.5px;color:#0f172a;margin-bottom:6px;line-height:1.32;">${esc(j.title)}</div>
+
+              <!-- Location + Degree Level + Compensation -->
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;color:#475569;margin-bottom:9px;font-weight:500;">
+                <span>📍 ${esc(j.location || "United States")}</span>
+                <span>•</span>
+                <span style="color:#4338ca;font-weight:700;">🎓 ${esc(j.degreeLevel || "Bachelor's")}+</span>
+                ${
+                  j.compensation || j.salaryDisplay
+                    ? `<span>•</span><span style="color:#059669;font-weight:700;">${esc(j.compensation || j.salaryDisplay)}</span>`
+                    : ""
+                }
+              </div>
+
+              <!-- Attribute Badges -->
               <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px;">
-                <span class="chip sky" style="font-size:10.5px;">${esc(j.postedLabel || "Recent")}</span>
+                <span class="chip sky" style="font-size:10.5px;">🕒 ${esc(j.postedLabel || "Recent")}</span>
                 <span class="chip indigo" style="font-size:10.5px;">${esc(j.roleType || "Full-Time")}</span>
                 <span class="chip amber" style="font-size:10.5px;">${esc(j.experienceLabel || `${j.experienceRange || "2-3"} Yrs`)}</span>
                 <span class="chip slate" style="font-size:10.5px;">${esc(j.workMode || "Hybrid")}</span>
                 ${j.h1bSponsor ? `<span class="chip green" style="font-size:10.5px;">${esc(j.sponsorshipType || "H-1B Sponsor")}</span>` : ""}
               </div>
+
+              <!-- Expandable Details Drawer -->
+              ${
+                detailOpen
+                  ? `<div class="job-details-drawer">
+                      <div style="font-weight:700;color:#0f172a;margin-bottom:4px;">Role Details &amp; Qualifications</div>
+                      <div style="margin-bottom:8px;">${esc(
+                        j.description ||
+                          `${j.title} at ${j.company} (${j.location}). Degree level: ${j.degreeLevel || "Bachelor's"}+. Core stack: Python, TypeScript, Cloud Infrastructure, Distributed Systems & AI/LLM Engineering.`
+                      )}</div>
+                      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <a class="btn sm secondary" href="${esc(j.url)}" target="_blank">Open Posting ↗</a>
+                        <button type="button" class="btn sm secondary jf-ap" data-idx="${idx}">🤖 Add to Auto Apply Queue</button>
+                      </div>
+                    </div>`
+                  : ""
+              }
             </div>
-            <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
-              <button class="btn sm ${alreadyApplied && dupGuardOn ? "secondary" : "emerald"} jf-launch-auto" data-idx="${idx}" data-applied="${
-              alreadyApplied ? "1" : "0"
-            }" style="flex:1.2;">${alreadyApplied && dupGuardOn ? "✓ Applied" : "⚡ Auto-Apply"}</button>
-              <a class="btn sm primary" href="${esc(j.url)}" target="_blank" style="flex:0.8;">Open ↗</a>
-              <button class="btn sm secondary jf-save" data-idx="${idx}" title="Save to Tracker">📌</button>
-              <button class="btn sm secondary jf-ap" data-idx="${idx}" title="Queue in Autopilot">🤖</button>
+
+            <!-- Tsenta 4-Action Footer: Save | Details | Pass | Apply -->
+            <div style="display:grid;grid-template-columns:auto auto auto 1.35fr;gap:6px;margin-top:10px;align-items:center;">
+              <button type="button" class="btn sm secondary jf-save" data-idx="${idx}" title="Save to Tracker">${ts.isSaved ? "✓ Saved" : "🔖 Save"}</button>
+              <button type="button" class="btn sm secondary jf-details-btn" data-idx="${idx}" title="View Role Details">${detailOpen ? "▴ Hide" : "🔎 Details"}</button>
+              <button type="button" class="btn sm secondary jf-pass" data-idx="${idx}" title="Pass &amp; mark Skipped">✕ Pass</button>
+              <button type="button" class="btn sm ${applyBtnClass} jf-launch-auto" data-idx="${idx}" data-applied="${
+              ts.isSubmitted ? "1" : "0"
+            }" ${isStartedOrDone ? "disabled" : ""} style="justify-content:center;">${applyBtnText}</button>
             </div>
           </div>`;
           })
@@ -1824,32 +2404,20 @@ async function renderLiveJobs(c) {
     wrap.querySelectorAll(".jf-launch-auto").forEach((b) => {
       b.addEventListener("click", async () => {
         const j = cachedLiveJobs[Number(b.dataset.idx)];
+        if (!j) return;
         if (b.dataset.applied === "1" && STATE?.settings?.duplicateApplyGuard !== false) {
-          toast(`🛡️ Duplicate Guard: You already applied to ${j.company} (${j.title}).`);
+          toast(`🛡️ Duplicate Guard: You already submitted ${j.company} (${j.title}).`);
           return;
         }
-        b.disabled = true;
-        b.textContent = "⏳ Queued...";
-        toast(`🚀 Queued background Auto-Apply for ${j.company}!`);
-        await chrome.runtime.sendMessage({
-          type: "LAUNCH_TAB_AND_AUTO_APPLY",
-          payload: {
-            url: j.url,
-            active: false,
-            options: {
-              autoSubmit: STATE.settings?.autoSubmitEnabled !== false,
-              tailorResume: true,
-              jobMeta: { company: j.company, title: j.title, location: j.location, ats: j.ats, url: j.url }
-            }
-          }
-        });
-        await reloadState();
+        await startJobApplicationInstant(j, b);
+        toast(`✓ Application Started for ${j.company} — tracked live in Tracker!`);
       });
     });
 
     wrap.querySelectorAll(".jf-save").forEach((b) => {
       b.addEventListener("click", async () => {
         const j = cachedLiveJobs[Number(b.dataset.idx)];
+        if (!j) return;
         await chrome.runtime.sendMessage({
           type: "UPSERT_APPLICATION",
           payload: {
@@ -1860,23 +2428,81 @@ async function renderLiveJobs(c) {
               ats: j.ats,
               url: j.url,
               status: "Bookmarked",
+              stepLabel: "Saved",
               matchScore: j.matchScore
             }
           }
         });
         await reloadState();
-        toast(`Saved ${j.company} — ${j.title}`);
+        b.textContent = "✓ Saved";
+        toast(`🔖 Saved ${j.company} — ${j.title} to Tracker`);
+      });
+    });
+
+    wrap.querySelectorAll(".jf-details-btn").forEach((b) => {
+      b.addEventListener("click", () => {
+        const j = cachedLiveJobs[Number(b.dataset.idx)];
+        if (!j) return;
+        if (expandedJobDetailUrls.has(j.url)) expandedJobDetailUrls.delete(j.url);
+        else expandedJobDetailUrls.add(j.url);
+        renderJobCardsGrid();
+      });
+    });
+
+    wrap.querySelectorAll(".jf-pass").forEach((b) => {
+      b.addEventListener("click", async () => {
+        const j = cachedLiveJobs[Number(b.dataset.idx)];
+        if (!j) return;
+        await passJobToSkipped(j);
+        const card = b.closest(".job-card");
+        card?.classList.add("passed-card");
+        toast(`Passed ${j.company} — logged under Skipped in Tracker`);
+        renderJobCardsGrid();
       });
     });
 
     wrap.querySelectorAll(".jf-ap").forEach((b) => {
       b.addEventListener("click", async () => {
         const j = cachedLiveJobs[Number(b.dataset.idx)];
+        if (!j) return;
         await chrome.runtime.sendMessage({ type: "ENQUEUE_AUTOPILOT", payload: { job: j } });
         await reloadState();
-        toast(`Queued ${j.company} for Autopilot`);
+        toast(`🤖 Added ${j.company} to Auto Apply queue`);
       });
     });
+  };
+
+  const loadJobs = async (forceRefresh = false) => {
+    selectedJobIndexes.clear();
+    syncBatchButton();
+    syncFilterVisualState();
+    const location = c.querySelector("#jf-location").value;
+    const degreeLevel = c.querySelector("#jf-degree").value;
+    const platform = c.querySelector("#jf-platform").value;
+    const maxHoursAgo = Number(c.querySelector("#jf-recency").value) || 0;
+    const sponsorship = c.querySelector("#jf-sponsorship").value;
+    const roleType = c.querySelector("#jf-role-type").value;
+    const experienceRange = c.querySelector("#jf-exp").value;
+    const workMode = c.querySelector("#jf-work-mode").value;
+    const query = c.querySelector("#jf-q").value.trim();
+
+    const filterPayload = {
+      category: "ALL",
+      location,
+      degreeLevel,
+      platform,
+      maxHoursAgo,
+      sponsorship,
+      roleType,
+      experienceRange,
+      workMode,
+      query,
+      forceRefresh,
+      limit: 140
+    };
+
+    cachedLiveJobs = await fetchLiveJobsHelper(filterPayload);
+    renderJobCardsGrid();
   };
 
   c.querySelector("#jf-select-top5")?.addEventListener("click", () => {
@@ -1885,7 +2511,8 @@ async function renderLiveJobs(c) {
     c.querySelectorAll(".jf-batch-chk").forEach((chk) => {
       const idx = Number(chk.dataset.idx);
       const j = cachedLiveJobs[idx];
-      const pick = selectedJobIndexes.size < 5 && j && !isJobAlreadyApplied(j, apps);
+      const ts = getJobTrackState(j, apps);
+      const pick = selectedJobIndexes.size < 5 && j && !ts.isSubmitted && !ts.isStarted && !ts.isSkipped;
       chk.checked = pick;
       chk.closest(".job-card")?.classList.toggle("selected-card", pick);
       if (pick) selectedJobIndexes.add(idx);
@@ -1899,31 +2526,22 @@ async function renderLiveJobs(c) {
     if (indices.length === 0) return;
     const btn = e.currentTarget;
     btn.disabled = true;
-    btn.textContent = `⏳ Launching ${indices.length} Jobs in FIFO Queue...`;
-    toast(`🚀 Dispatched ${indices.length} jobs into the sequential FIFO Auto-Apply Queue!`);
+    btn.textContent = `✓ Starting ${indices.length} Applications...`;
     for (const idx of indices) {
       const j = cachedLiveJobs[idx];
       if (!j) continue;
-      chrome.runtime.sendMessage({
-        type: "LAUNCH_TAB_AND_AUTO_APPLY",
-        payload: {
-          url: j.url,
-          active: false,
-          options: {
-            autoSubmit: STATE.settings?.autoSubmitEnabled !== false,
-            tailorResume: true,
-            jobMeta: { company: j.company, title: j.title, location: j.location, ats: j.ats, url: j.url }
-          }
-        }
-      });
+      await startJobApplicationInstant(j, null);
     }
     selectedJobIndexes.clear();
     btn.disabled = false;
-    await reloadState();
-    loadJobs(false);
+    toast(`✓ Started ${indices.length} applications — all tracked in Tracker!`);
+    renderJobCardsGrid();
+    syncBatchButton();
   });
 
   c.querySelector("#jf-reset").addEventListener("click", () => {
+    c.querySelector("#jf-location").value = "ALL";
+    c.querySelector("#jf-degree").value = "ALL";
     c.querySelector("#jf-platform").value = "ALL";
     c.querySelector("#jf-recency").value = "0";
     c.querySelector("#jf-sponsorship").value = "ALL";
@@ -1935,7 +2553,7 @@ async function renderLiveJobs(c) {
   });
 
   c.querySelector("#jf-refresh").addEventListener("click", () => loadJobs(true));
-  ["#jf-platform", "#jf-recency", "#jf-sponsorship", "#jf-role-type", "#jf-exp", "#jf-work-mode"].forEach((sel) => {
+  ["#jf-location", "#jf-degree", "#jf-platform", "#jf-recency", "#jf-sponsorship", "#jf-role-type", "#jf-exp", "#jf-work-mode"].forEach((sel) => {
     c.querySelector(sel).addEventListener("change", () => loadJobs(false));
   });
   let searchTimer = null;
@@ -2229,39 +2847,160 @@ function renderVaultAndProfile(c) {
   const eeo = STATE.profile.workAuthAndEEO || {};
   const creds = STATE.credentials || {};
   const set = STATE.settings || {};
+  const resumes = Array.isArray(STATE.profile.resumes) && STATE.profile.resumes.length
+    ? STATE.profile.resumes
+    : [
+        { id: "one_page", name: "Raviteja_Velanati_Resume_1Page.pdf", label: "1-Page GenAI & Platform Standard Resume" },
+        { id: "master", name: "Raviteja_Velanati_Master_Resume.pdf", label: "2-Page Master Technical Resume" }
+      ];
+  const activeResId = set.defaultResumeVariant || "one_page";
   const domainPasswords = Object.entries(creds.domainPasswords || {});
+  const flatSkillsText = Array.isArray(STATE.profile.allSkillsFlat) ? STATE.profile.allSkillsFlat.join(", ") : "";
+  const eduList = Array.isArray(STATE.profile.education) ? STATE.profile.education : [];
 
   c.innerHTML = `
+    <!-- 1. MY STANDARD RESUME CARD -->
+    <div class="card" id="profile-standard-resume-card" style="border-color:#a7f3d0;background:linear-gradient(180deg,#ffffff 0%,#f0fdf4 100%);">
+      <div class="card-title" style="flex-wrap:wrap;gap:10px;">
+        <div>
+          <div style="font-size:16px;font-weight:800;color:#0f172a;">📄 My Standard Resume &amp; Default PDF Attachment</div>
+          <div style="font-size:12px;color:#475569;font-weight:500;">Automatically attached (or used as the base for 1-page AI tailoring) whenever you click Apply on any job portal</div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <select class="select" id="vc-def-res" style="width:240px;font-size:12.5px;padding:7px 10px;">
+            ${resumes
+              .map(
+                (r) =>
+                  `<option value="${esc(r.id)}" ${activeResId === r.id ? "selected" : ""}>${esc(r.label || r.name)}</option>`
+              )
+              .join("")}
+          </select>
+          <label class="btn sm emerald" style="cursor:pointer;">
+            📤 Upload Standard Resume PDF
+            <input type="file" id="vc-upload-pdf" accept="application/pdf" style="display:none;" />
+          </label>
+        </div>
+      </div>
+
+      <div class="grid-2" style="gap:12px;">
+        ${resumes
+          .map((r) => {
+            const isDef = activeResId === r.id;
+            return `
+            <div class="resume-file-card ${isDef ? "is-default" : ""}" data-resume-card-id="${esc(r.id)}">
+              <div>
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:3px;">
+                  <strong style="font-size:13.5px;color:#0f172a;">📄 ${esc(r.label || r.name)}</strong>
+                  ${isDef ? `<span class="chip green">★ Active Standard Resume</span>` : `<span class="chip slate">Available</span>`}
+                </div>
+                <div style="font-size:11.5px;color:#64748b;font-family:monospace;">${esc(r.name)}</div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <button type="button" class="btn sm secondary pf-preview-res" data-res-id="${esc(r.id)}">👁 Preview</button>
+                <button type="button" class="btn sm secondary pf-download-res" data-res-id="${esc(r.id)}">⬇ Download</button>
+                ${
+                  !isDef
+                    ? `<button type="button" class="btn sm primary pf-set-default-res" data-res-id="${esc(r.id)}">⭐ Set Standard</button>`
+                    : ""
+                }
+              </div>
+            </div>`;
+          })
+          .join("")}
+      </div>
+    </div>
+
+    <!-- 2. COMPLETE CANDIDATE PROFILE + PORTAL VAULT -->
     <div class="grid-2">
       <div class="card">
-        <div class="card-title">👤 Candidate Identity, Work Auth &amp; EEO Defaults</div>
-        <div class="grid-2 form-row">
+        <div class="card-title">
+          <span>👤 Complete Candidate Profile, Work Auth &amp; Workday Yes/No Defaults</span>
+          <span class="chip indigo">Auto-Filled Everywhere</span>
+        </div>
+
+        <div style="font-size:12px;font-weight:800;color:#4f46e5;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">1. Identity, Contact &amp; Address</div>
+        <div class="grid-3 form-row">
           <div><label class="field-lbl">First Name</label><input class="input" id="pf-fname" value="${esc(p.firstName)}" /></div>
+          <div><label class="field-lbl">Middle Name</label><input class="input" id="pf-mname" value="${esc(p.middleName || "")}" placeholder="Optional" /></div>
           <div><label class="field-lbl">Last Name</label><input class="input" id="pf-lname" value="${esc(p.lastName)}" /></div>
         </div>
         <div class="grid-2 form-row">
-          <div><label class="field-lbl">Email</label><input class="input" id="pf-email" value="${esc(p.email)}" /></div>
-          <div><label class="field-lbl">Phone</label><input class="input" id="pf-phone" value="${esc(p.phone)}" /></div>
+          <div><label class="field-lbl">Preferred Name</label><input class="input" id="pf-prefname" value="${esc(p.preferredName || "")}" /></div>
+          <div><label class="field-lbl">Pronouns</label><input class="input" id="pf-pronouns" value="${esc(p.pronouns || "He/Him")}" /></div>
+        </div>
+        <div class="grid-2 form-row">
+          <div><label class="field-lbl">Email Address</label><input class="input" id="pf-email" value="${esc(p.email)}" /></div>
+          <div><label class="field-lbl">Mobile Phone</label><input class="input" id="pf-phone" value="${esc(p.phone)}" /></div>
         </div>
         <div class="form-row">
           <label class="field-lbl">Street Address</label>
           <input class="input" id="pf-street" value="${esc(p.streetAddress || "")}" placeholder="39861 Potrero Dr" />
         </div>
-        <div class="grid-3 form-row">
-          <div><label class="field-lbl">City</label><input class="input" id="pf-city" value="${esc(p.city)}" /></div>
-          <div><label class="field-lbl">State</label><input class="input" id="pf-state" value="${esc(p.state)}" /></div>
-          <div><label class="field-lbl">Postal Code</label><input class="input" id="pf-zip" value="${esc(p.postalCode)}" /></div>
+        <div class="grid-2 form-row">
+          <div class="grid-2" style="gap:8px;">
+            <div><label class="field-lbl">City</label><input class="input" id="pf-city" value="${esc(p.city)}" /></div>
+            <div><label class="field-lbl">State</label><input class="input" id="pf-state" value="${esc(p.state)}" /></div>
+          </div>
+          <div class="grid-2" style="gap:8px;">
+            <div><label class="field-lbl">Postal Code</label><input class="input" id="pf-zip" value="${esc(p.postalCode)}" /></div>
+            <div><label class="field-lbl">Country</label><input class="input" id="pf-country" value="${esc(p.country || "United States")}" /></div>
+          </div>
         </div>
         <div class="grid-3 form-row">
           <div><label class="field-lbl">LinkedIn URL</label><input class="input" id="pf-li" value="${esc(p.linkedin)}" /></div>
           <div><label class="field-lbl">GitHub URL</label><input class="input" id="pf-gh" value="${esc(p.github)}" /></div>
           <div><label class="field-lbl">Portfolio Website</label><input class="input" id="pf-port" value="${esc(p.portfolio || "")}" /></div>
         </div>
+
+        <div style="font-size:12px;font-weight:800;color:#4f46e5;text-transform:uppercase;letter-spacing:0.4px;margin:14px 0 8px;">2. Role, Degree, Summary &amp; Skills</div>
+        <div class="grid-2 form-row">
+          <div><label class="field-lbl">Current Title</label><input class="input" id="pf-cur-title" value="${esc(p.currentTitle || "")}" /></div>
+          <div><label class="field-lbl">Current Company</label><input class="input" id="pf-cur-comp" value="${esc(p.currentCompany || "")}" /></div>
+        </div>
+        <div class="grid-3 form-row">
+          <div><label class="field-lbl">Years of Experience</label><input class="input" id="pf-yoe" value="${esc(p.yearsOfExperience || "3.5")}" /></div>
+          <div>
+            <label class="field-lbl">Highest Degree Level</label>
+            <select class="select" id="pf-degree">
+              <option value="Bachelor's Degree" ${String(p.highestDegree || "").includes("Bachelor") ? "selected" : ""}>Bachelor's Degree</option>
+              <option value="Master's Degree" ${!p.highestDegree || String(p.highestDegree).includes("Master") ? "selected" : ""}>Master's Degree</option>
+              <option value="Doctorate / PhD" ${String(p.highestDegree || "").includes("PhD") || String(p.highestDegree || "").includes("Doctor") ? "selected" : ""}>Doctorate / PhD</option>
+            </select>
+          </div>
+          <div><label class="field-lbl">Notice / Availability</label><input class="input" id="pf-notice" value="${esc(eeo.earliestStartDate || "2 weeks notice")}" /></div>
+        </div>
+        <div class="form-row">
+          <label class="field-lbl">Headline</label>
+          <input class="input" id="pf-headline" value="${esc(p.headline || "")}" />
+        </div>
+        <div class="form-row">
+          <label class="field-lbl">Standard Professional Summary</label>
+          <textarea class="textarea" id="pf-summary" style="min-height:74px;">${esc(STATE.profile.summary || "")}</textarea>
+        </div>
+        <div class="form-row">
+          <label class="field-lbl">Core Technical Skills (Comma-Separated)</label>
+          <textarea class="textarea" id="pf-skills" style="min-height:64px;">${esc(flatSkillsText)}</textarea>
+        </div>
+        ${
+          eduList.length
+            ? `<div class="sub-box form-row" style="padding:10px 12px;font-size:12px;">
+                <div style="font-weight:700;color:#0f172a;margin-bottom:4px;">🎓 Verified Education History (${eduList.length})</div>
+                ${eduList
+                  .map(
+                    (ed) =>
+                      `<div style="color:#475569;">• <strong>${esc(ed.degree)} in ${esc(ed.fieldOfStudy || ed.major || "Computer Science")}</strong> — ${esc(ed.school)} (${esc(ed.gpa ? `GPA ${ed.gpa}` : ed.endDate || "")})</div>`
+                  )
+                  .join("")}
+              </div>`
+            : ""
+        }
+
+        <div style="font-size:12px;font-weight:800;color:#4f46e5;text-transform:uppercase;letter-spacing:0.4px;margin:14px 0 8px;">3. Work Authorization &amp; Compensation</div>
         <div class="grid-3 form-row">
           <div>
             <label class="field-lbl">Authorized to Work in US?</label>
             <select class="select" id="pf-auth">
-              <option value="Yes" ${eeo.authorizedUS === "Yes" ? "selected" : ""}>Yes</option>
+              <option value="Yes" ${eeo.authorizedUS !== "No" ? "selected" : ""}>Yes</option>
               <option value="No" ${eeo.authorizedUS === "No" ? "selected" : ""}>No</option>
             </select>
           </div>
@@ -2278,20 +3017,81 @@ function renderVaultAndProfile(c) {
           </div>
         </div>
         <div class="grid-3 form-row">
+          <div><label class="field-lbl">Citizenship</label><input class="input" id="pf-cit" value="${esc(eeo.citizenship || "India")}" /></div>
           <div>
-            <label class="field-lbl">Citizenship</label>
-            <input class="input" id="pf-cit" value="${esc(eeo.citizenship || "India")}" />
+            <label class="field-lbl">Willing to Relocate?</label>
+            <select class="select" id="pf-reloc">
+              <option value="Yes" ${eeo.willingToRelocate !== "No" ? "selected" : ""}>Yes</option>
+              <option value="No" ${eeo.willingToRelocate === "No" ? "selected" : ""}>No</option>
+            </select>
+          </div>
+          <div><label class="field-lbl">Preferred Work Mode</label><input class="input" id="pf-work-arr" value="${esc(eeo.workArrangement || "Hybrid / Remote / On-site")}" /></div>
+        </div>
+        <div class="grid-3 form-row">
+          <div><label class="field-lbl">Target Annual Salary ($)</label><input class="input" type="number" id="pf-target-sal" value="${esc(eeo.desiredSalaryTarget || 120000)}" /></div>
+          <div><label class="field-lbl">Min Salary Dealbreaker ($)</label><input class="input" type="number" id="pf-sal" value="${esc(STATE.profile.preferences?.minSalary || 115000)}" /></div>
+          <div><label class="field-lbl">Target Hourly Rate ($/hr)</label><input class="input" type="number" id="pf-hourly" value="${esc(eeo.desiredHourlyTarget || 55)}" /></div>
+        </div>
+
+        <div style="font-size:12px;font-weight:800;color:#059669;text-transform:uppercase;letter-spacing:0.4px;margin:14px 0 8px;">4. Workday &amp; ATS Automatic Yes/No Screening Answers</div>
+        <div class="grid-3 form-row">
+          <div>
+            <label class="field-lbl">At Least 18 Years Old?</label>
+            <select class="select" id="pf-yn-18">
+              <option value="Yes" ${eeo.over18 !== "No" ? "selected" : ""}>Yes</option>
+              <option value="No" ${eeo.over18 === "No" ? "selected" : ""}>No</option>
+            </select>
           </div>
           <div>
-            <label class="field-lbl">Default Target Salary ($)</label>
-            <input class="input" type="number" id="pf-target-sal" value="${esc(eeo.desiredSalaryTarget || 120000)}" />
+            <label class="field-lbl">Background Check Consent?</label>
+            <select class="select" id="pf-yn-bg">
+              <option value="Yes" ${eeo.backgroundCheckConsent !== "No" ? "selected" : ""}>Yes</option>
+              <option value="No" ${eeo.backgroundCheckConsent === "No" ? "selected" : ""}>No</option>
+            </select>
           </div>
           <div>
-            <label class="field-lbl">Min Salary Dealbreaker ($)</label>
-            <input class="input" type="number" id="pf-sal" value="${esc(STATE.profile.preferences?.minSalary || 115000)}" />
+            <label class="field-lbl">Previously Employed Here?</label>
+            <select class="select" id="pf-yn-prev-emp">
+              <option value="No" ${eeo.previouslyEmployedAtCompany !== "Yes" ? "selected" : ""}>No</option>
+              <option value="Yes" ${eeo.previouslyEmployedAtCompany === "Yes" ? "selected" : ""}>Yes</option>
+            </select>
           </div>
         </div>
-        <button class="btn primary" id="pf-save-btn">💾 Save Profile &amp; Preferences</button>
+        <div class="grid-3 form-row">
+          <div>
+            <label class="field-lbl">Relatives at Company?</label>
+            <select class="select" id="pf-yn-relatives">
+              <option value="No" ${eeo.relativesAtCompany !== "Yes" ? "selected" : ""}>No</option>
+              <option value="Yes" ${eeo.relativesAtCompany === "Yes" ? "selected" : ""}>Yes</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-lbl">Non-Compete Restriction?</label>
+            <select class="select" id="pf-yn-noncompete">
+              <option value="No" ${eeo.nonCompeteRestriction !== "Yes" ? "selected" : ""}>No</option>
+              <option value="Yes" ${eeo.nonCompeteRestriction === "Yes" ? "selected" : ""}>Yes</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-lbl">Former Gov / Clearance?</label>
+            <select class="select" id="pf-yn-gov">
+              <option value="No" ${eeo.governmentOrClearance !== "Yes" ? "selected" : ""}>No</option>
+              <option value="Yes" ${eeo.governmentOrClearance === "Yes" ? "selected" : ""}>Yes</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="font-size:12px;font-weight:800;color:#4f46e5;text-transform:uppercase;letter-spacing:0.4px;margin:14px 0 8px;">5. Voluntary EEO Self-Identification</div>
+        <div class="grid-2 form-row">
+          <div><label class="field-lbl">Gender</label><input class="input" id="pf-eeo-gender" value="${esc(eeo.gender || "Male")}" /></div>
+          <div><label class="field-lbl">Race / Ethnicity</label><input class="input" id="pf-eeo-race" value="${esc(eeo.raceEthnicity || "Asian")}" /></div>
+        </div>
+        <div class="grid-2 form-row">
+          <div><label class="field-lbl">Veteran Status</label><input class="input" id="pf-eeo-vet" value="${esc(eeo.veteranStatus || "I am not a protected veteran")}" /></div>
+          <div><label class="field-lbl">Disability Status</label><input class="input" id="pf-eeo-dis" value="${esc(eeo.disabilityStatus || "No, I do not have a disability")}" /></div>
+        </div>
+
+        <button class="btn emerald" id="pf-save-btn" style="width:100%;justify-content:center;">💾 Save All Candidate Profile &amp; Workday Defaults</button>
       </div>
 
       <div class="card">
@@ -2316,19 +3116,6 @@ function renderVaultAndProfile(c) {
         <div class="form-row">
           <label class="field-lbl">Gemini API Key</label>
           <input class="input" type="password" id="vc-api-key" value="${esc(set.geminiApiKey)}" autocomplete="off" />
-        </div>
-        <div class="grid-2 form-row">
-          <div>
-            <label class="field-lbl">Default Resume Variant</label>
-            <select class="select" id="vc-def-res">
-              <option value="one_page" ${set.defaultResumeVariant === "one_page" ? "selected" : ""}>1-Page GenAI Resume</option>
-              <option value="master" ${set.defaultResumeVariant === "master" ? "selected" : ""}>2-Page Master Resume</option>
-            </select>
-          </div>
-          <div>
-            <label class="field-lbl">Upload Additional PDF Resume</label>
-            <input class="input" type="file" id="vc-upload-pdf" accept="application/pdf" />
-          </div>
         </div>
         <div class="form-row" style="display:grid;gap:8px;">
           <label class="toggle-row">
@@ -2407,30 +3194,122 @@ function renderVaultAndProfile(c) {
     </div>
   `;
 
+  // Standard Resume Preview / Download / Set Default handlers
+  c.querySelectorAll(".pf-preview-res").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const resp = await chrome.runtime.sendMessage({
+        type: "GET_RESUME_PDF_BYTES",
+        payload: { variantOrId: btn.dataset.resId }
+      });
+      if (resp?.ok && resp.base64) {
+        previewBase64Pdf(resp.base64);
+      } else {
+        toast("Unable to preview PDF.");
+      }
+    });
+  });
+
+  c.querySelectorAll(".pf-download-res").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const resp = await chrome.runtime.sendMessage({
+        type: "GET_RESUME_PDF_BYTES",
+        payload: { variantOrId: btn.dataset.resId }
+      });
+      if (resp?.ok && resp.base64) {
+        downloadBase64(resp.base64, resp.fileName || "Raviteja_Velanati_Standard_Resume.pdf");
+      } else {
+        toast("Unable to download PDF.");
+      }
+    });
+  });
+
+  c.querySelectorAll(".pf-set-default-res").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const newId = btn.dataset.resId;
+      await chrome.runtime.sendMessage({
+        type: "UPDATE_SETTINGS",
+        payload: { settings: { defaultResumeVariant: newId } }
+      });
+      await reloadState();
+      renderVaultAndProfile(c);
+      toast("★ Updated active Standard Resume!");
+    });
+  });
+
+  c.querySelector("#vc-def-res")?.addEventListener("change", async (e) => {
+    await chrome.runtime.sendMessage({
+      type: "UPDATE_SETTINGS",
+      payload: { settings: { defaultResumeVariant: e.target.value } }
+    });
+    await reloadState();
+    renderVaultAndProfile(c);
+    toast("★ Updated active Standard Resume!");
+  });
+
   c.querySelector("#pf-save-btn").addEventListener("click", async () => {
     const next = structuredClone(STATE.profile);
     next.personal.firstName = c.querySelector("#pf-fname").value.trim();
+    next.personal.middleName = c.querySelector("#pf-mname").value.trim();
     next.personal.lastName = c.querySelector("#pf-lname").value.trim();
-    next.personal.fullName = `${next.personal.firstName} ${next.personal.lastName}`.trim();
+    next.personal.fullName = [next.personal.firstName, next.personal.middleName, next.personal.lastName].filter(Boolean).join(" ").trim();
+    next.personal.preferredName = c.querySelector("#pf-prefname").value.trim();
+    next.personal.pronouns = c.querySelector("#pf-pronouns").value.trim();
     next.personal.email = c.querySelector("#pf-email").value.trim();
     next.personal.phone = c.querySelector("#pf-phone").value.trim();
     next.personal.streetAddress = c.querySelector("#pf-street").value.trim();
     next.personal.city = c.querySelector("#pf-city").value.trim();
     next.personal.state = c.querySelector("#pf-state").value.trim();
     next.personal.postalCode = c.querySelector("#pf-zip").value.trim();
+    next.personal.country = c.querySelector("#pf-country").value.trim() || "United States";
+    next.personal.locationDisplay = [next.personal.city, next.personal.state, next.personal.country].filter(Boolean).join(", ");
     next.personal.linkedin = c.querySelector("#pf-li").value.trim();
     next.personal.github = c.querySelector("#pf-gh").value.trim();
     next.personal.portfolio = c.querySelector("#pf-port").value.trim();
+    next.personal.currentTitle = c.querySelector("#pf-cur-title").value.trim();
+    next.personal.currentCompany = c.querySelector("#pf-cur-comp").value.trim();
+    next.personal.yearsOfExperience = c.querySelector("#pf-yoe").value.trim();
+    next.personal.highestDegree = c.querySelector("#pf-degree").value;
+    next.personal.headline = c.querySelector("#pf-headline").value.trim();
+    next.summary = c.querySelector("#pf-summary").value.trim();
+
+    const parsedSkills = c
+      .querySelector("#pf-skills")
+      .value.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parsedSkills.length) {
+      next.allSkillsFlat = parsedSkills;
+    }
+
     next.workAuthAndEEO.authorizedUS = c.querySelector("#pf-auth").value;
     next.workAuthAndEEO.requireSponsorship = c.querySelector("#pf-spons").value;
     next.workAuthAndEEO.visaStatus = c.querySelector("#pf-visa").value.trim() || "H-1B";
     next.workAuthAndEEO.citizenship = c.querySelector("#pf-cit").value.trim() || "India";
+    next.workAuthAndEEO.willingToRelocate = c.querySelector("#pf-reloc").value;
+    next.workAuthAndEEO.workArrangement = c.querySelector("#pf-work-arr").value.trim();
+    next.workAuthAndEEO.earliestStartDate = c.querySelector("#pf-notice").value.trim();
     next.workAuthAndEEO.desiredSalaryTarget = Number(c.querySelector("#pf-target-sal").value || 120000);
+    next.workAuthAndEEO.desiredHourlyTarget = Number(c.querySelector("#pf-hourly").value || 55);
     next.preferences.minSalary = Number(c.querySelector("#pf-sal").value || 115000);
+
+    // Workday & ATS Automatic Yes/No Screening Defaults
+    next.workAuthAndEEO.over18 = c.querySelector("#pf-yn-18").value;
+    next.workAuthAndEEO.backgroundCheckConsent = c.querySelector("#pf-yn-bg").value;
+    next.workAuthAndEEO.previouslyEmployedAtCompany = c.querySelector("#pf-yn-prev-emp").value;
+    next.workAuthAndEEO.relativesAtCompany = c.querySelector("#pf-yn-relatives").value;
+    next.workAuthAndEEO.nonCompeteRestriction = c.querySelector("#pf-yn-noncompete").value;
+    next.workAuthAndEEO.governmentOrClearance = c.querySelector("#pf-yn-gov").value;
+    next.workAuthAndEEO.securityClearance = c.querySelector("#pf-yn-gov").value;
+
+    // Voluntary EEO
+    next.workAuthAndEEO.gender = c.querySelector("#pf-eeo-gender").value.trim();
+    next.workAuthAndEEO.raceEthnicity = c.querySelector("#pf-eeo-race").value.trim();
+    next.workAuthAndEEO.veteranStatus = c.querySelector("#pf-eeo-vet").value.trim();
+    next.workAuthAndEEO.disabilityStatus = c.querySelector("#pf-eeo-dis").value.trim();
 
     await chrome.runtime.sendMessage({ type: "UPDATE_PROFILE", payload: { profile: next } });
     await reloadState();
-    toast("✅ Profile saved!");
+    toast("✅ Saved complete Candidate Profile & Workday Yes/No defaults!");
   });
 
   c.querySelector("#vc-toggle-secrets")?.addEventListener("click", (e) => {
@@ -2485,7 +3364,7 @@ function renderVaultAndProfile(c) {
     const payload = JSON.stringify(
       {
         exportedAt: new Date().toISOString(),
-        version: "2.3.0",
+        version: "2.4.0",
         state: STATE
       },
       null,
@@ -2532,16 +3411,23 @@ function renderVaultAndProfile(c) {
       bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
     }
     const b64 = btoa(bin);
+    const customId = `custom_${Date.now()}`;
     const next = structuredClone(STATE.profile);
+    if (!Array.isArray(next.resumes)) next.resumes = [];
     next.resumes.unshift({
-      id: `custom_${Date.now()}`,
+      id: customId,
       name: file.name,
-      label: `Uploaded: ${file.name}`,
+      label: `Standard Resume: ${file.name}`,
       customBase64: b64
     });
     await chrome.runtime.sendMessage({ type: "UPDATE_PROFILE", payload: { profile: next } });
+    await chrome.runtime.sendMessage({
+      type: "UPDATE_SETTINGS",
+      payload: { settings: { defaultResumeVariant: customId } }
+    });
     await reloadState();
-    toast(`📎 Added ${file.name} to Resume Vault!`);
+    renderVaultAndProfile(c);
+    toast(`📎 Uploaded & set ${file.name} as your active Standard Resume!`);
   });
 
   c.querySelector("#vc-test-imap").addEventListener("click", async () => {

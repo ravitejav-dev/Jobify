@@ -3,54 +3,55 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Jobify Hub — AI Career Copilot, Autofill, Resume Tailor &amp; Job Tracker</title>
+  <title>Jobify Hub — Tsenta-Style Autonomous Job Copilot, Auto-Apply &amp; Tracker</title>
   <link rel="stylesheet" href="dashboard.css" />
 </head>
 <body>
   <div class="app-layout">
-    <aside class="sidebar">
-      <div class="brand-box">
-        <div class="brand-logo">J</div>
-        <div>
-          <div class="brand-name">Jobify</div>
-          <div class="brand-tag">Simplify+ Autonomous Suite</div>
+    <header class="tsenta-navbar">
+      <div class="tsenta-navbar-inner">
+        <div class="brand-box">
+          <div class="brand-logo">J</div>
+          <div>
+            <div class="brand-name">Jobify</div>
+            <div class="brand-tag">Autonomous Career Suite</div>
+          </div>
         </div>
-      </div>
 
-      <nav class="nav-list" id="main-nav">
-        <button class="nav-item active" data-view="overview">📊 Overview &amp; Funnel</button>
-        <button class="nav-item" data-view="tracker">📋 Job Tracker &amp; Kanban</button>
-        <button class="nav-item" data-view="resume">✨ AI Resume Tailor &amp; Editor</button>
-        <button class="nav-item" data-view="cover">📝 AI Cover Letters</button>
-        <button class="nav-item" data-view="interview">🎤 AI Interview Prep</button>
-        <button class="nav-item" data-view="jobs">🔍 Live Jobs &amp; Batch Apply</button>
-        <button class="nav-item" data-view="autopilot">🤖 Autopilot Queue</button>
-        <button class="nav-item" data-view="network">🤝 Network Copilot</button>
-        <button class="nav-item" data-view="vault">👤 Profile, Vault &amp; Backup</button>
-      </nav>
+        <nav class="nav-list" id="main-nav" aria-label="Primary Sections">
+          <button class="nav-item active" data-view="overview" data-primary-tab="true">📊 Dashboard</button>
+          <button class="nav-item" data-view="jobs" data-primary-tab="true">🔍 Browse Jobs</button>
+          <button class="nav-item" data-view="autopilot" data-primary-tab="true">⚡ Auto Apply</button>
+          <button class="nav-item" data-view="tracker" data-primary-tab="true">📋 Tracker</button>
+          <button class="nav-item" data-view="vault" data-primary-tab="true">👤 Profile</button>
+          <span class="nav-divider" aria-hidden="true"></span>
+          <button class="nav-item nav-studio" data-view="resume">✨ Resume AI</button>
+          <button class="nav-item nav-studio" data-view="cover">📝 Cover Letter</button>
+          <button class="nav-item nav-studio" data-view="interview">🎤 Interview Prep</button>
+          <button class="nav-item nav-studio" data-view="network">🤝 Referrals</button>
+        </nav>
 
-      <div class="sidebar-footer">
-        <div class="user-pill">
-          <div class="avatar">RV</div>
-          <div style="overflow:hidden;">
-            <div class="u-name" id="sb-user-name">Raviteja Velanati</div>
-            <div class="u-email" id="sb-user-email">ravitejavelanati11@gmail.com</div>
+        <div class="navbar-right">
+          <span class="queue-pill" id="topbar-queue-pill" style="display:none;">⚡ Auto-Apply Idle</span>
+          <span class="model-pill" id="topbar-model-pill">Gemini 3.5 Flash</span>
+          <div class="user-pill" title="Candidate Profile">
+            <div class="avatar">RV</div>
+            <div class="user-pill-meta">
+              <div class="u-name" id="sb-user-name">Raviteja Velanati</div>
+              <div class="u-email" id="sb-user-email">ravitejavelanati11@gmail.com</div>
+            </div>
           </div>
         </div>
       </div>
-    </aside>
+    </header>
 
     <main class="main-panel">
-      <header class="topbar">
+      <div class="topbar">
         <div>
-          <h1 class="view-title" id="topbar-title">Overview &amp; Quick Launch</h1>
-          <p class="view-sub" id="topbar-sub">Pre-configured with Raviteja Velanati's Master &amp; 1-Page Resumes</p>
+          <h1 class="view-title" id="topbar-title">Dashboard</h1>
+          <p class="view-sub" id="topbar-sub">Top job matches, 1-click Apply to All 5 &amp; live application tracker</p>
         </div>
-        <div class="topbar-right">
-          <span class="queue-pill" id="topbar-queue-pill" style="display:none;">⚡ Auto-Apply Idle</span>
-          <span class="model-pill" id="topbar-model-pill">Gemini 3.5 Flash • From-Scratch ATS</span>
-        </div>
-      </header>
+      </div>
 
       <div class="content-area" id="view-container"></div>
     </main>
